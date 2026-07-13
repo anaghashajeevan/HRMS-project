@@ -1,0 +1,80 @@
+# ===========================================
+# Python / Django
+# ===========================================
+backend/venv/
+backend/env/
+backend/__pycache__/
+backend/*/__pycache__/
+backend/**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py[cod]
+*$py.class
+
+# Django specific
+backend/*.log
+backend/db.sqlite3
+backend/db.sqlite3-journal
+backend/media/
+backend/staticfiles/
+backend/static/
+
+# ===========================================
+# Environment Variables (NEVER COMMIT!)
+# ===========================================
+.env
+.env.local
+.env.production
+.env.staging
+backend/.env
+frontend/.env
+frontend/.env.local
+
+# ===========================================
+# Node / React / Frontend
+# ===========================================
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+node_modules/
+
+# ===========================================
+# IDE / Editor
+# ===========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# ===========================================
+# OS Files
+# ===========================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===========================================
+# Testing
+# ===========================================
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+
+# ===========================================
+# Logs
+# ===========================================
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===========================================
+# Docker (for later)
+# ===========================================
+# docker-compose.override.yml
