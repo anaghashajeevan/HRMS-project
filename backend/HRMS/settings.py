@@ -173,17 +173,18 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    
     # Third-party apps (add as needed)
-    # 'rest_framework',
-    # 'corsheaders',
-    # 'rest_framework_simplejwt',
+    'rest_framework',
+    'corsheaders',
+    'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     
     # Your apps (add your apps here)
-    # 'authentication',
+    'HRMSapp',  # Your app
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',  
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -286,6 +287,57 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+AUTH_USER_MODEL = 'HRMSapp.UserAccount'
+# ==============================================================================
+# DJANGO REST FRAMEWORK
+# ==============================================================================
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
+    'DEFAULT_RENDERER_CLASSES': (
+        'rest_framework.renderers.JSONRenderer',
+    ),
+    'DEFAULT_FILTER_BACKENDS': (
+        'django_filters.rest_framework.DjangoFilterBackend',
+    ),
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+}
+
+# ==============================================================================
+# JWT SETTINGS
+# ==============================================================================
+
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),          # Access token valid for 1 hour
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),          # Refresh token valid for 7 days
+    'ROTATE_REFRESH_TOKENS': True,                        # New refresh token on each refresh
+    'BLACKLIST_AFTER_ROTATION': True,                     # Old tokens become invalid
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+    'TOKEN_TYPE_CLAIM': 'token_type',
+}
+
+# ==============================================================================
+# COMPANY SETTINGS
+# ==============================================================================
+
+
+
+# Login security
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_LOCKOUT_DURATION_MINUTES = 30
 # ==============================================================================
 # INTERNATIONALIZATION
 # ==============================================================================
