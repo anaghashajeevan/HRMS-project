@@ -406,3 +406,541 @@ class AuthAuditLogSerializer(serializers.ModelSerializer):
             'details', 'created_at',
         ]
         read_only_fields = fields
+
+# ==============================================================================
+# EMPLOYEE MODULE SERIALIZERS
+# ==============================================================================
+
+from .models import Employee, CompanyStructure, JobPosition
+
+
+class CompanyStructureMiniSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompanyStructure
+        fields = ['id', 'name', 'type']
+
+
+class JobPositionMiniSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source='department.name', read_only=True)
+
+    class Meta:
+        model = JobPosition
+        fields = ['id', 'title', 'grade_band', 'department_name']
+
+
+class EmployeeManagerMiniSerializer(serializers.ModelSerializer):
+    """Used to show manager info nested inside employee response."""
+    full_name = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = Employee
+        fields = ['id', 'employee_id', 'full_name', 'official_email']
+
+
+# ------------------------------------------------------------------------------
+# LIST SERIALIZER (lightweight — for table view)
+# ------------------------------------------------------------------------------
+
+class EmployeeListSerializer(serializers.ModelSerializer):
+    full_name = serializers.CharField(read_only=True)
+    position_title = serializers.CharField(source='position.title', read_only=True, default=None)
+    department_name = serializers.CharField(
+        source='position.department.name', read_only=True, default=None
+    )
+    manager_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Employee
+        fields = [
+            'id',
+            'employee_id',
+            'full_name',
+            'first_name',
+            'last_name',
+            'official_email',
+            'phone_number',
+            'status',
+            'position_title',
+            'department_name',
+            'manager_name',
+            'date_of_joining',
+        ]
+        read_only_fields = fields
+
+    def get_manager_name(self, obj):
+        if obj.reporting_manager:
+            return obj.reporting_manager.full_name
+        return None
+
+
+# ------------------------------------------------------------------------------
+# DETAIL SERIALIZER (full profile view)
+# ------------------------------------------------------------------------------
+
+class EmployeeDetailSerializer(serializers.ModelSerializer):
+    full_name = serializers.CharField(read_only=True)
+    position = JobPositionMiniSerializer(read_only=True)
+    reporting_manager = EmployeeManagerMiniSerializer(read_only=True)
+    structure_location = CompanyStructureMiniSerializer(read_only=True)
+
+    # NEW: Check if user account exists
+    has_user_account = serializers.SerializerMethodField()
+    user_account_info = serializers.SerializerMethodField()
+
+    # Masked encrypted fields
+    bank_account = serializers.SerializerMethodField()
+    pan_number = serializers.SerializerMethodField()
+    aadhaar_number = serializers.SerializerMethodField()
+    uan_number = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Employee
+        fields = [
+            # Identification
+            'id', 'employee_id', 'status',
+
+            # Personal
+            'first_name', 'last_name', 'full_name',
+            'official_email', 'personal_email', 'phone_number',
+            'date_of_birth', 'gender',
+
+            # Employment
+            'position', 'reporting_manager', 'structure_location',
+            'date_of_joining', 'date_of_exit',
+
+            # Bank / Statutory (masked)
+            'bank_account', 'bank_ifsc_code',
+            'pan_number', 'aadhaar_number', 'uan_number',
+
+            # NEW: User account info
+            'has_user_account', 'user_account_info',
+
+            # Timestamps
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+    # ---------- User Account Check ----------
+    def get_has_user_account(self, obj):
+        return hasattr(obj, 'user_account')
+
+    def get_user_account_info(self, obj):
+        if hasattr(obj, 'user_account'):
+            user = obj.user_account
+            return {
+                'username': user.username,
+                'email': user.email,
+                'is_active': user.is_active,
+                'is_locked_out': user.is_locked_out,
+                'last_login': user.last_login,
+                'roles': list(user.roles.values_list('role_name', flat=True)),
+            }
+        return None
+
+    # ---------- Masking Logic ----------
+    def _can_see_full_pii(self):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        user = request.user
+        return user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+
+    def _mask(self, value, visible_chars=4):
+        if not value:
+            return None
+        if self._can_see_full_pii():
+            return value
+        if len(value) <= visible_chars:
+            return '*' * len(value)
+        return '*' * (len(value) - visible_chars) + value[-visible_chars:]
+
+    def get_bank_account(self, obj):
+        return self._mask(obj.bank_account_encrypted)
+
+    def get_pan_number(self, obj):
+        return self._mask(obj.pan_number_encrypted)
+
+    def get_aadhaar_number(self, obj):
+        return self._mask(obj.aadhaar_number_encrypted)
+
+    def get_uan_number(self, obj):
+        return self._mask(obj.uan_number_encrypted)
+
+
+
+# ==============================================================================
+# MASTER DATA SERIALIZERS
+# ==============================================================================
+
+from .models import CompanyStructure, JobPosition, SystemSetting
+
+
+# ------------------------------------------------------------------------------
+# ROLE (Enhanced)
+# ------------------------------------------------------------------------------
+
+class RoleFullSerializer(serializers.ModelSerializer):
+    user_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Role
+        fields = [
+            'id', 'role_name', 'code', 'description',
+            'level', 'is_active', 'user_count',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'user_count', 'created_at', 'updated_at']
+
+    def get_user_count(self, obj):
+        return obj.user_accounts.count()
+
+    def validate_code(self, value):
+        if not value.replace('_', '').isalnum():
+            raise serializers.ValidationError(
+                'Code can only contain letters, numbers, and underscores.'
+            )
+        return value.lower()
+
+
+# ------------------------------------------------------------------------------
+# COMPANY STRUCTURE (Departments / Locations)
+# ------------------------------------------------------------------------------
+
+class CompanyStructureSerializer(serializers.ModelSerializer):
+    parent_name = serializers.CharField(source='parent.name', read_only=True, default=None)
+    children_count = serializers.SerializerMethodField()
+    employee_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CompanyStructure
+        fields = [
+            'id', 'name', 'type', 'parent', 'parent_name',
+            'cost_center_code', 'is_active',
+            'children_count', 'employee_count', 'created_at',
+        ]
+        read_only_fields = ['id', 'children_count', 'employee_count', 'created_at']
+
+    def get_children_count(self, obj):
+        return obj.children.count()
+
+    def get_employee_count(self, obj):
+        return obj.employees.filter(is_deleted=False).count()
+
+
+# ------------------------------------------------------------------------------
+# JOB POSITION
+# ------------------------------------------------------------------------------
+
+class JobPositionSerializer(serializers.ModelSerializer):
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    vacancy_count = serializers.IntegerField(read_only=True)
+    is_full = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = JobPosition
+        fields = [
+            'id', 'title', 'grade_band',
+            'department', 'department_name',
+            'budgeted_count', 'actual_count', 'vacancy_count', 'is_full',
+            'salary_min', 'salary_max',
+            'is_active', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'actual_count', 'vacancy_count', 'is_full', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        salary_min = attrs.get('salary_min')
+        salary_max = attrs.get('salary_max')
+        if salary_min and salary_max and salary_min > salary_max:
+            raise serializers.ValidationError({
+                'salary_max': 'Maximum salary must be greater than minimum salary.'
+            })
+        return attrs
+
+
+# ------------------------------------------------------------------------------
+# EMPLOYEE ID SETTINGS (only)
+# ------------------------------------------------------------------------------
+
+class EmployeeIdSettingSerializer(serializers.ModelSerializer):
+    updated_by_name = serializers.CharField(source='updated_by.full_name', read_only=True, default=None)
+
+    class Meta:
+        model = SystemSetting
+        fields = [
+            'id', 'key', 'value', 'description',
+            'is_editable', 'updated_at', 'updated_by_name',
+        ]
+        read_only_fields = ['id', 'key', 'is_editable', 'updated_at', 'updated_by_name']
+
+
+class EmployeeIdPreviewSerializer(serializers.Serializer):
+    """For previewing what the next employee ID will look like."""
+    prefix = serializers.CharField(required=True, max_length=10)
+    include_year = serializers.BooleanField(required=True)
+    padding = serializers.IntegerField(required=True, min_value=1, max_value=8)
+
+
+
+# ==============================================================================
+# EMPLOYEE CREATE / UPDATE SERIALIZER
+# ==============================================================================
+
+# ==============================================================================
+# EMPLOYEE CREATE / UPDATE SERIALIZER
+# ==============================================================================
+
+class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
+    """
+    Handles creating and updating employees.
+    Optionally creates a UserAccount on create OR on update (if none exists).
+    """
+    create_user_account = serializers.BooleanField(write_only=True, required=False, default=False)
+    password = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        min_length=8,
+    )
+    role_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        write_only=True, required=False, allow_empty=True
+    )
+
+    class Meta:
+        model = Employee
+        fields = [
+            'first_name', 'last_name', 'official_email', 'personal_email',
+            'phone_number', 'date_of_birth', 'gender',
+            'status', 'position', 'reporting_manager', 'structure_location',
+            'date_of_joining', 'date_of_exit',
+            'bank_account_encrypted', 'bank_ifsc_code',
+            'pan_number_encrypted', 'aadhaar_number_encrypted', 'uan_number_encrypted',
+            'create_user_account', 'password', 'role_ids',
+        ]
+
+    def validate_official_email(self, value):
+        qs = Employee.objects.filter(official_email__iexact=value, is_deleted=False)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError('An employee with this email already exists.')
+        return value
+
+    def validate(self, attrs):
+        create_account = attrs.get('create_user_account', False)
+        password = attrs.get('password', '').strip() if attrs.get('password') else ''
+
+        if create_account:
+            # Check if employee already has an account (only on update)
+            if self.instance and hasattr(self.instance, 'user_account'):
+                raise serializers.ValidationError({
+                    'create_user_account': 'This employee already has a user account.'
+                })
+
+            if not password:
+                raise serializers.ValidationError({
+                    'password': 'Password is required when creating a user account.'
+                })
+            if len(password) < 8:
+                raise serializers.ValidationError({
+                    'password': 'Password must be at least 8 characters.'
+                })
+        return attrs
+
+    def _create_user_account(self, employee, password, role_ids):
+        """Helper to create UserAccount for an employee."""
+        from .models import UserAccount, Role
+
+        username = employee.official_email.split('@')[0]
+        base_username = username
+        counter = 1
+        while UserAccount.objects.filter(username=username).exists():
+            username = f"{base_username}{counter}"
+            counter += 1
+
+        user = UserAccount.objects.create_user(
+            email=employee.official_email,
+            username=username,
+            password=password,
+            employee=employee,
+            is_active=True,
+        )
+
+        if role_ids:
+            roles = Role.objects.filter(id__in=role_ids, is_active=True)
+            user.roles.set(roles)
+        else:
+            default_role = Role.objects.filter(role_name='EMPLOYEE', is_active=True).first()
+            if default_role:
+                user.roles.add(default_role)
+
+        return user
+
+    def create(self, validated_data):
+        create_account = validated_data.pop('create_user_account', False)
+        password = validated_data.pop('password', None)
+        role_ids = validated_data.pop('role_ids', [])
+
+        employee = Employee.objects.create(**validated_data)
+
+        if create_account and password:
+            self._create_user_account(employee, password, role_ids)
+
+        return employee
+
+    def update(self, instance, validated_data):
+        # Extract user account fields
+        create_account = validated_data.pop('create_user_account', False)
+        password = validated_data.pop('password', None)
+        role_ids = validated_data.pop('role_ids', [])
+
+        # Update employee fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Create user account if requested (and doesn't exist)
+        if create_account and password and not hasattr(instance, 'user_account'):
+            self._create_user_account(instance, password, role_ids)
+
+        return instance
+
+
+# ==============================================================================
+# EMPLOYEE DOCUMENTS
+# ==============================================================================
+
+from .models import EmployeeDocument
+
+
+class EmployeeDocumentSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+    uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True, default=None)
+    is_expired = serializers.BooleanField(read_only=True)
+    days_until_expiry = serializers.IntegerField(read_only=True)
+    document_type_display = serializers.CharField(source='get_document_type_display', read_only=True)
+
+    class Meta:
+        model = EmployeeDocument
+        fields = [
+            'id', 'employee',
+            'document_type', 'document_type_display',
+            'document_name',
+            'file_path', 'file_url',
+            'file_size_kb', 'mime_type',
+            'expiry_date', 'is_expired', 'days_until_expiry',
+            'alert_fired_count',
+            'uploaded_by', 'uploaded_by_name',
+            'uploaded_at',
+        ]
+        read_only_fields = [
+            'id', 'file_url', 'file_size_kb', 'mime_type',
+            'is_expired', 'days_until_expiry',
+            'alert_fired_count', 'uploaded_by', 'uploaded_by_name',
+            'uploaded_at',
+        ]
+
+    def get_file_url(self, obj):
+        if obj.file_path:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.file_path.url)
+            return obj.file_path.url
+        return None
+
+    def create(self, validated_data):
+        # Auto-compute file size + mime type
+        file_obj = validated_data.get('file_path')
+        if file_obj:
+            validated_data['file_size_kb'] = round(file_obj.size / 1024)
+            validated_data['mime_type'] = getattr(file_obj, 'content_type', '')
+        return super().create(validated_data)
+
+
+# ==============================================================================
+# EMPLOYEE AUDIT LOG
+# ==============================================================================
+
+from .models import EmployeeAuditLog
+
+
+# ==============================================================================
+# EMPLOYEE AUDIT LOG (with UUID → name resolution)
+# ==============================================================================
+
+from .models import EmployeeAuditLog
+
+
+class EmployeeAuditLogSerializer(serializers.ModelSerializer):
+    modified_by_name = serializers.CharField(
+        source='modified_by.full_name', read_only=True, default='System'
+    )
+    modified_by_id = serializers.CharField(
+        source='modified_by.employee_id', read_only=True, default=None
+    )
+    field_display = serializers.SerializerMethodField()
+    old_value_display = serializers.SerializerMethodField()
+    new_value_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EmployeeAuditLog
+        fields = [
+            'id', 'employee',
+            'field_name', 'field_display',
+            'old_value', 'new_value',
+            'old_value_display', 'new_value_display',
+            'modified_by', 'modified_by_name', 'modified_by_id',
+            'changed_at',
+        ]
+        read_only_fields = fields
+
+    def get_field_display(self, obj):
+        """Human-friendly field labels."""
+        labels = {
+            'first_name': 'First Name',
+            'last_name': 'Last Name',
+            'official_email': 'Official Email',
+            'personal_email': 'Personal Email',
+            'phone_number': 'Phone Number',
+            'gender': 'Gender',
+            'status': 'Status',
+            'position_id': 'Position',
+            'reporting_manager_id': 'Reporting Manager',
+            'structure_location_id': 'Department/Location',
+            'date_of_joining': 'Date of Joining',
+            'date_of_exit': 'Date of Exit',
+            'bank_ifsc_code': 'Bank IFSC Code',
+        }
+        return labels.get(obj.field_name, obj.field_name.replace('_', ' ').title())
+
+    def _resolve_uuid(self, field_name, value):
+        """Convert UUID references to human-readable names."""
+        if not value or value in ('None', 'null', ''):
+            return None
+
+        # Import inside function to avoid circular imports
+        from .models import JobPosition, Employee, CompanyStructure
+
+        try:
+            if field_name == 'position_id':
+                pos = JobPosition.objects.filter(id=value).first()
+                return f"{pos.title} ({pos.grade_band})" if pos else f"Unknown Position"
+
+            if field_name == 'reporting_manager_id':
+                mgr = Employee.objects.filter(id=value).first()
+                return f"{mgr.full_name} ({mgr.employee_id})" if mgr else f"Unknown Manager"
+
+            if field_name == 'structure_location_id':
+                loc = CompanyStructure.objects.filter(id=value).first()
+                return loc.name if loc else f"Unknown Location"
+        except Exception:
+            return value  # Fallback to raw value on error
+
+        return value  # Non-UUID fields — return as-is
+
+    def get_old_value_display(self, obj):
+        return self._resolve_uuid(obj.field_name, obj.old_value)
+
+    def get_new_value_display(self, obj):
+        return self._resolve_uuid(obj.field_name, obj.new_value)

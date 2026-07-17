@@ -1,13 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
-import { Bell, ChevronDown, LogOut, User as UserIcon, Settings } from 'lucide-react';
+import { Bell, ChevronDown, LogOut, User as UserIcon, Settings, Key } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import ChangePasswordModal from './ChangePasswordModal';
 
 export default function Topbar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -49,28 +51,27 @@ export default function Topbar() {
         <div className="relative" ref={menuRef}>
           <button
             onClick={() => setOpen(!open)}
-            className="flex items-center gap-2 rounded-lg p-1.5 pr-2 hover:bg-gray-100"
+            className="flex items-center gap-1 rounded-full p-1 hover:bg-gray-100 transition"
+            title={user?.employee?.full_name || user?.username}
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-600 text-sm font-semibold text-white">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-600 text-sm font-semibold text-white">
               {initials}
-            </div>
-            <div className="hidden text-left md:block">
-              <p className="text-sm font-medium text-gray-900">
-                {user?.employee?.full_name || user?.username}
-              </p>
-              <p className="text-xs text-gray-500">{user?.role_codes[0] || 'USER'}</p>
             </div>
             <ChevronDown className="h-4 w-4 text-gray-500" />
           </button>
 
           {open && (
-            <div className="absolute right-0 mt-2 w-56 rounded-xl border border-gray-200 bg-white py-2 shadow-lg">
+            <div
+              className="absolute right-0 z-50 mt-2 w-56 rounded-xl border border-gray-200 py-2 shadow-2xl ring-1 ring-black/5"
+              style={{ backgroundColor: '#ffffff' }}
+            >
               <div className="border-b border-gray-100 px-4 py-3">
                 <p className="text-sm font-medium text-gray-900">
                   {user?.employee?.full_name || user?.username}
                 </p>
                 <p className="truncate text-xs text-gray-500">{user?.email}</p>
               </div>
+
               <button
                 onClick={() => {
                   setOpen(false);
@@ -81,6 +82,18 @@ export default function Topbar() {
                 <UserIcon className="h-4 w-4" />
                 My Profile
               </button>
+
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  setPasswordModalOpen(true);
+                }}
+                className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <Key className="h-4 w-4" />
+                Change Password
+              </button>
+
               <button
                 onClick={() => {
                   setOpen(false);
@@ -91,7 +104,9 @@ export default function Topbar() {
                 <Settings className="h-4 w-4" />
                 Settings
               </button>
+
               <div className="my-1 border-t border-gray-100"></div>
+
               <button
                 onClick={handleLogout}
                 className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
@@ -103,6 +118,11 @@ export default function Topbar() {
           )}
         </div>
       </div>
+
+      <ChangePasswordModal
+        isOpen={passwordModalOpen}
+        onClose={() => setPasswordModalOpen(false)}
+      />
     </header>
   );
 }

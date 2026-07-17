@@ -162,6 +162,14 @@ ALLOWED_HOSTS = os.getenv(
     'localhost,127.0.0.1'
 ).split(',')
 
+FIELD_ENCRYPTION_KEY = os.getenv(
+    'FIELD_ENCRYPTION_KEY',
+    'CUzLvcic0EfwYGtteQg8tbK_ri0Lq3cCATxF22UYiog='  # ← Replace with key from Step 2
+)
+
+CRYPTOGRAPHY_KEY = FIELD_ENCRYPTION_KEY
+CRYPTOGRAPHY_SALT = os.getenv('CRYPTOGRAPHY_SALT', 'hrms-pii-salt-change-me')
+CRYPTOGRAPHY_BACKEND = 'cryptography.hazmat.backends.default_backend'
 # ==============================================================================
 # APPLICATION DEFINITION
 # ==============================================================================
@@ -178,7 +186,8 @@ INSTALLED_APPS = [
     'corsheaders',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
-    
+    'django_celery_beat',        # ← ADD
+    'django_celery_results',
     # Your apps (add your apps here)
     'HRMSapp',  # Your app
 ]
@@ -332,7 +341,14 @@ SIMPLE_JWT = {
 # ==============================================================================
 # COMPANY SETTINGS
 # ==============================================================================
+CORS_ALLOW_METHODS = [
+    'DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT',
+]
 
+CORS_ALLOW_HEADERS = [
+    'accept', 'accept-encoding', 'authorization', 'content-type',
+    'dnt', 'origin', 'user-agent', 'x-csrftoken', 'x-requested-with',
+]
 
 
 # Login security
@@ -357,8 +373,59 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024        # 5 MB in memory before switching to disk
+DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024        # 5 MB total request in memory
+
+# Maximum total file size allowed per upload (20 MB)
+MAX_UPLOAD_SIZE = 20 * 1024 * 1024                   # ← 20 MB
+
+DATA_UPLOAD_MAX_NUMBER_FILES = 20
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 1000
+
+FILE_UPLOAD_TEMP_DIR = None
+FILE_UPLOAD_PERMISSIONS = 0o644
+FILE_UPLOAD_DIRECTORY_PERMISSIONS = 0o755
+
+FILE_UPLOAD_HANDLERS = [
+    'django.core.files.uploadhandler.MemoryFileUploadHandler',
+    'django.core.files.uploadhandler.TemporaryFileUploadHandler',
+]
 # ==============================================================================
 # DEFAULT PRIMARY KEY
 # ==============================================================================
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# ==============================================================================
+# CELERY CONFIGURATION
+# ==============================================================================
+
+CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = 'django-db'
+
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 min max per task
+
+CELERY_TASK_ALWAYS_EAGER = os.getenv('CELERY_EAGER', 'False').lower() == 'true'
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+
+# ==============================================================================
+# EMAIL CONFIGURATION
+# ==============================================================================
+
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'HRMS <noreply@hrms.com>')
+EMAIL_TIMEOUT = 30
+
+HR_NOTIFICATION_EMAIL = os.getenv('HR_NOTIFICATION_EMAIL', 'hr@hrms.com')
+PORTAL_URL = os.getenv('PORTAL_URL', 'http://localhost:5173')

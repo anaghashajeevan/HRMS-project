@@ -1,0 +1,19 @@
+HR ALERT: DOCUMENT EXPIRING
+
+Hello HR Team,
+
+A document belonging to an employee is expiring soon and requires attention:
+
+Employee: {{ employee_name }} ({{ employee_id }})
+Document: {{ document_name }}
+Type: {{ document_type }}
+Expiry Date: {{ expiry_date|date:"F j, Y" }}
+Days Remaining: {{ days_remaining }} days
+
+The employee has been notified. Please follow up if needed.
+
+View employee: {{ portal_url }}/employees/{{ employee_uuid }}
+
+---
+© {{ current_year }} HRMS
+This is an automated notification.

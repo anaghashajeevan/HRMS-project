@@ -1,0 +1,21 @@
+Hi {{ employee_name }},
+
+DOCUMENT EXPIRY REMINDER
+
+One of your documents is expiring soon:
+
+Document: {{ document_name }}
+Type: {{ document_type }}
+Expiry Date: {{ expiry_date|date:"F j, Y" }}
+Days Remaining: {{ days_remaining }} days
+
+Please upload the renewed document to your HRMS profile before
+the expiry date to avoid any workflow disruptions.
+
+Go to your profile: {{ portal_url }}/profile
+
+If you have any questions, please contact your HR administrator.
+
+---
+© {{ current_year }} HRMS
+This is an automated notification.

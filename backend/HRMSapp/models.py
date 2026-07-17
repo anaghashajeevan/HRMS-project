@@ -10,7 +10,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.utils import timezone
 from .managers import UserAccountManager
-
+from django_cryptography.fields import encrypt
 
 # ==============================================================================
 # ROLE MASTER
@@ -178,11 +178,12 @@ class Employee(models.Model):
     date_of_joining = models.DateField()
     date_of_exit = models.DateField(null=True, blank=True)
 
-    bank_account_encrypted = models.TextField(blank=True, null=True)
-    bank_ifsc_code = models.CharField(max_length=20, blank=True, null=True)
-    pan_number_encrypted = models.TextField(blank=True, null=True)
-    aadhaar_number_encrypted = models.TextField(blank=True, null=True)
-    uan_number_encrypted = models.TextField(blank=True, null=True)
+    # Encrypted PII fields (AES-256 at rest via django-cryptography)
+    bank_account_encrypted = encrypt(models.TextField(blank=True, null=True))
+    bank_ifsc_code = models.CharField(max_length=20, blank=True, null=True)  # Not sensitive — plain text OK
+    pan_number_encrypted = encrypt(models.TextField(blank=True, null=True))
+    aadhaar_number_encrypted = encrypt(models.TextField(blank=True, null=True))
+    uan_number_encrypted = encrypt(models.TextField(blank=True, null=True))
     # Soft-delete + audit
     is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -384,7 +385,11 @@ class EmployeeAuditLog(models.Model):
         Employee, on_delete=models.CASCADE, related_name='field_audit_logs'
     )
     modified_by = models.ForeignKey(
-        Employee, on_delete=models.PROTECT, related_name='changes_made'
+        Employee,
+        on_delete=models.SET_NULL,   # ← Changed
+        related_name='changes_made',
+        null=True,                    # ← Added
+        blank=True,                   # ← Added
     )
     field_name = models.CharField(max_length=50)
     old_value = models.TextField(blank=True, null=True)
@@ -436,3 +441,51 @@ class AuthAuditLog(models.Model):
 
     def __str__(self):
         return f"{self.event_type} - {self.username_attempted or self.user} @ {self.created_at}"
+
+
+# ==============================================================================
+# SYSTEM SETTINGS (Only for Employee ID configuration)
+# ==============================================================================
+
+class SystemSetting(models.Model):
+    """
+    Key-value store for Employee ID configuration.
+    Only employee_id related settings — nothing else.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.CharField(max_length=100, unique=True, help_text="Unique setting key")
+    value = models.CharField(max_length=255, help_text="Setting value")
+    description = models.TextField(blank=True, null=True)
+    is_editable = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        Employee, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='updated_settings'
+    )
+
+    class Meta:
+        db_table = 'system_settings'
+        ordering = ['key']
+
+    def __str__(self):
+        return f"{self.key} = {self.value}"
+
+    @classmethod
+    def get_value(cls, key, default=None):
+        """Helper to fetch a setting value with fallback."""
+        try:
+            return cls.objects.get(key=key).value
+        except cls.DoesNotExist:
+            return default
+
+    @classmethod
+    def set_value(cls, key, value, description=None):
+        """Helper to create or update a setting."""
+        setting, _ = cls.objects.update_or_create(
+            key=key,
+            defaults={
+                'value': str(value),
+                'description': description or '',
+            }
+        )
+        return setting

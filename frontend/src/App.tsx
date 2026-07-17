@@ -129,36 +129,113 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
 import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
+import Unauthorized from './pages/Unauthorized';
+import EmployeeList from './pages/employees/EmployeeList';
+import EmployeeDetailPage from './pages/employees/EmployeeDetail';
+import EmployeeForm from './pages/employees/EmployeeForm';
+import RolesPage from './pages/settings/Roles';
+import DepartmentsPage from './pages/settings/Departments';
+import PositionsPage from './pages/settings/Positions';
+import EmployeeCodeSettingsPage from './pages/settings/EmployeeCode';
+import ProfilePage from './pages/Profile';
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Toaster
-          position="top-right"
-          toastOptions={{
-            duration: 3500,
-            style: { fontSize: '14px' },
-            success: { iconTheme: { primary: '#2563eb', secondary: '#fff' } },
-          }}
-        />
+        <Toaster position="top-right" toastOptions={{ duration: 3500, style: { fontSize: '14px' } }} />
 
         <Routes>
           {/* Public */}
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/unauthorized" element={<Unauthorized />} />
 
-          {/* Protected */}
+          {/* Everyone (authenticated) */}
           <Route
             path="/dashboard"
+            element={<ProtectedRoute><Dashboard /></ProtectedRoute>}
+          />
+
+          {/* Employees — HR, Manager, System Admin */}
+          <Route
+            path="/employees"
             element={
-              <ProtectedRoute>
-                <Dashboard />
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+                <EmployeeList />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/employees/new"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+                <EmployeeForm />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/employees/:id"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+                <EmployeeDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/employees/:id/edit"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+                <EmployeeForm />
               </ProtectedRoute>
             }
           />
 
-          {/* Root & fallback */}
+          {/* Settings — Roles: SYSTEM_ADMIN only */}
+          <Route
+            path="/settings/roles"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN']}>
+                <RolesPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Settings — Employee Code: SYSTEM_ADMIN only */}
+          <Route
+            path="/settings/employee-code"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN']}>
+                <EmployeeCodeSettingsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Settings — Departments/Positions: SYSTEM_ADMIN + HR_ADMIN */}
+          <Route
+            path="/settings/departments"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+                <DepartmentsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/positions"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+                <PositionsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+  path="/profile"
+  element={
+    <ProtectedRoute>
+      <ProfilePage />
+    </ProtectedRoute>
+  }
+/>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

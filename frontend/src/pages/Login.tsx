@@ -237,7 +237,8 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
+  // const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
+  const from = '/dashboard';  // Always land on dashboard after login
 
   const validateEmail = (val: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
 

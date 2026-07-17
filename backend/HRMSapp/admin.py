@@ -121,3 +121,12 @@ class EmployeeAuditLogAdmin(admin.ModelAdmin):
     readonly_fields = [f.name for f in EmployeeAuditLog._meta.fields]
     ordering = ['-changed_at']
 
+
+from .models import SystemSetting
+
+@admin.register(SystemSetting)
+class SystemSettingAdmin(admin.ModelAdmin):
+    list_display = ('key', 'value', 'is_editable', 'updated_at')
+    list_filter = ('is_editable',)
+    search_fields = ('key', 'description')
+    readonly_fields = ('id', 'updated_at', 'updated_by')
