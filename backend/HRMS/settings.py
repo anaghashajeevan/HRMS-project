@@ -237,7 +237,7 @@ if DATABASE_ENGINE == "django.db.backends.sqlite3":
             "NAME": BASE_DIR / os.getenv("DATABASE_NAME", "db.sqlite3"),
         }
     }
-    print("🔧 Database: SQLite (Development)")
+    print("[HRMS Settings] Database: SQLite (Development)")
 
 else:
     # ---------------- PostgreSQL (Production) ----------------
@@ -257,7 +257,7 @@ else:
             "PORT": os.getenv("DATABASE_PORT", "5432"),
         }
     }
-    print(f"🚀 Database: PostgreSQL (Production) - Host: {database_host}")
+    print(f"[HRMS Settings] Database: PostgreSQL (Production) - Host: {database_host}")
 
 # ==============================================================================
 # CORS / CSRF SETTINGS
@@ -429,3 +429,28 @@ EMAIL_TIMEOUT = 30
 
 HR_NOTIFICATION_EMAIL = os.getenv('HR_NOTIFICATION_EMAIL', 'hr@hrms.com')
 PORTAL_URL = os.getenv('PORTAL_URL', 'http://localhost:5173')
+
+# ==============================================================================
+# GROQ AI CONFIGURATION
+# ==============================================================================
+GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
+GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')
+
+
+# ==============================================================================
+# COMPANY BRANDING FOR HR LETTER PDF
+# ==============================================================================
+
+COMPANY_NAME = os.getenv('COMPANY_NAME', 'NL Technologies Pvt Ltd')
+COMPANY_TAGLINE = os.getenv('COMPANY_TAGLINE', 'Excellence in Every Endeavor')
+COMPANY_ADDRESS = os.getenv('COMPANY_ADDRESS', '123 Business Park, Bengaluru, KA 560001')
+COMPANY_PHONE = os.getenv('COMPANY_PHONE', '+91 80 4567 8900')
+COMPANY_EMAIL = os.getenv('COMPANY_EMAIL', 'hr@nltechsolutions.com')
+COMPANY_WEBSITE = os.getenv('COMPANY_WEBSITE', 'www.nltechsolutions.com')
+
+# Optional local logo path. Example:
+# COMPANY_LOGO_PATH=C:\Users\HP\Documents\Django\HRMS\media\company\logo.png
+COMPANY_LOGO_PATH = os.getenv('COMPANY_LOGO_PATH', '')
+
+COMPANY_PRIMARY_COLOR = os.getenv('COMPANY_PRIMARY_COLOR', '#1E40AF')
+COMPANY_ACCENT_COLOR = os.getenv('COMPANY_ACCENT_COLOR', '#3B82F6')

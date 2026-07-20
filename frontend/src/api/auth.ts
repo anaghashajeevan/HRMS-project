@@ -24,3 +24,34 @@ export const authApi = {
     await api.post('/auth/password/change/', payload);
   },
 };
+
+export const forgotPasswordApi = {
+  requestOTP: async (email: string): Promise<{ message: string }> => {
+    const { data } = await api.post('/auth/forgot-password/request/', { email });
+    return data;
+  },
+
+  verifyOTP: async (
+    email: string,
+    otp: string
+  ): Promise<{ reset_token: string; expires_in_minutes: number }> => {
+    const { data } = await api.post('/auth/forgot-password/verify-otp/', {
+      email,
+      otp,
+    });
+    return data;
+  },
+
+  resetPassword: async (
+    resetToken: string,
+    newPassword: string,
+    confirmPassword: string
+  ): Promise<{ message: string }> => {
+    const { data } = await api.post('/auth/forgot-password/reset/', {
+      reset_token: resetToken,
+      new_password: newPassword,
+      confirm_password: confirmPassword,
+    });
+    return data;
+  },
+};

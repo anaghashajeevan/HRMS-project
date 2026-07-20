@@ -1,3 +1,4 @@
+// src/api/employees.ts
 import api from './axios';
 import type {
   PaginatedEmployees, EmployeeDetail,CareerHistoryResponse,

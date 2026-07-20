@@ -25,8 +25,11 @@ from .views import (
     CustomTokenRefreshView,
     MeView,
     ChangePasswordView,
+    PerformanceReportsView,
     RegisterUserView,
     MyActiveSessionsView,
+    # ReportExportView,
+    export_report_fn, 
     RevokeSessionView,
     AuthAuditLogListView,
     RoleViewSet,
@@ -35,6 +38,25 @@ from .views import (
     EmployeeIdSettingViewSet,
     # Employee Module
     EmployeeViewSet,
+    ApprovalWorkflowViewSet,
+    LetterTemplateViewSet,
+    LifecycleChangeRequestViewSet,
+    NotificationViewSet,
+    RatingScaleViewSet,
+    OrganizationalPriorityViewSet,
+    DepartmentalKRAViewSet,
+    DepartmentalKPIViewSet,
+    KRALibraryViewSet,
+    KPILibraryItemViewSet,
+    PerformanceCycleViewSet,
+    EmployeeScorecardViewSet,
+    EmployeeKRAViewSet,
+    EmployeeKPIViewSet,
+    EmployeeKPIEvidenceViewSet,KRAPeerNominationViewSet,
+    PeerRatingViewSet,
+    PeerSearchView,ForgotPasswordRequestView,
+    ForgotPasswordVerifyOTPView,
+    ForgotPasswordResetView,DashboardStatsView,
 )
 
 
@@ -49,7 +71,23 @@ router.register(r'job-positions', JobPositionViewSet, basename='job-positions')
 router.register(r'employee-id-settings', EmployeeIdSettingViewSet, basename='employee-id-settings')
 router.register(r'employees', EmployeeViewSet, basename='employee')
 router.register(r'employee-documents', EmployeeDocumentViewSet, basename='employee-documents')
-
+router.register(r'approval-workflows', ApprovalWorkflowViewSet, basename='approval-workflows')
+router.register(r'letter-templates', LetterTemplateViewSet, basename='letter-templates')
+router.register(r'lifecycle-requests', LifecycleChangeRequestViewSet, basename='lifecycle-requests')
+router.register(r'notifications', NotificationViewSet, basename='notifications')
+router.register(r'rating-scales', RatingScaleViewSet, basename='rating-scales')
+router.register(r'organizational-priorities', OrganizationalPriorityViewSet, basename='org-priorities')
+router.register(r'departmental-kras', DepartmentalKRAViewSet, basename='dept-kras')
+router.register(r'departmental-kpis', DepartmentalKPIViewSet, basename='dept-kpis')
+router.register(r'kra-library', KRALibraryViewSet, basename='kra-library')
+router.register(r'kpi-library', KPILibraryItemViewSet, basename='kpi-library')
+router.register(r'performance-cycles', PerformanceCycleViewSet, basename='performance-cycles')
+router.register(r'employee-scorecards', EmployeeScorecardViewSet, basename='employee-scorecards')
+router.register(r'employee-kras', EmployeeKRAViewSet, basename='employee-kras')
+router.register(r'employee-kpis', EmployeeKPIViewSet, basename='employee-kpis')
+router.register(r'kpi-evidences', EmployeeKPIEvidenceViewSet, basename='kpi-evidences')
+router.register(r'peer-nominations', KRAPeerNominationViewSet, basename='peer-nominations')
+router.register(r'peer-ratings', PeerRatingViewSet, basename='peer-ratings')
 # ==============================================================================
 # URL PATTERNS
 # ==============================================================================
@@ -62,14 +100,19 @@ urlpatterns = [
     path('auth/me/', MeView.as_view(), name='me'),
     path('auth/password/change/', ChangePasswordView.as_view(), name='password_change'),
     path('auth/register/', RegisterUserView.as_view(), name='register'),
-
+    path('auth/forgot-password/request/', ForgotPasswordRequestView.as_view(), name='forgot-password-request'),
+    path('auth/forgot-password/verify-otp/', ForgotPasswordVerifyOTPView.as_view(), name='forgot-password-verify-otp'),
+    path('auth/forgot-password/reset/', ForgotPasswordResetView.as_view(), name='forgot-password-reset'),
     # ---------- Session Management ----------
     path('auth/sessions/', MyActiveSessionsView.as_view(), name='my_sessions'),
     path('auth/sessions/<uuid:session_id>/', RevokeSessionView.as_view(), name='revoke_session'),
-
+    path('dashboard/stats/', DashboardStatsView.as_view(), name='dashboard-stats'),
+    # path('reports/export/', ReportExportView.as_view(), name='report-export'),
+    path('reports/export/', export_report_fn, name='report-export'),
+    path('reports/data/', PerformanceReportsView.as_view(), name='performance-reports'),
     # ---------- Audit Logs ----------
     path('auth/audit-logs/', AuthAuditLogListView.as_view(), name='audit_logs'),
-
+    path('peer-search/', PeerSearchView.as_view(), name='peer-search'),
 
     # ---------- Router URLs (ViewSets) ----------
     path('', include(router.urls)),
