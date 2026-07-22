@@ -2905,7 +2905,7 @@ class ReportExportView(APIView):
 
     def get(self, request):
         print("=" * 70)
-        print("🚨 ReportExportView.get() CALLED!")
+        print("ReportExportView.get() called")
         print(f"   Path: {request.path}")
         print(f"   Query: {dict(request.query_params)}")
         print(f"   User: {request.user}")
@@ -2914,12 +2914,15 @@ class ReportExportView(APIView):
         import traceback
         
         print("\n" + "=" * 70)
-        print("📥 EXPORT REQUEST RECEIVED")
+        print("Export request received")
         print(f"   Query params: {dict(request.query_params)}")
         print("=" * 70)
         
         report_type = request.query_params.get('type', 'company')
-        file_format = request.query_params.get('format', 'excel').lower()
+        # `format` is reserved by Django REST framework for renderer negotiation.
+        # Using it for export type makes DRF return a generic 404 before this view
+        # is reached when the requested renderer (pdf/excel) is unavailable.
+        file_format = request.query_params.get('file_format', 'excel').lower()
         cycle_id = request.query_params.get('cycle_id')
         employee_id = request.query_params.get('employee_id')
         manager_id = request.query_params.get('manager_id')
@@ -2934,9 +2937,9 @@ class ReportExportView(APIView):
             try:
                 cycle = PerformanceCycle.objects.get(id=cycle_id)
                 cycle_name = cycle.name
-                print(f"   ✅ Cycle found: {cycle_name}")
+                print(f"   Cycle found: {cycle_name}")
             except PerformanceCycle.DoesNotExist:
-                print(f"   ❌ Cycle {cycle_id} NOT FOUND")
+                print(f"   Cycle {cycle_id} not found")
                 return Response({'detail': f'Cycle {cycle_id} not found'}, status=404)
         
         # Get employee name for individual reports
@@ -2970,7 +2973,7 @@ class ReportExportView(APIView):
                 if not cycle_id:
                     return Response({'detail': 'cycle_id required'}, status=400)
                 
-                print(f"   📊 Calling export_company_{file_format}...")
+                print(f"   Calling export_company_{file_format}...")
                 content = (ReportsExportService.export_company_excel(cycle_id, cycle_name)
                           if file_format == 'excel'
                           else ReportsExportService.export_company_pdf(cycle_id, cycle_name))
@@ -3016,10 +3019,10 @@ class ReportExportView(APIView):
             else:
                 return Response({'detail': f'Invalid report type: {report_type}'}, status=400)
             
-            print(f"   ✅ Content generated: {len(content)} bytes")
+            print(f"   Content generated: {len(content)} bytes")
         
         except AttributeError as e:
-            print(f"   ❌ ATTRIBUTE ERROR: {e}")
+            print(f"   Attribute error: {e}")
             traceback.print_exc()
             return Response({
                 'detail': f'Missing method or attribute: {str(e)}',
@@ -3027,7 +3030,7 @@ class ReportExportView(APIView):
             }, status=500)
         
         except Exception as e:
-            print(f"   ❌ EXCEPTION: {type(e).__name__}: {e}")
+            print(f"   Export exception: {type(e).__name__}: {e}")
             traceback.print_exc()
             return Response({
                 'detail': f'Export failed: {str(e)}',
@@ -3048,112 +3051,13 @@ class ReportExportView(APIView):
                 response = HttpResponse(content, content_type='application/pdf')
                 response['Content-Disposition'] = f'attachment; filename="{filename}.pdf"'
             
-            print(f"   📤 Sending file: {filename}")
+            print(f"   Sending file: {filename}")
             return response
         
         except Exception as e:
-            print(f"   ❌ RESPONSE ERROR: {e}")
+            print(f"   Response error: {e}")
             traceback.print_exc()
             return Response({'detail': f'Response error: {str(e)}'}, status=500)
 
 
 
-# ==============================================================================
-# FUNCTION-BASED EXPORT VIEW (Alternative to class-based)
-# ==============================================================================
-
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from django.http import HttpResponse, JsonResponse
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def export_report_fn(request):
-    """Function-based view for exporting reports."""
-    print("=" * 70)
-    print("🚨 EXPORT FUNCTION CALLED!")
-    print(f"   Query: {dict(request.query_params)}")
-    print("=" * 70)
-    
-    from .models import PerformanceCycle, Employee
-    from .services.reports_export_service import ReportsExportService
-    import traceback
-    
-    report_type = request.query_params.get('type', 'company')
-    file_format = request.query_params.get('format', 'excel').lower()
-    cycle_id = request.query_params.get('cycle_id')
-    
-    user = request.user
-    
-    # Get cycle name
-    cycle_name = 'Report'
-    if cycle_id:
-        try:
-            cycle = PerformanceCycle.objects.get(id=cycle_id)
-            cycle_name = cycle.name
-        except PerformanceCycle.DoesNotExist:
-            return JsonResponse({'detail': 'Cycle not found'}, status=404)
-    
-    # Permission checks
-    is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
-    
-    try:
-        if report_type == 'company':
-            if not is_hr:
-                return JsonResponse({'detail': 'HR only'}, status=403)
-            content = (ReportsExportService.export_company_excel(cycle_id, cycle_name)
-                      if file_format == 'excel'
-                      else ReportsExportService.export_company_pdf(cycle_id, cycle_name))
-            filename = f"Company_Report_{cycle_name.replace(' ', '_')}"
-        
-        elif report_type == 'department':
-            content = (ReportsExportService.export_department_excel(cycle_id, cycle_name)
-                      if file_format == 'excel'
-                      else ReportsExportService.export_department_pdf(cycle_id, cycle_name))
-            filename = f"Department_Report_{cycle_name.replace(' ', '_')}"
-        
-        elif report_type == 'team':
-            mgr_id = str(user.employee.id) if hasattr(user, 'employee') else None
-            content = (ReportsExportService.export_team_excel(mgr_id, cycle_id)
-                      if file_format == 'excel'
-                      else ReportsExportService.export_team_pdf(mgr_id, cycle_id))
-            filename = f"Team_Report_{cycle_name.replace(' ', '_')}"
-        
-        elif report_type == 'individual':
-            emp = getattr(user, 'employee', None)
-            if not emp:
-                return JsonResponse({'detail': 'No employee record'}, status=400)
-            content = (ReportsExportService.export_individual_excel(str(emp.id), emp.full_name)
-                      if file_format == 'excel'
-                      else ReportsExportService.export_individual_pdf(str(emp.id), emp.full_name))
-            filename = f"Performance_{emp.full_name.replace(' ', '_')}"
-        
-        elif report_type == 'kra':
-            content = (ReportsExportService.export_kra_excel(cycle_id, cycle_name)
-                      if file_format == 'excel'
-                      else ReportsExportService.export_kra_pdf(cycle_id, cycle_name))
-            filename = f"KRA_Report_{cycle_name.replace(' ', '_')}"
-        
-        else:
-            return JsonResponse({'detail': f'Invalid report type: {report_type}'}, status=400)
-        
-        print(f"   ✅ Generated {len(content)} bytes")
-        
-    except Exception as e:
-        print(f"   ❌ ERROR: {type(e).__name__}: {e}")
-        traceback.print_exc()
-        return JsonResponse({'detail': str(e)}, status=500)
-    
-    # Return file
-    if file_format == 'excel':
-        response = HttpResponse(
-            content,
-            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        )
-        response['Content-Disposition'] = f'attachment; filename="{filename}.xlsx"'
-    else:
-        response = HttpResponse(content, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}.pdf"'
-    
-    return response

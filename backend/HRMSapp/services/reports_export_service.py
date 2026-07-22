@@ -66,9 +66,8 @@ class ReportsExportService:
     @staticmethod
     def _auto_size_columns(ws):
         """Auto-adjust column widths."""
-        for col in ws.columns:
+        for column_index, col in enumerate(ws.iter_cols(), start=1):
             max_length = 0
-            column = col[0].column_letter
             for cell in col:
                 try:
                     if cell.value:
@@ -76,7 +75,9 @@ class ReportsExportService:
                 except:
                     pass
             adjusted_width = min(max_length + 3, 50)
-            ws.column_dimensions[column].width = adjusted_width
+            # The title and date rows are merged; their non-anchor cells are
+            # MergedCell instances without a column_letter attribute.
+            ws.column_dimensions[get_column_letter(column_index)].width = adjusted_width
 
     @staticmethod
     def export_company_excel(cycle_id: str, cycle_name: str) -> bytes:

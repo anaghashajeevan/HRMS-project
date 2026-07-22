@@ -29,6 +29,12 @@ class RoleSerializer(serializers.ModelSerializer):
 
 class EmployeeMiniSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
+    department_name = serializers.CharField(
+        source='structure_location.name', read_only=True, default=None
+    )
+    position_title = serializers.CharField(
+        source='position.title', read_only=True, default=None
+    )
 
     class Meta:
         model = Employee
@@ -36,6 +42,7 @@ class EmployeeMiniSerializer(serializers.ModelSerializer):
             'id', 'employee_id', 'full_name',
             'first_name', 'last_name', 'official_email',
             'status', 'date_of_joining',
+            'department_name', 'position_title',
         ]
         read_only_fields = fields
 

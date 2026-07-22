@@ -535,8 +535,11 @@ export const performanceReportsApi = {
     employee_id?: string;
     manager_id?: string;
   }): Promise<{ blob: Blob; filename: string }> => {
-    const response = await api.get('/reports/export/', {            // ⬅️ Changed
-      params,
+    const { format, ...reportParams } = params;
+    const response = await api.get('/reports/export/', {
+      // `format` is interpreted by DRF as a renderer selector. Use a
+      // domain-specific parameter so PDF/Excel export reaches the view.
+      params: { ...reportParams, file_format: format },
       responseType: 'blob',
     });
 

@@ -292,6 +292,17 @@ import SelfReviewPage from './pages/performance/SelfReviewPage';
 import FinalReviewPage from './pages/performance/FinalReviewPage';
 import PerformanceCalibrationPage from './pages/performance/PerformanceCalibrationPage';
 import PerformanceReportsPage from './pages/performance/PerformanceReportsPage';
+// Reimbursement pages
+import ReimbursementSmartUploadPage from './pages/reimbursement/SmartUploadPage';
+import ReimbursementUploadStatusPage from './pages/reimbursement/UploadStatusPage';
+import ReimbursementMyClaimsPage from './pages/reimbursement/MyClaimsPage';
+import ReimbursementDashboardPage from './pages/reimbursement/ReimbursementDashboardPage';
+import ReimbursementClaimMonitorPage from './pages/reimbursement/ClaimMonitorPage';
+import ReimbursementFinanceReviewPage from './pages/reimbursement/FinanceReviewPage';
+import ReimbursementReportsPage from './pages/reimbursement/ReimbursementReportsPage';
+import ReimbursementEmailControlPage from './pages/reimbursement/EmailControlPage';
+import ReimbursementSettingsPage from './pages/reimbursement/ReimbursementSettingsPage';
+import ReimbursementProfilePage from './pages/reimbursement/ReimbursementProfilePage';
 
 export default function App() {
   return (
@@ -605,6 +616,93 @@ export default function App() {
   element={
     <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
       <PerformanceReportsPage />
+    </ProtectedRoute>
+  }
+/>
+
+
+{/* ==================== REIMBURSEMENTS ==================== */}
+
+{/* Employee pages */}
+<Route
+  path="/reimbursements/smart-upload"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+      <ReimbursementSmartUploadPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/reimbursements/smart-upload/:uploadId"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+      <ReimbursementUploadStatusPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/reimbursements/profile"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+      <ReimbursementProfilePage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/reimbursements/my-claims"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+      <ReimbursementMyClaimsPage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* Admin/Finance pages */}
+<Route
+  path="/reimbursements/dashboard"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <ReimbursementDashboardPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/reimbursements/claims"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <ReimbursementClaimMonitorPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/reimbursements/finance-review"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <ReimbursementFinanceReviewPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/reimbursements/reports"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <ReimbursementReportsPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/reimbursements/email-control"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <ReimbursementEmailControlPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/reimbursements/settings"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN']}>
+      <ReimbursementSettingsPage />
     </ProtectedRoute>
   }
 />

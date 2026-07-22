@@ -28,8 +28,7 @@ from .views import (
     PerformanceReportsView,
     RegisterUserView,
     MyActiveSessionsView,
-    # ReportExportView,
-    export_report_fn, 
+    ReportExportView,
     RevokeSessionView,
     AuthAuditLogListView,
     RoleViewSet,
@@ -107,9 +106,9 @@ urlpatterns = [
     path('auth/sessions/', MyActiveSessionsView.as_view(), name='my_sessions'),
     path('auth/sessions/<uuid:session_id>/', RevokeSessionView.as_view(), name='revoke_session'),
     path('dashboard/stats/', DashboardStatsView.as_view(), name='dashboard-stats'),
-    # path('reports/export/', ReportExportView.as_view(), name='report-export'),
-    path('reports/export/', export_report_fn, name='report-export'),
     path('reports/data/', PerformanceReportsView.as_view(), name='performance-reports'),
+    path('reports/export/', ReportExportView.as_view(), name='report-export'),
+    
     # ---------- Audit Logs ----------
     path('auth/audit-logs/', AuthAuditLogListView.as_view(), name='audit_logs'),
     path('peer-search/', PeerSearchView.as_view(), name='peer-search'),

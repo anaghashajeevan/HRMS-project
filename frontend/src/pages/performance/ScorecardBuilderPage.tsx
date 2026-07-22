@@ -972,12 +972,12 @@ function KPIModal({
             </div>
           </div>
 
-          <div>
+          {/* <div>
             <label className="mb-1 block text-xs font-medium uppercase text-gray-500">Formula</label>
             <input type="text" value={form.formula} onChange={(e) => update('formula', e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
               placeholder="e.g. (Covered lines / Total lines) × 100" />
-          </div>
+          </div> */}
 
           <div className="rounded-xl bg-gray-50 p-4">
             <h4 className="mb-3 text-xs font-semibold uppercase text-gray-600">Targets</h4>

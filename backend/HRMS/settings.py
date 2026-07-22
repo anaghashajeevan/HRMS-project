@@ -190,6 +190,7 @@ INSTALLED_APPS = [
     'django_celery_results',
     # Your apps (add your apps here)
     'HRMSapp',  # Your app
+    'reimbursementapp',   
 ]
 
 MIDDLEWARE = [
@@ -200,7 +201,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware', 
 ]
 
 ROOT_URLCONF = 'HRMS.urls'
@@ -454,3 +455,38 @@ COMPANY_LOGO_PATH = os.getenv('COMPANY_LOGO_PATH', '')
 
 COMPANY_PRIMARY_COLOR = os.getenv('COMPANY_PRIMARY_COLOR', '#1E40AF')
 COMPANY_ACCENT_COLOR = os.getenv('COMPANY_ACCENT_COLOR', '#3B82F6')
+
+
+
+# ==============================================================================
+# REIMBURSEMENT APP SETTINGS
+# ==============================================================================
+
+# Tesseract OCR path
+TESSERACT_CMD = os.getenv(
+    "TESSERACT_CMD",
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+)
+
+# Quick Claim limits
+QUICK_CLAIM_MAX_FILES = int(os.getenv("QUICK_CLAIM_MAX_FILES", "50"))
+QUICK_CLAIM_MAX_FILE_SIZE = int(os.getenv("QUICK_CLAIM_MAX_FILE_SIZE", str(10 * 1024 * 1024)))
+QUICK_CLAIM_UPLOAD_RATE = os.getenv("QUICK_CLAIM_UPLOAD_RATE", "10/hour")
+QUICK_CLAIM_SEND_RATE = os.getenv("QUICK_CLAIM_SEND_RATE", "20/hour")
+
+# Allowed recipient email domains for quick claims
+ALLOWED_RECIPIENT_DOMAINS = [
+    d.strip() for d in os.getenv("ALLOWED_RECIPIENT_DOMAINS", "").split(",") if d.strip()
+]
+
+# Finance/CTO emails (defaults)
+CTO_EMAIL = os.getenv("CTO_EMAIL", "")
+FINANCE_HEAD_EMAIL = os.getenv("FINANCE_HEAD_EMAIL", "")
+
+# REST Framework throttle rates (for reimbursement)
+REST_FRAMEWORK_THROTTLE = {
+    'DEFAULT_THROTTLE_RATES': {
+        'quick_claim_upload': QUICK_CLAIM_UPLOAD_RATE,
+        'quick_claim_send': QUICK_CLAIM_SEND_RATE,
+    }
+}
