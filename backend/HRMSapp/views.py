@@ -474,7 +474,7 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 from .models import Employee
 from .serializers import EmployeeListSerializer, EmployeeDetailSerializer,EmployeeAuditLogSerializer
 from .permissions import IsHRAdminOrReadOwn
-
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
 from rest_framework.viewsets import ModelViewSet
 from .utils import generate_employee_id
@@ -805,6 +805,75 @@ class EmployeeViewSet(ModelViewSet):
             },
             'timeline': entries,
         })   
+    @action(detail=False,methods=['get'],url_path='bulk-import-template',permission_classes=[IsAuthenticated, IsHRAdmin],)
+    def bulk_import_template(self, request):
+        """
+        GET /api/v1/employees/bulk-import-template/
+        Download a sample CSV template for bulk import.
+        """
+        from django.http import HttpResponse
+        from .services.employee_bulk_import import get_sample_csv_content
+
+        content = get_sample_csv_content()
+        response = HttpResponse(content, content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="employee_import_template.csv"'
+        return response
+
+    @action(detail=False,methods=['post'],url_path='bulk-import',permission_classes=[IsAuthenticated, IsHRAdmin],parser_classes=[MultiPartParser, FormParser],)
+    def bulk_import(self, request):
+        """
+        POST /api/v1/employees/bulk-import/
+        Body: multipart/form-data
+            - file: CSV or XLSX file
+            - skip_existing: 'true' (default) or 'false'
+        """
+        from .services.employee_bulk_import import (
+            import_employees_from_file,
+            EmployeeBulkImportError,
+        )
+
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response(
+                {'detail': 'No file uploaded.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate file size (max 5 MB)
+        if uploaded_file.size > 5 * 1024 * 1024:
+            return Response(
+                {'detail': 'File too large. Maximum 5 MB allowed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        skip_existing = request.data.get('skip_existing', 'true').lower() == 'true'
+
+        try:
+            result = import_employees_from_file(
+                uploaded_file, skip_existing=skip_existing
+            )
+        except EmployeeBulkImportError as exc:
+            return Response(
+                {'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {'detail': f'Import failed: {str(exc)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response({
+            'ok': True,
+            'message': (
+                f"Import complete: {result['created']} created, "
+                f"{result['updated']} updated, {result['skipped']} skipped"
+                + (f", {len(result['errors'])} errors" if result['errors'] else "")
+            ),
+            **result,
+        })
+
 # ==============================================================================
 # MASTER DATA VIEWS
 # ==============================================================================
@@ -925,21 +994,21 @@ class EmployeeIdSettingViewSet(ModelViewSet):
     
     # Only expose these 3 settings + their defaults
     DEFAULT_SETTINGS = [
-        {
-            'key': 'EMPLOYEE_ID_PREFIX',
-            'value': 'NL',
-            'description': 'Prefix for employee ID (e.g., NL, NLT, EMP)',
-        },
-        {
-            'key': 'EMPLOYEE_ID_INCLUDE_YEAR',
-            'value': 'true',
-            'description': 'Include year in employee ID. Use "true" or "false"',
-        },
-        {
-            'key': 'EMPLOYEE_ID_PADDING',
-            'value': '4',
-            'description': 'Number of digits in sequence (4 = 0001, 5 = 00001)',
-        },
+    {
+        'key': 'EMPLOYEE_ID_PREFIX',
+        'value': 'NL',
+        'description': 'Prefix for employee ID (e.g., NL, NLT, EMP)',
+    },
+    {
+        'key': 'EMPLOYEE_ID_INCLUDE_YEAR',
+        'value': 'false',       # ⬅️ Changed from 'true'
+        'description': 'Include year in employee ID. Use "true" or "false"',
+    },
+    {
+        'key': 'EMPLOYEE_ID_PADDING',
+        'value': '3',            # ⬅️ Changed from '4'
+        'description': 'Number of digits in sequence (3 = 001, 002 ... 999)',
+    },
     ]
 
     def _ensure_defaults_exist(self):
@@ -970,29 +1039,19 @@ class EmployeeIdSettingViewSet(ModelViewSet):
         """
         Preview what the next employee ID would look like with given settings.
         POST /api/v1/employee-id-settings/preview/
-        Body: { "prefix": "NLT", "include_year": true, "padding": 4 }
-        Returns: { "preview": "NLT-2026-0007" }
+        Body: { "prefix": "NL", "include_year": false, "padding": 3 }
+        Returns: { "preview": "NL001" }
         """
         serializer = EmployeeIdPreviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        from .models import Employee
-        from django.utils import timezone
+        from .utils import generate_employee_id_preview
 
         prefix = serializer.validated_data['prefix']
         include_year = serializer.validated_data['include_year']
         padding = serializer.validated_data['padding']
-        year = timezone.now().year
 
-        # Count existing employees to estimate next number
-        next_seq = Employee.objects.count() + 1
-        seq_str = str(next_seq).zfill(padding)
-
-        if include_year:
-            preview = f"{prefix}-{year}-{seq_str}"
-        else:
-            preview = f"{prefix}-{seq_str}"
-
+        preview = generate_employee_id_preview(prefix, include_year, padding)
         return Response({'preview': preview})
 
 

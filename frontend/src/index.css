@@ -1,6 +1,11 @@
 @import "tailwindcss";
 
+/* ============================================================================
+   HRMS THEME (existing — preserved)
+   ============================================================================ */
+
 @theme {
+  /* HRMS primary colors */
   --color-primary-50:  #eff6ff;
   --color-primary-100: #dbeafe;
   --color-primary-200: #bfdbfe;
@@ -10,7 +15,55 @@
   --color-primary-800: #1e40af;
 
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* ============================================================================
+     ATTENDANCE MODULE — Custom colors (Tailwind v4 syntax)
+     Used only in /attendance/* pages
+     ============================================================================ */
+
+  /* Base palette */
+  --color-canvas: #05070D;
+  --color-surface: #0E1422;
+  --color-ink: #F8FAFC;
+  --color-muted: #94A3B8;
+  --color-relay-blue: #2563EB;
+  --color-shift-gold: #EF4444;
+
+  /* Semantic state colors — positive (green) */
+  --color-positive-text: #86EFAC;
+  --color-positive-fill: rgba(34,197,94,0.12);
+  --color-positive-line: rgba(34,197,94,0.36);
+
+  /* Semantic state colors — neutral (gray) */
+  --color-neutral-text: #CBD5E1;
+  --color-neutral-fill: rgba(148,163,184,0.10);
+  --color-neutral-line: rgba(148,163,184,0.22);
+
+  /* Semantic state colors — info (blue) */
+  --color-info-text: #93C5FD;
+  --color-info-fill: rgba(37,99,235,0.16);
+  --color-info-line: rgba(59,130,246,0.42);
+
+  /* Semantic state colors — warning (amber) */
+  --color-warning-text: #FBBF24;
+  --color-warning-fill: rgba(245,158,11,0.13);
+  --color-warning-line: rgba(245,158,11,0.42);
+
+  /* Semantic state colors — critical (red) */
+  --color-critical-text: #FCA5A5;
+  --color-critical-fill: rgba(220,38,38,0.15);
+  --color-critical-line: rgba(239,68,68,0.44);
+
+  /* Custom shadows */
+  --shadow-glass: 0 28px 90px rgba(0, 0, 0, 0.54);
+  --shadow-raised: 0 1px 0 rgba(255,255,255,0.06), 0 12px 30px rgba(0,0,0,0.28);
+  --shadow-crafted: 0 1px 0 rgba(255,255,255,0.05), 0 24px 70px rgba(0,0,0,0.42);
+  --shadow-popover: 0 20px 60px rgba(0,0,0,0.52), 0 0 0 1px rgba(255,255,255,0.08);
 }
+
+/* ============================================================================
+   HRMS BASE LAYOUT (existing — preserved)
+   ============================================================================ */
 
 html,
 body,
@@ -23,4 +76,107 @@ body,
 
 *, *::before, *::after {
   box-sizing: border-box;
+}
+
+/* ============================================================================
+   ATTENDANCE MODULE — Global keyframes & utilities
+   Prefixed with 'attendance-' where possible to avoid conflicts
+   ============================================================================ */
+
+@keyframes attendance-shimmer {
+  100% { transform: translateX(100%); }
+}
+
+@keyframes attendance-rail-shimmer {
+  100% { transform: translateX(260%); }
+}
+
+/* Shimmer skeleton for attendance loading states */
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.skeleton-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.20), transparent);
+  animation: attendance-shimmer 1.35s ease-in-out infinite;
+}
+
+.shift-rail-line {
+  position: relative;
+  overflow: hidden;
+}
+
+.shift-rail-line::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  width: 96px;
+  transform: translateX(-120%);
+  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.42), transparent);
+  animation: attendance-rail-shimmer 1.8s ease-in-out infinite;
+}
+
+/* Smooth state transitions for badges */
+.state-pop {
+  transition:
+    transform 180ms ease,
+    opacity 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+/* Monospace tabular data (for punch times, counts) */
+.tabular-data {
+  font-family:
+    "Roboto Mono", "SFMono-Regular", Consolas,
+    "Liberation Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom scrollbar for attendance tables (dark theme) */
+.table-scroll {
+  scrollbar-color: rgba(59, 130, 246, 0.48) transparent;
+  scrollbar-width: thin;
+}
+
+.table-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.table-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.table-scroll::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+  background-color: rgba(59, 130, 246, 0.38);
+}
+
+.table-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(59, 130, 246, 0.68);
+}
+
+/* ============================================================================
+   ATTENDANCE MODULE — Reduced motion support
+   ============================================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer::after,
+  .shift-rail-line::after {
+    animation: none !important;
+  }
+  .state-pop {
+    transition: none !important;
+  }
 }

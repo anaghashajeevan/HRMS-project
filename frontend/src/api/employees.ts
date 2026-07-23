@@ -91,4 +91,33 @@ export const employeesApi = {
     );
     return data;
   },
+    bulkImportTemplate: async (): Promise<Blob> => {
+    const { data } = await api.get('/employees/bulk-import-template/', {
+      responseType: 'blob',
+    });
+    return data;
+  },
+
+  bulkImport: async (
+    file: File,
+    skipExisting: boolean = true
+  ): Promise<{
+    ok: boolean;
+    message: string;
+    total_rows: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    errors: string[];
+    created_employees: Array<{ employee_id: string; full_name: string; email: string }>;
+  }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('skip_existing', skipExisting ? 'true' : 'false');
+
+    const { data } = await api.post('/employees/bulk-import/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
 };

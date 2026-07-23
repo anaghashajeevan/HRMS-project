@@ -304,6 +304,12 @@ import ReimbursementEmailControlPage from './pages/reimbursement/EmailControlPag
 import ReimbursementSettingsPage from './pages/reimbursement/ReimbursementSettingsPage';
 import ReimbursementProfilePage from './pages/reimbursement/ReimbursementProfilePage';
 
+// ==================== ATTENDANCE ====================
+import { AttendanceLayout } from './components/attendance/AttendanceLayout';
+import AttendanceDashboardPage from './pages/attendance/AttendanceDashboardPage';
+import LiveDashboardPage from './pages/attendance/LiveDashboardPage';
+import AttendanceSettingsPage from './pages/attendance/AttendanceSettingsPage';
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -706,6 +712,28 @@ export default function App() {
     </ProtectedRoute>
   }
 />
+{/* ==================== ATTENDANCE ==================== */}
+<Route
+  path="/attendance"
+  element={
+    <ProtectedRoute
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}
+    >
+      <AttendanceLayout />
+    </ProtectedRoute>
+  }
+>
+  <Route index element={<AttendanceDashboardPage />} />
+  <Route path="live" element={<LiveDashboardPage />} />
+  <Route
+    path="settings"
+    element={
+      <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+        <AttendanceSettingsPage />
+      </ProtectedRoute>
+    }
+  />
+</Route>
           {/* ==================== FALLBACKS ==================== */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

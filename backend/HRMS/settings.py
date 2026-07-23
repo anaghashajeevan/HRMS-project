@@ -191,6 +191,7 @@ INSTALLED_APPS = [
     # Your apps (add your apps here)
     'HRMSapp',  # Your app
     'reimbursementapp',   
+    'attendanceapp',
 ]
 
 MIDDLEWARE = [

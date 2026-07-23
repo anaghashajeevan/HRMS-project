@@ -34,6 +34,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/', include('HRMSapp.urls')),
     path('api/v1/reimbursements/', include('reimbursementapp.urls')),  # ⬅️ ADD
+    path('api/v1/attendance/', include('attendanceapp.urls')),  # ⬅️ ADD
 ]
 
 if settings.DEBUG:

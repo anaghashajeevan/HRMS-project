@@ -1,0 +1,7 @@
+from django.apps import AppConfig
+
+
+class AttendanceappConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'attendanceapp'
+    verbose_name = 'Attendance Automation'
