@@ -17,6 +17,7 @@ interface ImportResult {
   updated: number;
   skipped: number;
   errors: string[];
+  warnings?: string[]; 
   created_employees: Array<{ employee_id: string; full_name: string; email: string }>;
 }
 
@@ -132,7 +133,7 @@ export default function BulkImportModal({ isOpen, onClose, onSuccess }: BulkImpo
           </div>
 
           {/* Step 2: Required columns */}
-          <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-4">
+          {/* <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-4">
             <h3 className="font-semibold text-gray-900">Step 2: Required Columns</h3>
             <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-gray-700">
               <div>✅ Employee Code (e.g., NL001)</div>
@@ -146,7 +147,30 @@ export default function BulkImportModal({ isOpen, onClose, onSuccess }: BulkImpo
             <p className="mt-2 text-xs text-gray-500">
               Optional: Department, Gender (MALE/FEMALE/OTHER), Personal Email, Position
             </p>
-          </div>
+          </div> */}
+          {/* Step 2: Required columns */}
+<div className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-4">
+  <h3 className="font-semibold text-gray-900">Step 2: Choose Your Format</h3>
+
+  <div className="mt-3 space-y-3">
+    <div className="rounded-lg border border-green-200 bg-green-50 p-3">
+      <p className="text-sm font-semibold text-green-900">✅ Simple Format (Quick)</p>
+      <p className="mt-1 text-xs text-green-700">
+        <strong>Columns:</strong> Employee Code, Employee Name, Department, Email, Status
+      </p>
+      <p className="mt-1 text-xs text-green-700">
+        Missing fields (phone, DOB, DOJ) will use placeholder values. HR can update later.
+      </p>
+    </div>
+
+    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+      <p className="text-sm font-semibold text-blue-900">📋 Full Format (Complete)</p>
+      <p className="mt-1 text-xs text-blue-700">
+        <strong>Columns:</strong> Employee Code, First Name, Last Name, Email, Phone, Date of Joining, Date of Birth, Department, Gender
+      </p>
+    </div>
+  </div>
+</div>
 
           {/* Step 3: Upload */}
           <div className="mb-6">
@@ -187,6 +211,15 @@ export default function BulkImportModal({ isOpen, onClose, onSuccess }: BulkImpo
           {result && (
             <div className="mb-6 rounded-xl border border-gray-200 p-4">
               <h3 className="mb-3 font-semibold text-gray-900">Import Results</h3>
+              {(result as any).template_format && (
+        <span className={`text-xs px-2 py-1 rounded-full ${
+          (result as any).template_format === 'FULL'
+            ? 'bg-green-100 text-green-700'
+            : 'bg-amber-100 text-amber-700'
+        }`}>
+          {(result as any).template_format} template
+        </span>
+      )}
               <div className="grid grid-cols-4 gap-3 text-center">
                 <div className="rounded-lg bg-blue-50 p-3">
                   <div className="text-2xl font-bold text-blue-600">{result.total_rows}</div>
@@ -205,7 +238,19 @@ export default function BulkImportModal({ isOpen, onClose, onSuccess }: BulkImpo
                   <div className="text-xs text-red-700">Errors</div>
                 </div>
               </div>
-
+               {(result as any).warnings && (result as any).warnings.length > 0 && (
+      <div className="mt-4 max-h-40 overflow-y-auto rounded-lg bg-amber-50 p-3">
+        <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-900">
+          <AlertCircle className="h-4 w-4" />
+          Warnings ({(result as any).warnings.length}):
+        </div>
+        <ul className="space-y-1 text-xs text-amber-800">
+          {(result as any).warnings.map((warn: string, idx: number) => (
+            <li key={idx}>• {warn}</li>
+          ))}
+        </ul>
+      </div>
+    )}
               {result.errors.length > 0 && (
                 <div className="mt-4 max-h-40 overflow-y-auto rounded-lg bg-red-50 p-3">
                   <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-red-900">

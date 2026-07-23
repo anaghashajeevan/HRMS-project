@@ -198,7 +198,11 @@ class Employee(models.Model):
 
     @property
     def full_name(self):
-        return f"{self.first_name} {self.last_name}"
+        """Combine first + last name, gracefully handling missing last name."""
+        parts = [self.first_name.strip() if self.first_name else '']
+        if self.last_name and self.last_name.strip() and self.last_name.strip() != '-':
+            parts.append(self.last_name.strip())
+        return ' '.join(parts).strip()
 
 
 # ==============================================================================
