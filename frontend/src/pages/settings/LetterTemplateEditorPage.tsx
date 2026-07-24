@@ -53,6 +53,22 @@ const AVAILABLE_VARIABLES = [
   { key: 'peer_score', desc: 'Aggregated peer score %', group: 'Performance' },
   { key: 'manager_score', desc: "Manager's assessment %", group: 'Performance' },
   { key: 'kra_breakdown', desc: 'KRA-wise score breakdown', group: 'Performance' },
+
+  { key: 'leave_type', desc: 'Leave type name (e.g. Casual Leave)', group: 'Leave' },
+  { key: 'leave_type_code', desc: 'Leave code (e.g. CL, SL)', group: 'Leave' },
+  { key: 'start_date', desc: 'Leave start date', group: 'Leave' },
+  { key: 'end_date', desc: 'Leave end date', group: 'Leave' },
+  { key: 'total_days', desc: 'Total leave days', group: 'Leave' },
+  { key: 'is_half_day', desc: '"Yes" or "No"', group: 'Leave' },
+  { key: 'half_day_period', desc: '"Morning" or "Afternoon"', group: 'Leave' },
+  { key: 'application_number', desc: 'Reference number (e.g. LEAVE-2026-0001)', group: 'Leave' },
+  { key: 'contact_during_leave', desc: 'Emergency contact', group: 'Leave' },
+  { key: 'handover_to', desc: 'Colleague handling responsibilities', group: 'Leave' },
+  { key: 'handover_notes', desc: 'Handover instructions', group: 'Leave' },
+  { key: 'approver_name', desc: 'Current approver name', group: 'Leave' },
+  { key: 'manager_name', desc: 'Reporting manager name', group: 'Leave' },
+  { key: 'is_lop', desc: '"Yes" or "No"', group: 'Leave' },
+  { key: 'lop_days', desc: 'Days that will be Loss of Pay', group: 'Leave' },
 ];
 
 // Preview data — used to render sample PDF with realistic values
@@ -86,6 +102,21 @@ const PREVIEW_DATA: Record<string, string> = {
   manager_score: '92',
   kra_breakdown:
     '• Code Quality (Weight: 30%) - Score: 95%\n• Team Collaboration (Weight: 25%) - Score: 88%\n• Sprint Delivery (Weight: 25%) - Score: 92%\n• Learning (Weight: 20%) - Score: 90%',
+  leave_type: 'Casual Leave',
+  leave_type_code: 'CL',
+  start_date: '25 July 2026',
+  end_date: '27 July 2026',
+  total_days: '3',
+  is_half_day: 'No',
+  half_day_period: '—',
+  application_number: 'LEAVE-2026-0042',
+  contact_during_leave: '+91 98765 43210',
+  handover_to: 'Nisha Yadav',
+  handover_notes: 'Please monitor emails and cover urgent client calls',
+  approver_name: 'John Manager',
+  manager_name: 'John Manager',
+  is_lop: 'No',
+  lop_days: '0',
 };
 
 // ==============================================================================
@@ -338,6 +369,10 @@ export default function LetterTemplateEditorPage() {
     <option value="APPRAISAL_LETTER">Appraisal Letter</option>
     <option value="PIP_LETTER">Performance Improvement Plan (PIP)</option>
   </optgroup>
+  <optgroup label="🏖️ Leave Letters">
+    <option value="LEAVE_APPLICATION">Leave Application Letter</option>
+    <option value="LEAVE_APPROVAL">Leave Approval Letter</option>
+  </optgroup>
                     </select>
                   </div>
                   <div className="md:col-span-2">
@@ -513,66 +548,71 @@ export default function LetterTemplateEditorPage() {
   </div>
 
   {/* Group by category */}
-  {['Common', 'Lifecycle', 'Performance'].map((group) => {
-    const groupVars = AVAILABLE_VARIABLES.filter((v) => {
-  if (v.group !== group) return false;
-  // Filter out irrelevant groups based on template type
-  const isPerformanceTemplate = ['PERFORMANCE_RATING', 'APPRAISAL_LETTER', 'PIP_LETTER'].includes(
-    templateType
-  );
-  const isLifecycleTemplate = [
-    'PROMOTION', 'TRANSFER', 'REDESIGNATION', 'CONFIRMATION', 'MANAGER_CHANGE'
-  ].includes(templateType);
-  
-  if (group === 'Lifecycle' && isPerformanceTemplate) return false;
-  if (group === 'Performance' && isLifecycleTemplate) return false;
-  return true;
-});
-    if (groupVars.length === 0) return null;
+  {['Common', 'Lifecycle', 'Performance', 'Leave'].map((group) => {
+  const groupVars = AVAILABLE_VARIABLES.filter((v) => {
+    if (v.group !== group) return false;
+    
+    const isPerformanceTemplate = ['PERFORMANCE_RATING', 'APPRAISAL_LETTER', 'PIP_LETTER'].includes(templateType);
+    const isLifecycleTemplate = [
+      'PROMOTION', 'TRANSFER', 'REDESIGNATION', 'CONFIRMATION', 'MANAGER_CHANGE'
+    ].includes(templateType);
+    const isLeaveTemplate = ['LEAVE_APPLICATION', 'LEAVE_APPROVAL'].includes(templateType);
+    
+    if (group === 'Lifecycle' && !isLifecycleTemplate) return false;
+    if (group === 'Performance' && !isPerformanceTemplate) return false;
+    if (group === 'Leave' && !isLeaveTemplate) return false;
+    
+    return true;
+  });
+  if (groupVars.length === 0) return null;
 
-    const groupColor =
-      group === 'Common'
-        ? 'text-gray-600'
-        : group === 'Lifecycle'
-        ? 'text-blue-600'
-        : 'text-purple-600';
+  const groupColor =
+    group === 'Common'
+      ? 'text-gray-600'
+      : group === 'Lifecycle'
+      ? 'text-blue-600'
+      : group === 'Performance'
+      ? 'text-purple-600'
+      : 'text-green-600';  // 🆕 Leave = green
 
-    const groupBadge =
-      group === 'Common'
-        ? '📌 All Letters'
-        : group === 'Lifecycle'
-        ? '🔄 Promotion/Transfer'
-        : '🎯 Rating/PIP';
+  const groupBadge =
+    group === 'Common'
+      ? '📌 All Letters'
+      : group === 'Lifecycle'
+      ? '🔄 Promotion/Transfer'
+      : group === 'Performance'
+      ? '🎯 Rating/PIP'
+      : '🏖️ Leave Letters';  // 🆕
 
-    return (
-      <div key={group} className="mb-3 last:mb-0">
-        <div
-          className={`mb-1.5 flex items-center gap-1 border-b border-gray-100 pb-1 text-xs font-bold ${groupColor}`}
-        >
-          {groupBadge}
-        </div>
-        <div className="space-y-0.5">
-          {groupVars.map((v) => (
-            <button
-              key={v.key}
-              onClick={() => insertVariable(v.key)}
-              className="group flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-primary-50"
-            >
-              <Copy className="mt-0.5 h-3 w-3 flex-shrink-0 text-gray-400 group-hover:text-primary-600" />
-              <div className="flex-1 min-w-0">
-                <code className="block truncate text-xs font-medium text-primary-700">
-                  {'{{'}
-                  {v.key}
-                  {'}}'}
-                </code>
-                <span className="text-[10px] text-gray-500">{v.desc}</span>
-              </div>
-            </button>
-          ))}
-        </div>
+  return (
+    <div key={group} className="mb-3 last:mb-0">
+      <div
+        className={`mb-1.5 flex items-center gap-1 border-b border-gray-100 pb-1 text-xs font-bold ${groupColor}`}
+      >
+        {groupBadge}
       </div>
-    );
-  })}
+      <div className="space-y-0.5">
+        {groupVars.map((v) => (
+          <button
+            key={v.key}
+            onClick={() => insertVariable(v.key)}
+            className="group flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-primary-50"
+          >
+            <Copy className="mt-0.5 h-3 w-3 flex-shrink-0 text-gray-400 group-hover:text-primary-600" />
+            <div className="flex-1 min-w-0">
+              <code className="block truncate text-xs font-medium text-primary-700">
+                {'{{'}
+                {v.key}
+                {'}}'}
+              </code>
+              <span className="text-[10px] text-gray-500">{v.desc}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+})}
 </div>
 
               {/* Preview Toggle */}

@@ -1,0 +1,42 @@
+LEAVE APPROVAL REQUIRED
+========================
+
+Hello {{ approver_name }},
+
+{% if is_escalation %}
+🔔 ESCALATED APPROVAL
+
+This leave application was approved in previous steps and now needs your final approval.
+
+Previously approved by:
+{% for prev in previous_approvals %}
+  - Step {{ prev.step_number }}: {{ prev.step_name }} by {{ prev.approver.full_name }}
+{% endfor %}
+{% else %}
+{{ employee_name }} ({{ employee_code }}) has submitted a leave application requiring your approval.
+{% endif %}
+
+APPLICATION DETAILS
+-------------------
+Application: {{ application_number }}
+Employee   : {{ employee_name }} ({{ employee_code }})
+Department : {{ employee_department }}
+Position   : {{ employee_position }}
+Leave Type : {{ leave_type_code }} - {{ leave_type_name }}
+Start Date : {{ start_date }}
+End Date   : {{ end_date }}
+Total Days : {{ total_days }} day(s){% if is_half_day %} ({{ half_day_period }}){% endif %}
+Reason     : {{ reason }}
+Handover   : {{ handover_to }}
+Applied    : {{ applied_at }}
+
+{% if is_lop and lop_days > 0 %}
+⚠️ LOP: {{ lop_days }} day(s) will be Loss of Pay.
+{% endif %}
+
+📎 Attachment: Leave application letter (PDF)
+
+Take action: {{ action_url }}
+
+---
+{{ company_name }}

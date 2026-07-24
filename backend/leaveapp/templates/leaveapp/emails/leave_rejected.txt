@@ -1,0 +1,20 @@
+LEAVE NOT APPROVED ❌
+====================
+
+Hello {{ employee_name }},
+
+We regret to inform you that your leave application has been rejected.
+
+Application : {{ application_number }}
+Leave Type  : {{ leave_type_name }}
+Requested   : {{ start_date }} to {{ end_date }}
+Total Days  : {{ total_days }} day(s)
+Rejected By : {{ rejected_by }}
+
+REASON:
+{{ rejection_reason }}
+
+Please contact your manager or HR for clarifications.
+
+---
+{{ company_name }}

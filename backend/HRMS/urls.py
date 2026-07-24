@@ -33,8 +33,9 @@ from django.urls import include, path
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/', include('HRMSapp.urls')),
-    path('api/v1/reimbursements/', include('reimbursementapp.urls')),  # ⬅️ ADD
-    path('api/v1/attendance/', include('attendanceapp.urls')),  # ⬅️ ADD
+    path('api/v1/reimbursements/', include('reimbursementapp.urls')),
+    path('api/v1/attendance/', include('attendanceapp.urls')), 
+    path('api/v1/leave/', include('leaveapp.urls')),
 ]
 
 if settings.DEBUG:

@@ -8,7 +8,11 @@ export type ApproverType =
   | 'DEPARTMENT_HEAD'
   | 'HR_ADMIN'
   | 'SYSTEM_ADMIN'
-  | 'SPECIFIC_EMPLOYEE';
+  | 'SPECIFIC_EMPLOYEE'
+  | 'LEAVE_APPLICATION'   
+  | 'LEAVE_APPROVAL'; 
+
+export type ModuleType = 'LIFECYCLE' | 'LEAVE';
 
 export interface WorkflowStep {
   id?: string;
@@ -24,7 +28,7 @@ export interface WorkflowStep {
 export interface ApprovalWorkflow {
   id: string;
   name: string;
-  module: 'LIFECYCLE';
+  module: ModuleType;
   module_display?: string;
   description: string;
   is_active: boolean;
@@ -37,7 +41,7 @@ export interface ApprovalWorkflow {
 
 export interface ApprovalWorkflowCreatePayload {
   name: string;
-  module: 'LIFECYCLE';
+  module: ModuleType;
   description?: string;
   is_active: boolean;
   steps: Omit<WorkflowStep, 'id' | 'approver_type_display' | 'specific_employee_name'>[];

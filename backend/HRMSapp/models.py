@@ -565,6 +565,7 @@ class ApprovalWorkflow(models.Model):
     """
     MODULE_CHOICES = [
         ('LIFECYCLE', 'Lifecycle Change'),
+         ('LEAVE', 'Leave Application'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -639,6 +640,8 @@ class LetterTemplate(models.Model):
         ('PERFORMANCE_RATING', 'Performance Rating Letter'),
         ('APPRAISAL_LETTER', 'Appraisal Letter'),
         ('PIP_LETTER', 'Performance Improvement Plan Letter'),
+        ('LEAVE_APPLICATION', 'Leave Application Letter'), 
+        ('LEAVE_APPROVAL', 'Leave Approval Letter'), 
     ]
     CREATION_METHOD_CHOICES = [
         ('AI', 'AI Generated'),

@@ -192,6 +192,7 @@ INSTALLED_APPS = [
     'HRMSapp',  # Your app
     'reimbursementapp',   
     'attendanceapp',
+    'leaveapp',
 ]
 
 MIDDLEWARE = [

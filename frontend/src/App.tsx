@@ -309,6 +309,13 @@ import { AttendanceLayout } from './components/attendance/AttendanceLayout';
 import AttendanceDashboardPage from './pages/attendance/AttendanceDashboardPage';
 import LiveDashboardPage from './pages/attendance/LiveDashboardPage';
 import AttendanceSettingsPage from './pages/attendance/AttendanceSettingsPage';
+import LeaveBalancesPage from './pages/leave/LeaveBalancesPage';
+import LeaveTypesPage from './pages/leave/LeaveTypesPage';
+import MyLeavePage from './pages/leave/MyLeavePage';
+import ApplyLeavePage from './pages/leave/ApplyLeavePage';
+import PendingApprovalsPage from './pages/leave/PendingApprovalsPage';
+import TeamCalendarPage from './pages/leave/TeamCalendarPage';
+import MyLeaveCalendarPage from './pages/leave/MyLeaveCalendarPage';
 
 export default function App() {
   return (
@@ -734,6 +741,62 @@ export default function App() {
     }
   />
 </Route>
+<Route
+  path="/leave/balances"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <LeaveBalancesPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/leave/types"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <LeaveTypesPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/leave"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+      <MyLeavePage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/leave/apply"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+      <ApplyLeavePage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/leave/approvals"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+      <PendingApprovalsPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/leave/team-calendar"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+      <TeamCalendarPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/leave/my-calendar"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+      <MyLeaveCalendarPage />
+    </ProtectedRoute>
+  }
+/>
           {/* ==================== FALLBACKS ==================== */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

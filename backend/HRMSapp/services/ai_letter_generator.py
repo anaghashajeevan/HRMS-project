@@ -21,6 +21,23 @@ Available placeholders (use with double curly braces):
 - {{current_date}} - Today's date
 - {{company_name}} - Company name
 - {{reason}} - Reason for the change
+
+Leave-specific (only for LEAVE_APPLICATION and LEAVE_APPROVAL templates):
+- {{leave_type}} - Leave type name (e.g., "Casual Leave")
+- {{leave_type_code}} - Short code (e.g., "CL")
+- {{start_date}} - Leave start date
+- {{end_date}} - Leave end date
+- {{total_days}} - Total leave days
+- {{is_half_day}} - "Yes" or "No"
+- {{half_day_period}} - "Morning" or "Afternoon"
+- {{application_number}} - Leave application reference
+- {{contact_during_leave}} - Emergency contact
+- {{handover_to}} - Colleague handling responsibilities
+- {{handover_notes}} - Handover instructions
+- {{manager_name}} - Reporting manager name
+- {{approver_name}} - Current approver name
+- {{is_lop}} - "Yes" or "No"
+- {{lop_days}} - Days that will be LOP
 """
 
 SYSTEM_PROMPT = f"""You are a professional HR letter template generator.

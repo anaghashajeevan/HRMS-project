@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f7fa; margin: 0; padding: 20px; color: #1f2937; }
+        .container { max-width: 640px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+        .header { padding: 32px; text-align: center; color: white; }
+        .header.new { background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); }
+        .header.escalation { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+        .header h1 { margin: 0; font-size: 24px; font-weight: 700; }
+        .header p { margin: 8px 0 0 0; opacity: 0.9; font-size: 14px; }
+        .content { padding: 32px; }
+        .escalation-notice { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px 16px; margin: 16px 0; border-radius: 4px; }
+        .details-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        .details-table th, .details-table td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        .details-table th { background: #f9fafb; font-weight: 600; color: #374151; width: 40%; font-size: 13px; }
+        .details-table td { color: #1f2937; font-size: 14px; }
+        .previous-approvals { background: #f0fdf4; padding: 12px 16px; border-radius: 8px; margin: 16px 0; }
+        .previous-approvals h4 { margin: 0 0 8px 0; color: #166534; }
+        .previous-approvals ul { margin: 0; padding-left: 20px; color: #166534; font-size: 13px; }
+        .cta-section { text-align: center; margin: 32px 0; }
+        .cta-button { display: inline-block; background: #2563eb; color: white !important; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px; }
+        .attachment-note { background: #eff6ff; border-left: 4px solid #2563eb; padding: 12px 16px; margin: 16px 0; border-radius: 4px; font-size: 13px; }
+        .lop-warning { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px 16px; margin: 16px 0; border-radius: 4px; }
+        .footer { background: #f9fafb; padding: 24px; text-align: center; color: #6b7280; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header {% if is_escalation %}escalation{% else %}new{% endif %}">
+            {% if is_escalation %}
+                <h1>🔔 Escalated Leave Approval</h1>
+                <p>Application #{{ application_number }} needs your approval</p>
+            {% else %}
+                <h1>⏳ Leave Approval Required</h1>
+                <p>Application #{{ application_number }}</p>
+            {% endif %}
+        </div>
+
+        <div class="content">
+            <p>Hello <strong>{{ approver_name }}</strong>,</p>
+
+            {% if is_escalation %}
+                <div class="escalation-notice">
+                    <strong>🔔 Escalation Notice:</strong> This leave application has been approved in previous steps and now requires your review and final approval.
+                </div>
+
+                {% if previous_approvals %}
+                <div class="previous-approvals">
+                    <h4>✅ Previously Approved By:</h4>
+                    <ul>
+                        {% for prev in previous_approvals %}
+                        <li>
+                            Step {{ prev.step_number }}: {{ prev.step_name }} — 
+                            <strong>{{ prev.approver.full_name }}</strong>
+                            {% if prev.comments %}
+                                <br><em>Comments: {{ prev.comments }}</em>
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+            {% else %}
+                <p><strong>{{ employee_name }}</strong> ({{ employee_code }}) has submitted a leave application that requires your approval.</p>
+            {% endif %}
+
+            <div class="attachment-note">
+                📎 <strong>Attachment:</strong> The complete leave application letter is attached as a PDF for your reference.
+            </div>
+
+            <table class="details-table">
+                <tr>
+                    <th>Employee</th>
+                    <td>{{ employee_name }} ({{ employee_code }})</td>
+                </tr>
+                <tr>
+                    <th>Department</th>
+                    <td>{{ employee_department }}</td>
+                </tr>
+                <tr>
+                    <th>Position</th>
+                    <td>{{ employee_position }}</td>
+                </tr>
+                <tr>
+                    <th>Leave Type</th>
+                    <td><strong>{{ leave_type_code }}</strong> - {{ leave_type_name }}</td>
+                </tr>
+                <tr>
+                    <th>Start Date</th>
+                    <td>{{ start_date }}</td>
+                </tr>
+                <tr>
+                    <th>End Date</th>
+                    <td>{{ end_date }}</td>
+                </tr>
+                <tr>
+                    <th>Total Days</th>
+                    <td><strong>{{ total_days }}</strong> day(s){% if is_half_day %} ({{ half_day_period }}){% endif %}</td>
+                </tr>
+                <tr>
+                    <th>Reason</th>
+                    <td>{{ reason }}</td>
+                </tr>
+                {% if contact_during_leave %}
+                <tr>
+                    <th>Contact During Leave</th>
+                    <td>{{ contact_during_leave }}</td>
+                </tr>
+                {% endif %}
+                <tr>
+                    <th>Handover To</th>
+                    <td>{{ handover_to }}</td>
+                </tr>
+                {% if handover_notes and handover_notes != '—' %}
+                <tr>
+                    <th>Handover Notes</th>
+                    <td>{{ handover_notes }}</td>
+                </tr>
+                {% endif %}
+                <tr>
+                    <th>Applied On</th>
+                    <td>{{ applied_at }}</td>
+                </tr>
+            </table>
+
+            {% if is_lop and lop_days > 0 %}
+            <div class="lop-warning">
+                <strong>⚠️ LOP Notice:</strong> {{ lop_days }} day(s) will be marked as Loss of Pay due to insufficient leave balance.
+            </div>
+            {% endif %}
+
+            <div class="cta-section">
+                <a href="{{ action_url }}" class="cta-button">
+                    Review & Take Action →
+                </a>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p><strong>{{ company_name }}</strong></p>
+            <p>This is an automated notification from HRMS Leave Management System.</p>
+            <p>&copy; {{ current_year }}</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,21 @@
+LEAVE APPROVED ✅
+==================
+
+Hello {{ employee_name }},
+
+Great news! Your leave application has been APPROVED.
+
+Application : {{ application_number }}
+Leave Type  : {{ leave_type_code }} - {{ leave_type_name }}
+Start Date  : {{ start_date }}
+End Date    : {{ end_date }}
+Total Days  : {{ total_days }} day(s)
+Approved By : {{ approved_by }}
+Approved On : {{ approved_at }}
+
+📎 Approval letter attached (PDF).
+
+View in HRMS: {{ action_url }}
+
+---
+{{ company_name }}

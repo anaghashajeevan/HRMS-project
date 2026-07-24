@@ -921,6 +921,8 @@ import {
   Target, TrendingUp, Award, ClipboardCheck, UserCheck, Users2,
   PieChart, ChevronDown, ChevronRight, Receipt, Upload,
   FileSpreadsheet, Mail, Cog, MonitorCheck, CheckCircle2,
+  Sparkles,
+  Plus,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -1082,11 +1084,54 @@ const mainNav: NavEntry[] = [
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
   },
   {
-    label: 'Leave',
-    icon: ClipboardList,
-    to: '/leave',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
-  },
+  label: 'Leave',
+  icon: ClipboardList,
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  children: [
+    {
+      label: 'My Leave',
+      icon: Calendar,
+      to: '/leave',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    },
+    {
+      label: 'My Calendar',
+      icon: Calendar,
+      to: '/leave/my-calendar',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    },
+    {
+      label: 'Apply Leave',
+      icon: Plus,
+      to: '/leave/apply',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    },
+    {
+      label: 'Pending Approvals',
+      icon: CheckSquare,
+      to: '/leave/approvals',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+    },
+    {
+      label: 'Team Calendar',
+      icon: Users,
+      to: '/leave/team-calendar',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+    },
+    {
+      label: 'Leave Types',
+      icon: Sparkles,
+      to: '/leave/types',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    },
+    {
+      label: 'Leave Balances',
+      icon: TrendingUp,
+      to: '/leave/balances',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    },
+  ],
+},
   {
     label: 'Payroll',
     icon: DollarSign,
