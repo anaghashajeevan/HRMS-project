@@ -548,31 +548,64 @@ def _seconds_to_hours_decimal(seconds: int) -> float:
     return round((seconds or 0) / 3600, 2)
 
 
-def _day_status(attendance_row, day, holiday_dates, leaves_by_date, is_future):
+def _day_status(attendance_row, day, holiday_dates, leaves_by_date, is_future, today):
     """
     Determine status for a single day.
-    New statuses: 'on_leave', 'on_half_leave' (integrated with leave module)
+    
+    Priority logic (NEW):
+    1. Future date → 'future' (or 'will_be_on_leave' if leave approved)
+    2. Holiday → 'holiday'
+    3. Weekend → 'weekend' or 'weekend_present'
+    4. Leave approved:
+       ├─ If employee punched in → 'present' (they showed up!)
+       └─ If no punch → 'on_leave' (actually took leave)
+    5. No leave, no punch → 'absent'
+    6. Missing punch → 'missing_punch'
+    7. Punched in properly → 'present'
     """
+    leave_info = leaves_by_date.get(day)
+    has_punch = attendance_row and (attendance_row.punch_in or attendance_row.punch_out)
+    has_full_attendance = attendance_row and attendance_row.punch_in and attendance_row.punch_out
+    
+    # 1. FUTURE DATE
     if is_future:
+        # If leave is approved for a future date, show "will be on leave"
+        if leave_info:
+            if leave_info['is_half_day']:
+                return 'will_be_on_half_leave'
+            return 'will_be_on_leave'
         return 'future'
+    
+    # 2. HOLIDAY
     if _is_holiday(day, holiday_dates):
         return 'holiday'
+    
+    # 3. WEEKEND
     if _is_weekend(day):
-        if attendance_row and (attendance_row.punch_in or attendance_row.punch_out):
+        if has_punch:
             return 'weekend_present'
         return 'weekend'
-
-    # 🔥 NEW: Check if on approved leave
-    leave_info = leaves_by_date.get(day)
+    
+    # 4. LEAVE APPROVED — Cross-check with actual attendance
     if leave_info:
-        # Full-day leave: on_leave (regardless of punch)
-        # Half-day leave: on_half_leave (they may have punched for half day)
         if leave_info['is_half_day']:
-            return 'on_half_leave'
+            # Half-day leave: check if they came for the other half
+            if has_punch:
+                return 'half_leave_present'  # Half leave + came for other half
+            return 'on_half_leave'  # Took half leave, no attendance
         else:
-            return 'on_leave'
-
-    # Regular attendance logic
+            # Full-day leave: check if they came at all
+            if has_full_attendance:
+                # 🎯 Employee CAME even though on leave — mark as present
+                return 'leave_but_present'
+            elif has_punch:
+                # Partial punch on leave day
+                return 'leave_but_partial'
+            else:
+                # Actually took the leave
+                return 'on_leave'
+    
+    # 5-7. Regular attendance logic (no leave)
     if not attendance_row:
         return 'absent'
     if attendance_row.missing_punch:
@@ -634,7 +667,7 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int):
         is_future = current > today
         row = rows_by_date.get(current)
         leave_info = leaves_by_date.get(current)
-        status = _day_status(row, current, holiday_dates, leaves_by_date, is_future)
+        status = _day_status(row, current, holiday_dates, leaves_by_date, is_future, today)
 
         # Count working days
         is_working_day = not _is_weekend(current) and not _is_holiday(current, holiday_dates)
@@ -651,26 +684,59 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int):
             present_days += 1
             total_worked_seconds += worked_seconds
             total_break_seconds += break_seconds
+
         elif status == 'missing_punch':
             missing_punch_days += 1
             total_worked_seconds += worked_seconds
             total_break_seconds += break_seconds
+
         elif status == 'absent':
             absent_days += 1
+
         elif status == 'weekend_present':
             weekend_worked_days += 1
             total_worked_seconds += worked_seconds
             total_break_seconds += break_seconds
+
+        #  NEW STATUSES
         elif status == 'on_leave':
             on_leave_days += 1
             if leave_info and leave_info.get('is_lop'):
                 lop_days += 1
+
+        elif status == 'will_be_on_leave':
+            # Don't count in any stats — future planned leave
+            pass
+
         elif status == 'on_half_leave':
             on_half_leave_days += 1
-            # Half-day = 0.5 days
             if row and worked_seconds > 0:
                 total_worked_seconds += worked_seconds
                 total_break_seconds += break_seconds
+
+        elif status == 'will_be_on_half_leave':
+            pass
+
+        #  NEW: Employee came despite being on leave
+        elif status == 'leave_but_present':
+            # Count as PRESENT (they showed up!)
+            present_days += 1
+            total_worked_seconds += worked_seconds
+            total_break_seconds += break_seconds
+            # Note: They still used a leave day from balance,
+            # but attendance-wise they were present
+
+        elif status == 'leave_but_partial':
+            # Partial attendance on leave day
+            present_days += 1  # or missing_punch_days, your call
+            total_worked_seconds += worked_seconds
+            total_break_seconds += break_seconds
+
+        elif status == 'half_leave_present':
+            # Half leave + came for other half
+            present_days += 1  # Count as present for the working half
+            total_worked_seconds += worked_seconds
+            total_break_seconds += break_seconds
 
         days.append({
             'date': current.isoformat(),
@@ -689,13 +755,13 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int):
             'break_time': _seconds_to_hhmm(break_seconds),
             'is_late': row.is_late if row else False,
             'is_early_exit': row.is_early_exit if row else False,
-            # 🔥 NEW: Leave info
+            #  NEW: Leave info
             'leave_info': leave_info,
         })
 
         current += timedelta(days=1)
 
-    # 🔥 UPDATED: Shortage calculation — exclude leave days from expected
+    #  UPDATED: Shortage calculation — exclude leave days from expected
     full_day_hours = float(settings_obj.full_day_min_hours)
 
     # Working days minus leave days

@@ -234,7 +234,12 @@ export type DayStatus =
   | 'holiday'
   | 'future'
   | 'on_leave'         
-  | 'on_half_leave';  
+  | 'on_half_leave'
+  | 'will_be_on_leave'        
+  | 'will_be_on_half_leave'    
+  | 'leave_but_present'        
+  | 'leave_but_partial'        
+  | 'half_leave_present';  
 
 export interface DayEntry {
   date: string;

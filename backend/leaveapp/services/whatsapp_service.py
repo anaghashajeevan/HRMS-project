@@ -1,5 +1,7 @@
 """
-WhatsApp service — communicates with Node.js gateway supporting multi-session.
+WhatsApp service with fallback support.
+- Primary: connected WhatsApp session via gateway
+- Fallback: static phone number in .env — receives alerts if primary fails
 """
 
 import logging
@@ -31,6 +33,11 @@ def is_whatsapp_enabled() -> bool:
     )
 
 
+def get_fallback_phone() -> str:
+    """Get fallback phone from .env."""
+    return getattr(settings, 'WHATSAPP_FALLBACK_PHONE', '') or ''
+
+
 def _url(endpoint: str) -> str:
     base = settings.WHATSAPP_GATEWAY_BASE_URL.rstrip('/')
     return f"{base}{endpoint}"
@@ -41,66 +48,59 @@ def _url(endpoint: str) -> str:
 # ==============================================================================
 
 def get_gateway_status() -> dict:
-    """Get overall gateway status including primary + fallback sessions."""
+    """Get overall gateway + session status."""
     try:
         response = requests.get(_url('/api/status'), timeout=10)
-        return response.json()
+        data = response.json()
+        # Add fallback info
+        data['fallback_phone'] = get_fallback_phone()
+        data['fallback_configured'] = bool(get_fallback_phone())
+        return data
     except requests.exceptions.ConnectionError:
         return {
             'gateway_online': False,
             'connected': False,
+            'fallback_phone': get_fallback_phone(),
+            'fallback_configured': bool(get_fallback_phone()),
             'error': 'Gateway not reachable. Is node server.js running?',
         }
     except Exception as exc:
         return {'gateway_online': False, 'error': str(exc)}
 
 
-def get_session_qr(session_key: str = 'primary') -> dict:
-    """Get QR code for a session (returns base64 data URL)."""
+def get_qr_code() -> dict:
+    """Get QR code data URL from gateway."""
     try:
-        response = requests.get(_url(f'/api/session/{session_key}/qr'), timeout=10)
+        response = requests.get(_url('/api/qr'), timeout=10)
         return response.json()
     except Exception as exc:
         return {'error': str(exc), 'has_qr': False}
 
 
-def connect_session(session_key: str = 'primary') -> dict:
-    """Start a session — call this then poll for QR."""
+def connect_whatsapp() -> dict:
+    """Start WhatsApp connection (needs QR scan)."""
     try:
-        response = requests.post(_url(f'/api/session/{session_key}/connect'), timeout=10)
+        response = requests.post(_url('/api/connect'), timeout=10)
         return response.json()
     except Exception as exc:
         return {'success': False, 'error': str(exc)}
 
 
-def disconnect_session(session_key: str = 'primary') -> dict:
-    """Disconnect a session (deletes auth)."""
+def disconnect_whatsapp() -> dict:
+    """Disconnect WhatsApp (deletes auth)."""
     try:
-        response = requests.post(_url(f'/api/session/{session_key}/disconnect'), timeout=10)
-        return response.json()
-    except Exception as exc:
-        return {'success': False, 'error': str(exc)}
-
-
-def switch_active_session(session_key: str) -> dict:
-    """Switch which session is active for sending."""
-    try:
-        response = requests.post(
-            _url('/api/session/switch'),
-            json={'session': session_key},
-            timeout=10,
-        )
+        response = requests.post(_url('/api/disconnect'), timeout=10)
         return response.json()
     except Exception as exc:
         return {'success': False, 'error': str(exc)}
 
 
 # ==============================================================================
-# SEND MESSAGE
+# SEND MESSAGE (with fallback logic)
 # ==============================================================================
 
-def send_whatsapp_message(to_phone: str, message: str) -> dict:
-    """Send WhatsApp message via active session."""
+def _send_direct(to_phone: str, message: str) -> dict:
+    """Send message directly via gateway (no fallback)."""
     if not is_whatsapp_enabled():
         return {'success': False, 'error': 'WhatsApp not enabled'}
     
@@ -117,12 +117,10 @@ def send_whatsapp_message(to_phone: str, message: str) -> dict:
         
         if response.status_code == 200:
             data = response.json()
-            logger.info(f"✅ WhatsApp sent to {cleaned} via {data.get('sent_via', 'unknown')}")
             return {
                 'success': True,
                 'message_id': data.get('messageId', ''),
                 'to': cleaned,
-                'sent_via': data.get('sent_via'),
             }
         
         error_data = response.json() if response.text else {}
@@ -134,16 +132,120 @@ def send_whatsapp_message(to_phone: str, message: str) -> dict:
     except requests.exceptions.ConnectionError:
         return {'success': False, 'error': 'Gateway not reachable'}
     except Exception as exc:
-        logger.exception(f"WhatsApp send failed: {exc}")
         return {'success': False, 'error': str(exc)}
 
 
+def send_whatsapp_message(to_phone: str, message: str, allow_fallback: bool = True) -> dict:
+    """
+    Send WhatsApp message with fallback support.
+    
+    Flow:
+    1. Try to send to `to_phone` via primary WhatsApp
+    2. If fails AND allow_fallback → send to WHATSAPP_FALLBACK_PHONE
+    3. Fallback message includes info about who it was originally meant for
+    
+    Args:
+        to_phone: Recipient phone
+        message: Message text
+        allow_fallback: Whether to use fallback on failure (default: True)
+    
+    Returns:
+        {
+            'success': bool,
+            'message_id': str,
+            'to': str,
+            'sent_via': 'primary' | 'fallback',
+            'fallback_used': bool,
+            'original_error': str (if fallback used),
+        }
+    """
+    # First attempt — primary
+    primary_result = _send_direct(to_phone, message)
+    
+    if primary_result.get('success'):
+        logger.info(f"✅ WhatsApp sent to {to_phone} via PRIMARY")
+        return {
+            **primary_result,
+            'sent_via': 'primary',
+            'fallback_used': False,
+        }
+    
+    # Primary failed
+    primary_error = primary_result.get('error', 'Unknown error')
+    logger.warning(f"⚠️ Primary WhatsApp failed for {to_phone}: {primary_error}")
+    
+    # Try fallback if enabled + configured
+    fallback_phone = get_fallback_phone()
+    
+    if not allow_fallback:
+        return primary_result
+    
+    if not fallback_phone:
+        logger.warning("No fallback phone configured — message lost")
+        return {
+            **primary_result,
+            'sent_via': 'primary',
+            'fallback_used': False,
+            'fallback_reason': 'not_configured',
+        }
+    
+    # Build fallback message with context
+    fallback_message = (
+        f"⚠️ *WhatsApp Fallback Alert*\n\n"
+        f"Primary WhatsApp couldn't reach the intended recipient.\n\n"
+        f"📱 *Intended for:* {_clean_phone_number(to_phone)}\n"
+        f"❌ *Error:* {primary_error[:150]}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"*Original Message:*\n\n"
+        f"{message}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"_Please forward this to the intended recipient or fix the WhatsApp connection._"
+    )
+    
+    fallback_result = _send_direct(fallback_phone, fallback_message)
+    
+    if fallback_result.get('success'):
+        logger.info(f"✅ WhatsApp sent to FALLBACK {fallback_phone} (primary failed)")
+        return {
+            'success': True,
+            'message_id': fallback_result.get('message_id', ''),
+            'to': fallback_phone,
+            'sent_via': 'fallback',
+            'fallback_used': True,
+            'original_recipient': to_phone,
+            'original_error': primary_error,
+        }
+    
+    # Both failed
+    logger.error(f"❌ BOTH primary AND fallback failed")
+    return {
+        'success': False,
+        'error': f'Primary: {primary_error} | Fallback: {fallback_result.get("error")}',
+        'sent_via': None,
+        'fallback_used': True,
+        'fallback_failed': True,
+    }
+
+
 # ==============================================================================
-# LEAVE-SPECIFIC MESSAGES (unchanged from before)
+# LEAVE-SPECIFIC MESSAGES
 # ==============================================================================
 
 def send_leave_approval_request_whatsapp(application, approver):
+    """WhatsApp approver about pending leave. Fallback to admin if fails."""
     if not approver.phone_number:
+        # No phone — send to fallback directly
+        fallback = get_fallback_phone()
+        if fallback:
+            msg = (
+                f"⚠️ *No Phone Number Alert*\n\n"
+                f"Leave approver *{approver.full_name}* has no phone number.\n\n"
+                f"Employee *{application.employee.full_name}* applied for "
+                f"{application.leave_type.name}\n"
+                f"Please notify {approver.full_name} manually.\n\n"
+                f"_Ref: {application.application_number}_"
+            )
+            return _send_direct(fallback, msg)
         return {'success': False, 'error': 'Approver has no phone number'}
     
     portal_url = getattr(settings, 'PORTAL_URL', 'http://localhost:5173')
@@ -179,6 +281,7 @@ def send_leave_approval_request_whatsapp(application, approver):
 
 
 def send_leave_approved_whatsapp(application, approver):
+    """WhatsApp employee about approval."""
     if not application.employee.phone_number:
         return {'success': False, 'error': 'Employee has no phone number'}
     
@@ -199,6 +302,7 @@ def send_leave_approved_whatsapp(application, approver):
 
 
 def send_leave_rejected_whatsapp(application, rejector, reason):
+    """WhatsApp employee about rejection."""
     if not application.employee.phone_number:
         return {'success': False, 'error': 'Employee has no phone number'}
     

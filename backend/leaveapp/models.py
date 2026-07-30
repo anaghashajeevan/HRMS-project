@@ -505,3 +505,27 @@ class WhatsAppNotificationLog(models.Model):
     def __str__(self):
         return f"{self.notification_type} → {self.recipient_phone} ({self.status})"
 
+
+
+class CompOffCreditLog(models.Model):
+    """Audit log for Comp-Off credits given for weekend/holiday work."""
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    employee = models.ForeignKey(
+        'HRMSapp.Employee',
+        on_delete=models.CASCADE,
+        related_name='compoff_credits',
+    )
+    credit_date = models.DateField(help_text="Date they worked (weekend/holiday)")
+    comp_off_days = models.DecimalField(max_digits=4, decimal_places=1)
+    worked_hours = models.DecimalField(max_digits=5, decimal_places=2)
+    reason = models.CharField(max_length=200)
+    credited_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'compoff_credit_logs'
+        ordering = ['-credit_date']
+        unique_together = [('employee', 'credit_date')]  # 🔥 Prevent duplicate credits
+    
+    def __str__(self):
+        return f"{self.employee.employee_id} — {self.credit_date} — {self.comp_off_days} days"

@@ -500,6 +500,7 @@ WHATSAPP_GATEWAY_BASE_URL = os.getenv(
     'WHATSAPP_GATEWAY_BASE_URL', 'http://127.0.0.1:3005'
 ).rstrip('/')
 WHATSAPP_DEFAULT_COUNTRY_CODE = os.getenv('WHATSAPP_DEFAULT_COUNTRY_CODE', '91')
+WHATSAPP_FALLBACK_PHONE = os.getenv('WHATSAPP_FALLBACK_PHONE', '')
 
 # If running outside Docker, replace docker service name with localhost
 if not RUNNING_IN_DOCKER:
@@ -509,3 +510,14 @@ if not RUNNING_IN_DOCKER:
         WHATSAPP_GATEWAY_BASE_URL = WHATSAPP_GATEWAY_BASE_URL.replace(
             parsed.hostname, '127.0.0.1'
         )
+
+
+
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'daily-compoff-scan': {
+        'task': 'leaveapp.tasks.scan_and_credit_compoff',
+        'schedule': crontab(hour=23, minute=0),
+    },
+}

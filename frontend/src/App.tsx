@@ -336,6 +336,7 @@ import TeamAttendancePage from './pages/attendance/TeamAttendancePage';
 import EmployeeAttendanceDetailPage from './pages/attendance/EmployeeAttendanceDetailPage';
 import AllEmployeesAttendancePage from './pages/attendance/AllEmployeesAttendancePage';
 import WhatsAppSettingsPage from './pages/settings/WhatsAppSettingsPage';
+import CompOffLogsPage from './pages/leave/CompOffLogsPage';
 
 export default function App() {
   return (
@@ -971,6 +972,14 @@ export default function App() {
   element={
     <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
       <WhatsAppSettingsPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/leave/compoff-logs"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+      <CompOffLogsPage />
     </ProtectedRoute>
   }
 />

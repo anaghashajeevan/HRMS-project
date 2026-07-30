@@ -26,6 +26,11 @@ const STATUS_STYLES: Record<DayStatus, { bg: string; text: string; label: string
   future: { bg: 'bg-white border-gray-100', text: 'text-gray-300', label: '-', dot: 'bg-gray-200' },
   on_leave: { bg: 'bg-cyan-50 border-cyan-200', text: 'text-cyan-700', label: 'On Leave', dot: 'bg-cyan-500' },
   on_half_leave: { bg: 'bg-teal-50 border-teal-200', text: 'text-teal-700', label: 'Half Leave', dot: 'bg-teal-500'},
+  will_be_on_leave: { bg: 'bg-cyan-50/50 border-cyan-200 border-dashed', text: 'text-cyan-600', label: 'Will Be on Leave', dot: 'bg-cyan-300' },
+  will_be_on_half_leave: { bg: 'bg-teal-50/50 border-teal-200 border-dashed', text: 'text-teal-600', label: 'Will Be on Half Leave', dot: 'bg-teal-300' },
+  leave_but_present: { bg: 'bg-lime-50 border-lime-300', text: 'text-lime-800', label: 'Leave but Present', dot: 'bg-lime-500' },
+  leave_but_partial: { bg: 'bg-orange-50 border-orange-200', text: 'text-orange-700', label: 'Leave (Partial)', dot: 'bg-orange-500' },
+  half_leave_present: { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Half Leave + Present', dot: 'bg-emerald-500' },
 };
 
 export default function MyAttendancePage() {
@@ -240,18 +245,40 @@ export default function MyAttendancePage() {
 
                 {/* Legend */}
                 {/* Legend */}
+{/* Legend */}
 <div className="mt-6 border-t border-gray-100 pt-4">
-  <p className="mb-2 text-xs font-semibold uppercase text-gray-500">Legend</p>
-  <div className="flex flex-wrap gap-3">
-    {(['present', 'absent', 'missing_punch', 'on_leave', 'on_half_leave', 'weekend', 'holiday'] as DayStatus[]).map((key) => {
-      const style = STATUS_STYLES[key];
-      return (
-        <div key={key} className="flex items-center gap-2">
-          <span className={`h-3 w-3 rounded-full ${style.dot}`} />
-          <span className="text-xs text-gray-600">{style.label}</span>
-        </div>
-      );
-    })}
+  <p className="mb-3 text-xs font-semibold uppercase text-gray-500">Legend</p>
+  
+  {/* Actual Attendance */}
+  <div className="mb-2">
+    <p className="text-[10px] font-semibold uppercase text-gray-400 mb-1">Actual Attendance</p>
+    <div className="flex flex-wrap gap-3">
+      {(['present', 'absent', 'missing_punch', 'weekend', 'holiday'] as DayStatus[]).map((key) => {
+        const style = STATUS_STYLES[key];
+        return (
+          <div key={key} className="flex items-center gap-2">
+            <span className={`h-3 w-3 rounded-full ${style.dot}`} />
+            <span className="text-xs text-gray-600">{style.label}</span>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+
+  {/* Leave-related */}
+  <div className="mt-3">
+    <p className="text-[10px] font-semibold uppercase text-gray-400 mb-1">Leave Status</p>
+    <div className="flex flex-wrap gap-3">
+      {(['on_leave', 'on_half_leave', 'will_be_on_leave', 'leave_but_present', 'half_leave_present'] as DayStatus[]).map((key) => {
+        const style = STATUS_STYLES[key];
+        return (
+          <div key={key} className="flex items-center gap-2">
+            <span className={`h-3 w-3 rounded-full ${style.dot}`} />
+            <span className="text-xs text-gray-600">{style.label}</span>
+          </div>
+        );
+      })}
+    </div>
   </div>
 </div>
               </div>
@@ -294,13 +321,19 @@ function StatCard({
   );
 }
 
-function DayCard({ day, onClick }: { day: DayEntry; onClick: () => void }) {
+function DayCard({ day, onClick }: { day: DayEntry; onClick?: () => void }) {
   const style = STATUS_STYLES[day.status];
   const clickable = !day.is_future && day.status !== 'weekend' && day.status !== 'holiday' && day.status !== 'future';
 
+  const isLeaveStatus = ['on_leave', 'on_half_leave', 'will_be_on_leave', 'will_be_on_half_leave',
+                         'leave_but_present', 'leave_but_partial', 'half_leave_present'].includes(day.status);
+  
+  const isWillBe = day.status.startsWith('will_be_');
+  const cameOnLeave = day.status === 'leave_but_present' || day.status === 'leave_but_partial';
+
   return (
     <div
-      onClick={clickable ? onClick : undefined}
+      onClick={clickable && onClick ? onClick : undefined}
       className={`
         relative aspect-square rounded-lg border p-2
         ${style.bg}
@@ -313,25 +346,36 @@ function DayCard({ day, onClick }: { day: DayEntry; onClick: () => void }) {
           {day.day_number}
         </span>
         {day.status !== 'future' && day.status !== 'weekend' && day.status !== 'holiday' && (
-          <span className={`h-2 w-2 rounded-full ${style.dot}`} />
+          <span className={`h-2 w-2 rounded-full ${style.dot} ${isWillBe ? 'opacity-60' : ''}`} />
         )}
       </div>
 
-      {/* 🔥 NEW: Show leave badge */}
-      {day.leave_info && (day.status === 'on_leave' || day.status === 'on_half_leave') && (
+      {/* Leave badge */}
+      {day.leave_info && isLeaveStatus && (
         <div className="mt-1">
           <span
-            className="inline-block rounded px-1 py-0.5 text-[9px] font-bold text-white"
+            className={`inline-block rounded px-1 py-0.5 text-[9px] font-bold text-white ${isWillBe ? 'opacity-70' : ''}`}
             style={{ backgroundColor: day.leave_info.leave_type_color }}
           >
             {day.leave_info.leave_type_code}
             {day.leave_info.is_half_day && ` (${day.leave_info.half_day_period})`}
           </span>
+          {/* Special indicators */}
+          {cameOnLeave && (
+            <div className="mt-0.5 text-[8px] font-bold text-lime-800">
+              ✓ Present!
+            </div>
+          )}
+          {isWillBe && (
+            <div className="mt-0.5 text-[8px] italic text-cyan-600">
+              upcoming
+            </div>
+          )}
         </div>
       )}
 
-      {/* Show worked hours only if actually worked */}
-      {day.worked_hours !== '00:00' && !day.is_future && day.status !== 'on_leave' && (
+      {/* Show worked hours */}
+      {day.worked_hours !== '00:00' && !day.is_future && day.status !== 'on_leave' && day.status !== 'will_be_on_leave' && (
         <div className="mt-1 flex flex-col">
           <span className="text-[10px] font-bold text-gray-900">
             {day.worked_hours}

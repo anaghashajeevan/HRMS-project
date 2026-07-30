@@ -185,3 +185,28 @@ def notify_employees_calendar_amendment(
             logger.warning(f"Amendment notification failed for {emp.employee_id}: {exc}")
 
     logger.info(f"📧 Notified employees about calendar amendment: {action} {holiday_name}")
+
+
+
+@shared_task
+def scan_and_credit_compoff():
+    """
+    Daily task: scan yesterday's attendance and credit comp-off for weekend/holiday work.
+    Runs every day at 11 PM via Celery Beat.
+    """
+    from .services.compoff_service import CompOffService
+    
+    logger.info("🔍 Starting daily Comp-Off scan...")
+    
+    try:
+        result = CompOffService.scan_yesterday()
+        
+        logger.info(
+            f"✅ Comp-Off scan done: "
+            f"{result['credited_count']} credits, "
+            f"{result['total_days_credited']} total days"
+        )
+        return result
+    except Exception as exc:
+        logger.exception(f"❌ Comp-Off scan failed: {exc}")
+        raise

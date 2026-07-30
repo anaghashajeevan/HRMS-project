@@ -926,7 +926,7 @@ import {
   BookOpen,
   Clock,
   Activity,
-  MessageCircle,
+  MessageCircle,Gift,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -1165,6 +1165,12 @@ const mainNav: NavEntry[] = [
       to: '/leave/balances',
       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
     },
+    {
+  label: 'Comp-Off Logs',
+  icon: Gift,   
+  to: '/leave/compoff-logs',
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+},
   ],
 },
 {

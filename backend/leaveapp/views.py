@@ -830,9 +830,8 @@ class AnnualCalendarViewSet(ModelViewSet):
 
 
 
-
-class WhatsAppGatewayStatusView(APIView):
-    """Get overall gateway + sessions status."""
+class WhatsAppStatusView(APIView):
+    """Get gateway + connection status."""
     permission_classes = [IsAuthenticated, IsHRAdmin]
 
     def get(self, request):
@@ -840,71 +839,58 @@ class WhatsAppGatewayStatusView(APIView):
         return Response(get_gateway_status())
 
 
-class WhatsAppSessionQRView(APIView):
-    """Get QR code for a specific session."""
+class WhatsAppQRView(APIView):
+    """Get QR code for connection."""
     permission_classes = [IsAuthenticated, IsHRAdmin]
 
-    def get(self, request, session_key):
-        from .services.whatsapp_service import get_session_qr
-        if session_key not in ('primary', 'fallback'):
-            return Response({'error': 'Invalid session'}, status=400)
-        return Response(get_session_qr(session_key))
+    def get(self, request):
+        from .services.whatsapp_service import get_qr_code
+        return Response(get_qr_code())
 
 
-class WhatsAppSessionConnectView(APIView):
-    """Start a session."""
-    permission_classes = [IsAuthenticated, IsHRAdmin]
-
-    def post(self, request, session_key):
-        from .services.whatsapp_service import connect_session
-        if session_key not in ('primary', 'fallback'):
-            return Response({'error': 'Invalid session'}, status=400)
-        return Response(connect_session(session_key))
-
-
-class WhatsAppSessionDisconnectView(APIView):
-    """Disconnect a session."""
-    permission_classes = [IsAuthenticated, IsHRAdmin]
-
-    def post(self, request, session_key):
-        from .services.whatsapp_service import disconnect_session
-        if session_key not in ('primary', 'fallback'):
-            return Response({'error': 'Invalid session'}, status=400)
-        return Response(disconnect_session(session_key))
-
-
-class WhatsAppSwitchSessionView(APIView):
-    """Manually switch active session."""
+class WhatsAppConnectView(APIView):
+    """Start WhatsApp connection."""
     permission_classes = [IsAuthenticated, IsHRAdmin]
 
     def post(self, request):
-        from .services.whatsapp_service import switch_active_session
-        session_key = request.data.get('session')
-        if session_key not in ('primary', 'fallback'):
-            return Response({'error': 'Invalid session'}, status=400)
-        return Response(switch_active_session(session_key))
+        from .services.whatsapp_service import connect_whatsapp
+        return Response(connect_whatsapp())
+
+
+class WhatsAppDisconnectView(APIView):
+    """Disconnect WhatsApp."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def post(self, request):
+        from .services.whatsapp_service import disconnect_whatsapp
+        return Response(disconnect_whatsapp())
 
 
 class WhatsAppTestSendView(APIView):
-    """Send a test message."""
+    """Send test message."""
     permission_classes = [IsAuthenticated, IsHRAdmin]
 
     def post(self, request):
         from .services.whatsapp_service import send_whatsapp_message
         
         phone = request.data.get('phone', '')
+        use_fallback_test = request.data.get('test_fallback', False)
+        
         if not phone:
             return Response({'ok': False, 'message': 'phone required'}, status=400)
         
-        result = send_whatsapp_message(
-            phone,
-            "🧪 *HRMS Test Message*\n\nWhatsApp integration is working! ✅"
+        message = (
+            "🧪 *HRMS Test Message*\n\n"
+            "WhatsApp integration is working! ✅\n\n"
+            "_Sent from HRMS gateway_"
         )
+        
+        result = send_whatsapp_message(phone, message, allow_fallback=True)
         
         return Response({
             'ok': result.get('success', False),
             'message': (
-                f"Sent to {phone} via {result.get('sent_via', 'gateway')}"
+                f"Sent to {result.get('to')} via {result.get('sent_via', 'unknown')}"
                 if result.get('success')
                 else f"Failed: {result.get('error')}"
             ),
@@ -957,3 +943,96 @@ class WhatsAppLogsView(APIView):
             },
             'logs': data,
         })
+
+
+
+class CompOffScanView(APIView):
+    """HR trigger: manually scan for comp-off credits."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def post(self, request):
+        from datetime import datetime, timedelta
+        from .services.compoff_service import CompOffService
+        
+        # Get date range from request
+        start_str = request.data.get('start_date')
+        end_str = request.data.get('end_date')
+        
+        try:
+            if start_str:
+                start_date = datetime.strptime(start_str, '%Y-%m-%d').date()
+            else:
+                # Default: last 7 days
+                start_date = timezone.localdate() - timedelta(days=7)
+            
+            if end_str:
+                end_date = datetime.strptime(end_str, '%Y-%m-%d').date()
+            else:
+                end_date = timezone.localdate()
+        except ValueError:
+            return Response(
+                {'detail': 'Invalid date format. Use YYYY-MM-DD'},
+                status=400,
+            )
+        
+        try:
+            result = CompOffService.scan_and_credit_for_period(start_date, end_date)
+            return Response({
+                'ok': True,
+                'message': (
+                    f"Scan complete. "
+                    f"Credited {result['credited_count']} employees "
+                    f"totaling {result['total_days_credited']} comp-off days."
+                ),
+                **result,
+            })
+        except Exception as exc:
+            return Response({
+                'ok': False,
+                'error': str(exc),
+            }, status=500)
+
+
+class CompOffLogsView(APIView):
+    """View comp-off credit history."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import CompOffCreditLog
+        
+        user = request.user
+        qs = CompOffCreditLog.objects.select_related('employee').order_by('-credit_date')
+        
+        # Filter by permission
+        if user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN'):
+            pass  # See all
+        elif user.has_role('MANAGER') and hasattr(user, 'employee'):
+            qs = qs.filter(employee__reporting_manager=user.employee)
+        elif hasattr(user, 'employee'):
+            qs = qs.filter(employee=user.employee)
+        else:
+            return Response([])
+        
+        # Optional filters
+        employee_id = request.query_params.get('employee_id')
+        if employee_id:
+            qs = qs.filter(employee_id=employee_id)
+        
+        # Limit
+        qs = qs[:100]
+        
+        data = [{
+            'id': str(log.id),
+            'employee_id': log.employee.employee_id,
+            'employee_name': log.employee.full_name,
+            'credit_date': log.credit_date.isoformat(),
+            'comp_off_days': float(log.comp_off_days),
+            'worked_hours': float(log.worked_hours),
+            'reason': log.reason,
+            'credited_at': log.credited_at.isoformat(),
+        } for log in qs]
+        
+        return Response({
+            'count': len(data),
+            'logs': data,
+        })    
