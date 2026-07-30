@@ -193,6 +193,7 @@ INSTALLED_APPS = [
     'reimbursementapp',   
     'attendanceapp',
     'leaveapp',
+    'policyapp',
 ]
 
 MIDDLEWARE = [
@@ -492,3 +493,19 @@ REST_FRAMEWORK_THROTTLE = {
         'quick_claim_send': QUICK_CLAIM_SEND_RATE,
     }
 }
+
+
+WHATSAPP_ENABLED = os.getenv('WHATSAPP_ENABLED', 'False').lower() == 'true'
+WHATSAPP_GATEWAY_BASE_URL = os.getenv(
+    'WHATSAPP_GATEWAY_BASE_URL', 'http://127.0.0.1:3005'
+).rstrip('/')
+WHATSAPP_DEFAULT_COUNTRY_CODE = os.getenv('WHATSAPP_DEFAULT_COUNTRY_CODE', '91')
+
+# If running outside Docker, replace docker service name with localhost
+if not RUNNING_IN_DOCKER:
+    from urllib.parse import urlparse
+    parsed = urlparse(WHATSAPP_GATEWAY_BASE_URL)
+    if parsed.hostname in ('whatsapp_gateway', 'whatsapp-gateway'):
+        WHATSAPP_GATEWAY_BASE_URL = WHATSAPP_GATEWAY_BASE_URL.replace(
+            parsed.hostname, '127.0.0.1'
+        )

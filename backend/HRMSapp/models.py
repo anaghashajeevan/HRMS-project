@@ -566,6 +566,8 @@ class ApprovalWorkflow(models.Model):
     MODULE_CHOICES = [
         ('LIFECYCLE', 'Lifecycle Change'),
          ('LEAVE', 'Leave Application'),
+         ('POLICY', 'Policy Approval'),
+         ('CALENDAR', 'Annual Calendar'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

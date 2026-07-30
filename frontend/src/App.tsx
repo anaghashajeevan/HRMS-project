@@ -309,6 +309,7 @@ import { AttendanceLayout } from './components/attendance/AttendanceLayout';
 import AttendanceDashboardPage from './pages/attendance/AttendanceDashboardPage';
 import LiveDashboardPage from './pages/attendance/LiveDashboardPage';
 import AttendanceSettingsPage from './pages/attendance/AttendanceSettingsPage';
+
 import LeaveBalancesPage from './pages/leave/LeaveBalancesPage';
 import LeaveTypesPage from './pages/leave/LeaveTypesPage';
 import MyLeavePage from './pages/leave/MyLeavePage';
@@ -316,6 +317,25 @@ import ApplyLeavePage from './pages/leave/ApplyLeavePage';
 import PendingApprovalsPage from './pages/leave/PendingApprovalsPage';
 import TeamCalendarPage from './pages/leave/TeamCalendarPage';
 import MyLeaveCalendarPage from './pages/leave/MyLeaveCalendarPage';
+
+import PolicyListPage from './pages/policies/PolicyListPage';
+import PolicyDetailPage from './pages/policies/PolicyDetailPage';
+import PolicyLibraryPage from './pages/policies/PolicyLibraryPage';
+import MyAcknowledgmentsPage from './pages/policies/MyAcknowledgmentsPage';
+import PolicyCreatePage from './pages/policies/PolicyCreatePage';
+import PolicyPendingApprovalsPage from './pages/policies/PolicyPendingApprovalsPage';
+import PolicyCreateVersionPage from './pages/policies/PolicyCreateVersionPage';
+
+import CalendarViewPage from './pages/calendar/CalendarViewPage';
+import CalendarManagePage from './pages/calendar/CalendarManagePage';
+import CalendarBuilderPage from './pages/calendar/CalendarBuilderPage';
+import CalendarPendingApprovalsPage from './pages/calendar/CalendarPendingApprovalsPage';
+
+import MyAttendancePage from './pages/attendance/MyAttendancePage';
+import TeamAttendancePage from './pages/attendance/TeamAttendancePage';
+import EmployeeAttendanceDetailPage from './pages/attendance/EmployeeAttendanceDetailPage';
+import AllEmployeesAttendancePage from './pages/attendance/AllEmployeesAttendancePage';
+import WhatsAppSettingsPage from './pages/settings/WhatsAppSettingsPage';
 
 export default function App() {
   return (
@@ -794,6 +814,163 @@ export default function App() {
   element={
     <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
       <MyLeaveCalendarPage />
+    </ProtectedRoute>
+  }
+/>
+{/* ==================== POLICIES ==================== */}
+
+{/* Create page — MUST be before :id */}
+<Route
+  path="/policies/create"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <PolicyCreatePage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* Other specific routes */}
+<Route
+  path="/policies/library"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+      <PolicyLibraryPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/policies/my-acknowledgments"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+      <MyAcknowledgmentsPage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* HR admin list */}
+<Route
+  path="/policies"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <PolicyListPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/policies/pending-approvals"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+      <PolicyPendingApprovalsPage />
+    </ProtectedRoute>
+  }
+/>
+<Route path="/policies/:id/create-version" element={<PolicyCreateVersionPage />} />
+{/* Dynamic :id — MUST be LAST */}
+<Route
+  path="/policies/:id"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+      <PolicyDetailPage />
+    </ProtectedRoute>
+  }
+/>
+
+
+<Route
+  path="/calendar"
+  element={
+    <ProtectedRoute
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}
+    >
+      <CalendarViewPage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* Specific routes MUST come before :id */}
+<Route
+  path="/calendar/manage"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <CalendarManagePage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/calendar/pending-approvals"
+  element={
+    <ProtectedRoute
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}
+    >
+      <CalendarPendingApprovalsPage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* Dynamic :id — MUST be LAST */}
+<Route
+  path="/calendar/manage/:id"
+  element={
+    <ProtectedRoute
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}
+    >
+      <CalendarBuilderPage />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/my-attendance"
+  element={
+    <ProtectedRoute
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}
+    >
+      <MyAttendancePage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/team-attendance"
+  element={
+    <ProtectedRoute
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}
+    >
+      <TeamAttendancePage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/team-attendance/:employeeId"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+      <EmployeeAttendanceDetailPage />
+    </ProtectedRoute>
+  }
+/>
+{/* HR — All employees attendance */}
+<Route
+  path="/all-attendance"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <AllEmployeesAttendancePage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* HR — Click any employee for detail (reuses same detail page) */}
+<Route
+  path="/all-attendance/:employeeId"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <EmployeeAttendanceDetailPage />
+    </ProtectedRoute>
+  }
+/>
+<Route
+  path="/settings/whatsapp"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <WhatsAppSettingsPage />
     </ProtectedRoute>
   }
 />

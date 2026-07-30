@@ -74,6 +74,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# WhatsApp Gateway
+whatsapp-gateway/node_modules/
+whatsapp-gateway/auth_info/
+whatsapp-gateway/auth_primary/
+whatsapp-gateway/auth_fallback/
 # ===========================================
 # Docker (for later)
 # ===========================================

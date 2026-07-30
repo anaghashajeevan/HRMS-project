@@ -219,3 +219,158 @@ export interface TestEmailResponse {
   server_pid?: number;
   exception_class?: string;
 }
+
+
+// ==============================================================================
+// PERSONAL ATTENDANCE VIEWS
+// ==============================================================================
+
+export type DayStatus =
+  | 'present'
+  | 'absent'
+  | 'missing_punch'
+  | 'weekend'
+  | 'weekend_present'
+  | 'holiday'
+  | 'future'
+  | 'on_leave'         
+  | 'on_half_leave';  
+
+export interface DayEntry {
+  date: string;
+  day_name: string;
+  day_number: number;
+  status: DayStatus;
+  is_weekend: boolean;
+  is_holiday: boolean;
+  is_future: boolean;
+  is_today: boolean;
+  punch_in: string | null;
+  punch_out: string | null;
+  total_punches: number;
+  worked_hours: string;
+  worked_hours_decimal: number;
+  break_time: string;
+  is_late: boolean;
+  is_early_exit: boolean;
+  leave_info: LeaveInfo | null; 
+}
+
+export interface MonthlyStats {
+  working_days_in_month: number;
+  working_days_elapsed: number;
+  effective_working_days: number;  
+  present_days: number;
+  absent_days: number;
+  missing_punch_days: number;
+  weekend_worked_days: number;
+  on_leave_days: number;             
+  on_half_leave_days: number;        
+  lop_days: number;                 
+  total_worked_hours: string;
+  total_worked_hours_decimal: number;
+  total_break_time: string;
+  expected_hours: number;
+  expected_hours_full_month: number;
+  shortage_hours: number;
+  attendance_percent: number;
+  full_day_hours: number;
+}
+
+export interface EmployeeInfo {
+  id: string;
+  employee_id: string;
+  full_name: string;
+  department: string | null;
+  position: string | null;
+}
+
+export interface MonthlyAttendanceData {
+  year: number;
+  month: number;
+  month_label: string;
+  start_date: string;
+  end_date: string;
+  employee: EmployeeInfo;
+  stats: MonthlyStats;
+  days: DayEntry[];
+}
+
+export interface DayDetailData {
+  date: string;
+  day_name: string;
+  employee: {
+    id: string;
+    employee_id: string;
+    full_name: string;
+  };
+  attendance: {
+    punch_in: string | null;
+    punch_out: string | null;
+    total_punches: number;
+    worked_hours: string;
+    break_time: string;
+    gross_hours: string;
+    is_late: boolean;
+    is_early_exit: boolean;
+    missing_punch: boolean;
+    status: string;
+  };
+  raw_punches: Array<{ time: string; raw_line: string }>;
+  expected_hours: number;
+  shift_in: string;
+  shift_out: string;
+}
+
+export interface TeamMemberAttendance {
+  employee: EmployeeInfo;
+  stats: MonthlyStats;
+}
+
+export interface TeamAttendanceData {
+  year: number;
+  month: number;
+  month_label: string;
+  manager: {
+    id: string;
+    employee_id: string;
+    full_name: string;
+  };
+  team_size: number;
+  team_total_shortage: number;
+  team_total_on_leave: number;
+  team_avg_attendance: number;
+  members: TeamMemberAttendance[];
+}
+
+export interface LeaveInfo {
+  leave_type_code: string;
+  leave_type_name: string;
+  leave_type_color: string;
+  is_half_day: boolean;
+  half_day_period: string;
+  application_number: string;
+  is_paid: boolean;
+  is_lop: boolean;
+}
+export interface AllEmployeesAttendanceData {
+  year: number;
+  month: number;
+  month_label: string;
+  total_employees: number;
+  total_shortage: number;
+  total_on_leave: number; 
+  avg_attendance: number;
+  departments: Array<{
+    name: string;
+    employee_count: number;
+    total_shortage: number;
+    total_on_leave: number; 
+    avg_attendance: number;
+  }>;
+  employees: Array<{
+    employee: EmployeeInfo;
+    manager_name: string | null;
+    stats: MonthlyStats;
+  }>;
+}

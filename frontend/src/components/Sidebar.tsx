@@ -923,6 +923,10 @@ import {
   FileSpreadsheet, Mail, Cog, MonitorCheck, CheckCircle2,
   Sparkles,
   Plus,
+  BookOpen,
+  Clock,
+  Activity,
+  MessageCircle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -1078,11 +1082,42 @@ const mainNav: NavEntry[] = [
 
   // ==================== Other Modules ====================
   {
-    label: 'Attendance',
-    icon: Calendar,
-    to: '/attendance',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
-  },
+  label: 'Attendance',
+  icon: Calendar,
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  children: [
+    {
+      label: 'My Attendance',
+      icon: ClipboardCheck,
+      to: '/my-attendance',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    },
+    {
+      label: 'Team Attendance',
+      icon: Users,
+      to: '/team-attendance',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+    },
+     {
+      label: 'All Employees',
+      icon: Users2,  // Import Users2 from lucide-react
+      to: '/all-attendance',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    },
+    {
+      label: 'Live Dashboard',
+      icon: Activity,
+      to: '/attendance/live',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','EMPLOYEE'],
+    },
+    {
+      label: 'HR Dashboard',
+      icon: LayoutDashboard,
+      to: '/attendance',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER','EMPLOYEE'],
+    },
+  ],
+},
   {
   label: 'Leave',
   icon: ClipboardList,
@@ -1132,6 +1167,63 @@ const mainNav: NavEntry[] = [
     },
   ],
 },
+{
+  label: 'Policies',
+  icon: Shield,
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  children: [
+    {
+      label: 'Policy Library',
+      icon: BookOpen,
+      to: '/policies/library',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    },
+    {
+      label: 'My Acknowledgments',
+      icon: CheckSquare,
+      to: '/policies/my-acknowledgments',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    },
+    {
+      label: 'Pending Approvals',
+      icon: Clock,
+      to: '/policies/pending-approvals',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+    },
+    {
+      label: 'Manage Policies',
+      icon: Settings,
+      to: '/policies',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN',],
+    },
+  ],
+},
+
+{
+  label: 'Holiday Calendar',
+  icon: Calendar,
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  children: [
+    {
+      label: 'View Calendar',
+      icon: Calendar,
+      to: '/calendar',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    },
+    {
+      label: 'Manage Calendars',
+      icon: Settings,
+      to: '/calendar/manage',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    },
+    {
+      label: 'Pending Approvals',
+      icon: Clock,
+      to: '/calendar/pending-approvals',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+    },
+  ],
+},
   {
     label: 'Payroll',
     icon: DollarSign,
@@ -1154,7 +1246,7 @@ const settingsNav: NavItem[] = [
     allowedRoles: ['SYSTEM_ADMIN'],
   },
   {
-    label: 'Departments',
+    label: 'Company Structures',
     icon: Building2,
     to: '/settings/departments',
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
@@ -1165,6 +1257,12 @@ const settingsNav: NavItem[] = [
     to: '/settings/positions',
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
   },
+  {
+  label: 'WhatsApp',
+  icon: MessageCircle, // import from lucide-react
+  to: '/settings/whatsapp',
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+},
   {
     label: 'Employee Code',
     icon: IdCard,

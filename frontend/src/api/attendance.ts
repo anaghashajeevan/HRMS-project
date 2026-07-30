@@ -140,3 +140,75 @@ export const attendanceReportsApi = {
     return data;
   },
 };
+
+
+import type {
+  MonthlyAttendanceData,
+  DayDetailData,
+  TeamAttendanceData,AllEmployeesAttendanceData, 
+} from '../types/attendance';
+
+// ==============================================================================
+// PERSONAL ATTENDANCE
+// ==============================================================================
+
+export const personalAttendanceApi = {
+
+  getMyMonth: async (year: number, month: number): Promise<MonthlyAttendanceData> => {
+    const { data } = await api.get<MonthlyAttendanceData>(
+      `${BASE}/my-attendance/month/`,
+      { params: { year, month } }
+    );
+    return data;
+  },
+
+  getMyDay: async (date: string): Promise<DayDetailData> => {
+    const { data } = await api.get<DayDetailData>(
+      `${BASE}/my-attendance/day/`,
+      { params: { date } }
+    );
+    return data;
+  },
+
+  getTeamMonth: async (
+    year: number,
+    month: number,
+    managerId?: string
+  ): Promise<TeamAttendanceData> => {
+    const params: any = { year, month };
+    if (managerId) params.manager_id = managerId;
+    const { data } = await api.get<TeamAttendanceData>(
+      `${BASE}/team-attendance/month/`,
+      { params }
+    );
+    return data;
+  },
+
+  getEmployeeMonth: async (
+    employeeId: string,
+    year: number,
+    month: number
+  ): Promise<MonthlyAttendanceData> => {
+    const { data } = await api.get<MonthlyAttendanceData>(
+      `${BASE}/employee-attendance/${employeeId}/month/`,
+      { params: { year, month } }
+    );
+    return data;
+  },
+
+  getAllEmployees: async (
+    year: number,
+    month: number,
+    filters?: { department_id?: string; search?: string }
+  ): Promise<AllEmployeesAttendanceData> => {
+    const params: any = { year, month };
+    if (filters?.department_id) params.department_id = filters.department_id;
+    if (filters?.search) params.search = filters.search;
+
+    const { data } = await api.get<AllEmployeesAttendanceData>(
+      `${BASE}/all-employees-attendance/`,
+      { params }
+    );
+    return data;
+  },
+};

@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.shortcuts import render
-
+from django.conf import settings
 # Create your views here.
 """
 Leave app DRF views.
@@ -12,7 +12,7 @@ import logging
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, status
-from rest_framework.decorators import action
+from rest_framework.decorators import APIView, action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
@@ -568,3 +568,392 @@ class LeaveApplicationViewSet(ModelViewSet):
             user.employee, start_date, end_date
         )
         return Response(calendar)
+
+
+
+from .models import AnnualCalendar
+from .serializers import (
+    AnnualCalendarListSerializer, AnnualCalendarDetailSerializer,
+    AnnualCalendarCreateSerializer,
+)
+from .services.calendar_service import AnnualCalendarService, CalendarServiceError
+
+
+class AnnualCalendarViewSet(ModelViewSet):
+    """Annual calendar management with approval workflow."""
+    queryset = AnnualCalendar.objects.all().prefetch_related('holidays', 'approvals')
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['status', 'year']
+    ordering = ['-year']
+    pagination_class = None
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return AnnualCalendarListSerializer
+        if self.action == 'create':
+            return AnnualCalendarCreateSerializer
+        return AnnualCalendarDetailSerializer
+
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve', 'published', 'pending_approvals']:
+            return [IsAuthenticated()]
+        if self.action in ['approve', 'reject', 'return_for_changes']:
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), IsHRAdmin()]
+
+    def create(self, request, *args, **kwargs):
+        user = request.user
+        if not hasattr(user, 'employee'):
+            return Response({'detail': 'No employee record'}, status=400)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            calendar = AnnualCalendarService.create_calendar(
+                year=serializer.validated_data['year'],
+                title=serializer.validated_data.get('title', f"Annual Calendar {serializer.validated_data['year']}"),
+                description=serializer.validated_data.get('description', ''),
+                created_by=user.employee,
+            )
+        except CalendarServiceError as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+        return Response(
+            AnnualCalendarDetailSerializer(calendar, context={'request': request}).data,
+            status=201,
+        )
+
+    @action(detail=True, methods=['post'], url_path='add-holiday')
+    def add_holiday(self, request, pk=None):
+        """Add a holiday to this calendar."""
+        calendar = self.get_object()
+        user = request.user
+        if not hasattr(user, 'employee'):
+            return Response({'detail': 'No employee record'}, status=400)
+
+        try:
+            location_ids = request.data.pop('applicable_locations', [])
+            holiday_data = {
+                'name': request.data.get('name'),
+                'date': request.data.get('date'),
+                'holiday_type': request.data.get('holiday_type', 'NATIONAL'),
+                'description': request.data.get('description', ''),
+                'applicable_to_all_locations': request.data.get('applicable_to_all_locations', True),
+                'is_optional': request.data.get('is_optional', False),
+                'is_active': False,  # Activated only on publish
+                'applicable_locations': location_ids,
+            }
+
+            from datetime import datetime
+            holiday_data['date'] = datetime.strptime(holiday_data['date'], '%Y-%m-%d').date()
+
+            holiday = AnnualCalendarService.add_holiday_to_calendar(
+                calendar, holiday_data, user.employee
+            )
+            return Response(HolidaySerializer(holiday).data, status=201)
+        except CalendarServiceError as exc:
+            return Response({'detail': str(exc)}, status=400)
+        except Exception as exc:
+            return Response({'detail': str(exc)}, status=500)
+
+    @action(detail=True, methods=['delete'], url_path='remove-holiday/(?P<holiday_id>[^/.]+)')
+    def remove_holiday(self, request, pk=None, holiday_id=None):
+        """Remove a holiday from this calendar."""
+        calendar = self.get_object()
+        if calendar.status not in ['DRAFT']:
+            return Response(
+                {'detail': f'Cannot modify {calendar.get_status_display()} calendar'},
+                status=400,
+            )
+        deleted, _ = Holiday.objects.filter(id=holiday_id, calendar=calendar).delete()
+        if deleted:
+            return Response({'ok': True, 'message': 'Holiday removed'})
+        return Response({'detail': 'Holiday not found'}, status=404)
+
+    @action(detail=True, methods=['post'], url_path='submit-for-review')
+    def submit_for_review(self, request, pk=None):
+        calendar = self.get_object()
+        user = request.user
+        try:
+            AnnualCalendarService.submit_for_approval(calendar, user.employee)
+            return Response({'ok': True, 'message': 'Submitted for approval'})
+        except CalendarServiceError as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+    @action(detail=True, methods=['post'], url_path='approve')
+    def approve(self, request, pk=None):
+        calendar = self.get_object()
+        user = request.user
+        try:
+            AnnualCalendarService.approve_calendar(
+                calendar, user.employee,
+                comments=request.data.get('comments', ''),
+            )
+            return Response({'ok': True, 'message': 'Approved'})
+        except CalendarServiceError as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+    @action(detail=True, methods=['post'], url_path='reject')
+    def reject(self, request, pk=None):
+        calendar = self.get_object()
+        user = request.user
+        reason = request.data.get('reason', '')
+        if not reason:
+            return Response({'detail': 'Reason required'}, status=400)
+        try:
+            AnnualCalendarService.reject_calendar(calendar, user.employee, reason)
+            return Response({'ok': True, 'message': 'Rejected'})
+        except CalendarServiceError as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+    @action(detail=True, methods=['post'], url_path='return-for-changes')
+    def return_for_changes(self, request, pk=None):
+        calendar = self.get_object()
+        user = request.user
+        comments = request.data.get('comments', '')
+        try:
+            AnnualCalendarService.return_calendar_for_changes(
+                calendar, user.employee, comments
+            )
+            return Response({'ok': True, 'message': 'Returned for changes'})
+        except CalendarServiceError as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+    @action(detail=True, methods=['post'], url_path='publish')
+    def publish(self, request, pk=None):
+        calendar = self.get_object()
+        user = request.user
+        try:
+            AnnualCalendarService.publish_calendar(calendar, user.employee)
+            return Response({'ok': True, 'message': 'Published successfully'})
+        except CalendarServiceError as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+    @action(detail=False, methods=['get'], url_path='published')
+    def published(self, request):
+        """Get the currently published calendar (for all employees)."""
+        year = int(request.query_params.get('year', timezone.now().year))
+        calendar = AnnualCalendar.objects.filter(
+            year=year, status='PUBLISHED'
+        ).first()
+        if not calendar:
+            return Response({'detail': f'No published calendar for {year}'}, status=404)
+        return Response(AnnualCalendarDetailSerializer(calendar, context={'request': request}).data)
+
+    @action(detail=False, methods=['get'], url_path='pending-approvals')
+    def pending_approvals(self, request):
+        """Calendars pending my approval."""
+        user = request.user
+        if not hasattr(user, 'employee'):
+            return Response([])
+        from .models import AnnualCalendarApproval
+        pending_ids = AnnualCalendarApproval.objects.filter(
+            approver=user.employee, status='PENDING'
+        ).values_list('calendar_id', flat=True)
+        calendars = AnnualCalendar.objects.filter(id__in=pending_ids, status='IN_REVIEW')
+        return Response(AnnualCalendarListSerializer(calendars, many=True).data)  
+
+
+    @action(detail=True, methods=['post'], url_path='amend-add-holiday')
+    def amend_add_holiday(self, request, pk=None):
+        """Add a holiday to a PUBLISHED calendar (HR only)."""
+        calendar = self.get_object()
+        user = request.user
+        if not hasattr(user, 'employee'):
+            return Response({'detail': 'No employee record'}, status=400)
+
+        try:
+            from datetime import datetime
+            location_ids = request.data.get('applicable_locations', [])
+            reason = request.data.get('reason', '')
+
+            holiday_data = {
+                'name': request.data.get('name', '').strip(),
+                'date': datetime.strptime(request.data.get('date'), '%Y-%m-%d').date(),
+                'holiday_type': request.data.get('holiday_type', 'NATIONAL'),
+                'description': request.data.get('description', ''),
+                'applicable_to_all_locations': request.data.get('applicable_to_all_locations', True),
+                'is_optional': request.data.get('is_optional', False),
+                'applicable_locations': location_ids,
+            }
+
+            if not holiday_data['name']:
+                return Response({'detail': 'Holiday name required'}, status=400)
+
+            holiday = AnnualCalendarService.amend_add_holiday(
+                calendar, holiday_data, reason, user.employee
+            )
+            return Response(HolidaySerializer(holiday).data, status=201)
+        except CalendarServiceError as exc:
+            return Response({'detail': str(exc)}, status=400)
+        except Exception as exc:
+            return Response({'detail': str(exc)}, status=500)
+
+
+    @action(detail=True, methods=['post'], url_path='amend-remove-holiday')
+    def amend_remove_holiday(self, request, pk=None):
+        """Remove a holiday from a PUBLISHED calendar (HR only)."""
+        calendar = self.get_object()
+        user = request.user
+        if not hasattr(user, 'employee'):
+            return Response({'detail': 'No employee record'}, status=400)
+
+        holiday_id = request.data.get('holiday_id')
+        reason = request.data.get('reason', '')
+
+        if not holiday_id:
+            return Response({'detail': 'holiday_id required'}, status=400)
+
+        try:
+            result = AnnualCalendarService.amend_remove_holiday(
+                calendar, holiday_id, reason, user.employee
+            )
+            return Response({'ok': True, **result})
+        except CalendarServiceError as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+
+    @action(detail=True, methods=['get'], url_path='amendments')
+    def amendments(self, request, pk=None):
+        """Get amendment history for this calendar."""
+        calendar = self.get_object()
+        from .models import CalendarAmendment
+        from .serializers import CalendarAmendmentSerializer
+
+        amendments = CalendarAmendment.objects.filter(
+            calendar=calendar
+        ).select_related('made_by').order_by('-made_at')
+
+        return Response(CalendarAmendmentSerializer(amendments, many=True).data)  
+
+
+
+
+class WhatsAppGatewayStatusView(APIView):
+    """Get overall gateway + sessions status."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def get(self, request):
+        from .services.whatsapp_service import get_gateway_status
+        return Response(get_gateway_status())
+
+
+class WhatsAppSessionQRView(APIView):
+    """Get QR code for a specific session."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def get(self, request, session_key):
+        from .services.whatsapp_service import get_session_qr
+        if session_key not in ('primary', 'fallback'):
+            return Response({'error': 'Invalid session'}, status=400)
+        return Response(get_session_qr(session_key))
+
+
+class WhatsAppSessionConnectView(APIView):
+    """Start a session."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def post(self, request, session_key):
+        from .services.whatsapp_service import connect_session
+        if session_key not in ('primary', 'fallback'):
+            return Response({'error': 'Invalid session'}, status=400)
+        return Response(connect_session(session_key))
+
+
+class WhatsAppSessionDisconnectView(APIView):
+    """Disconnect a session."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def post(self, request, session_key):
+        from .services.whatsapp_service import disconnect_session
+        if session_key not in ('primary', 'fallback'):
+            return Response({'error': 'Invalid session'}, status=400)
+        return Response(disconnect_session(session_key))
+
+
+class WhatsAppSwitchSessionView(APIView):
+    """Manually switch active session."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def post(self, request):
+        from .services.whatsapp_service import switch_active_session
+        session_key = request.data.get('session')
+        if session_key not in ('primary', 'fallback'):
+            return Response({'error': 'Invalid session'}, status=400)
+        return Response(switch_active_session(session_key))
+
+
+class WhatsAppTestSendView(APIView):
+    """Send a test message."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def post(self, request):
+        from .services.whatsapp_service import send_whatsapp_message
+        
+        phone = request.data.get('phone', '')
+        if not phone:
+            return Response({'ok': False, 'message': 'phone required'}, status=400)
+        
+        result = send_whatsapp_message(
+            phone,
+            "🧪 *HRMS Test Message*\n\nWhatsApp integration is working! ✅"
+        )
+        
+        return Response({
+            'ok': result.get('success', False),
+            'message': (
+                f"Sent to {phone} via {result.get('sent_via', 'gateway')}"
+                if result.get('success')
+                else f"Failed: {result.get('error')}"
+            ),
+            **result,
+        }, status=200 if result.get('success') else 400)
+
+
+class WhatsAppLogsView(APIView):
+    """View WhatsApp notification logs."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def get(self, request):
+        from .models import WhatsAppNotificationLog
+        
+        logs = WhatsAppNotificationLog.objects.select_related(
+            'recipient_employee', 'leave_application'
+        ).order_by('-sent_at')[:100]
+        
+        data = [{
+            'id': str(log.id),
+            'type': log.get_notification_type_display(),
+            'recipient': (
+                log.recipient_employee.full_name if log.recipient_employee else 'Unknown'
+            ),
+            'phone': log.recipient_phone,
+            'leave_ref': (
+                log.leave_application.application_number
+                if log.leave_application else None
+            ),
+            'status': log.status,
+            'message_id': log.message_id,
+            'error': log.error_message,
+            'sent_at': log.sent_at.isoformat(),
+        } for log in logs]
+        
+        # Stats
+        from django.db.models import Count
+        stats = dict(
+            WhatsAppNotificationLog.objects.values('status')
+            .annotate(count=Count('id'))
+            .values_list('status', 'count')
+        )
+        
+        return Response({
+            'stats': {
+                'total': sum(stats.values()),
+                'success': stats.get('SUCCESS', 0),
+                'failed': stats.get('FAILED', 0),
+                'skipped': stats.get('SKIPPED', 0),
+            },
+            'logs': data,
+        })

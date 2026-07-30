@@ -624,6 +624,18 @@ const MODULE_CONFIG: Record<ModuleType, {
     defaultName: 'Standard Leave Approval',
     helpText: 'When an employee applies for leave, it flows through the steps below. Typical setup: Reporting Manager (48h SLA) → HR Admin (only for long leaves > 5 days). Leave balances are reserved on submission and deducted on final approval.',
   },
+  POLICY: {                                      // 🆕 ADD
+    label: 'Policy Approval',
+    description: 'For policy document review and approval',
+    defaultName: 'Standard Policy Approval',
+    helpText: 'When HR submits a policy for review, it flows through these steps. Each approver reviews the policy content and can approve, reject, or request changes.',
+  },
+  CALENDAR: {
+    label: 'Annual Calendar',
+    description: 'For annual holiday calendar approval',
+    defaultName: 'Standard Calendar Approval',
+    helpText: 'When HR submits the annual calendar for review, it flows through these steps. Approvers review the year\'s holidays and can approve/reject/return.',
+  },
 };
 
 export default function ApprovalWorkflowSettingsPage() {

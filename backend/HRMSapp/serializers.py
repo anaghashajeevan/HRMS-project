@@ -45,7 +45,8 @@ class EmployeeMiniSerializer(serializers.ModelSerializer):
             'department_name', 'position_title',
         ]
         read_only_fields = fields
-
+        
+    
 
 # ------------------------------------------------------------------------------
 # USER PROFILE (for /me endpoint)
@@ -451,9 +452,7 @@ class EmployeeManagerMiniSerializer(serializers.ModelSerializer):
 class EmployeeListSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
     position_title = serializers.CharField(source='position.title', read_only=True, default=None)
-    department_name = serializers.CharField(
-        source='position.department.name', read_only=True, default=None
-    )
+    department_name = serializers.SerializerMethodField()
     manager_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -478,7 +477,11 @@ class EmployeeListSerializer(serializers.ModelSerializer):
         if obj.reporting_manager:
             return obj.reporting_manager.full_name
         return None
-
+    
+    def get_department_name(self, obj):
+        if obj.structure_location:
+            return obj.structure_location.name
+        return None
 
 # ------------------------------------------------------------------------------
 # DETAIL SERIALIZER (full profile view)

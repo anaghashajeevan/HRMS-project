@@ -234,3 +234,95 @@ class LeaveApprovalActionSerializer(serializers.Serializer):
 class LeaveRejectActionSerializer(serializers.Serializer):
     """For reject action."""
     reason = serializers.CharField(min_length=5)
+
+
+from .models import AnnualCalendar, AnnualCalendarApproval
+
+
+class AnnualCalendarApprovalSerializer(serializers.ModelSerializer):
+    approver_name = serializers.CharField(source='approver.full_name', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = AnnualCalendarApproval
+        fields = [
+            'id', 'step_number', 'step_name',
+            'approver', 'approver_name',
+            'status', 'status_display',
+            'acted_at', 'comments', 'created_at',
+        ]
+
+
+class AnnualCalendarListSerializer(serializers.ModelSerializer):
+    holiday_count = serializers.SerializerMethodField()   # ← CHANGED
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    created_by_name = serializers.CharField(
+        source='created_by.full_name', read_only=True, default=None
+    )
+
+    class Meta:
+        model = AnnualCalendar
+        fields = [
+            'id', 'year', 'title', 'description',
+            'status', 'status_display', 'holiday_count',
+            'created_by', 'created_by_name',
+            'published_at', 'created_at',
+        ]
+
+    def get_holiday_count(self, obj):    # ← NEW METHOD
+        return obj.holidays.count()
+
+
+class AnnualCalendarDetailSerializer(serializers.ModelSerializer):
+    holidays = HolidaySerializer(many=True, read_only=True)
+    approvals = AnnualCalendarApprovalSerializer(many=True, read_only=True)
+    holiday_count = serializers.SerializerMethodField()   # ← CHANGED
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    created_by_name = serializers.CharField(
+        source='created_by.full_name', read_only=True, default=None
+    )
+    returned_by_name = serializers.CharField(
+        source='returned_by.full_name', read_only=True, default=None
+    )
+    published_by_name = serializers.CharField(
+        source='published_by.full_name', read_only=True, default=None
+    )
+
+    class Meta:
+        model = AnnualCalendar
+        fields = [
+            'id', 'year', 'title', 'description',
+            'status', 'status_display', 'holiday_count', 'holidays',
+            'created_by', 'created_by_name',
+            'published_at', 'published_by', 'published_by_name',
+            'return_comments', 'returned_at', 'returned_by', 'returned_by_name',
+            'rejection_reason', 'rejected_at',
+            'approvals',
+            'created_at', 'updated_at',
+        ]
+
+    def get_holiday_count(self, obj):    # ← NEW METHOD
+        return obj.holidays.count()
+
+class AnnualCalendarCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AnnualCalendar
+        fields = ['year', 'title', 'description']
+
+
+
+from .models import CalendarAmendment
+
+
+class CalendarAmendmentSerializer(serializers.ModelSerializer):
+    action_display = serializers.CharField(source='get_action_display', read_only=True)
+    made_by_name = serializers.CharField(source='made_by.full_name', read_only=True, default=None)
+
+    class Meta:
+        model = CalendarAmendment
+        fields = [
+            'id', 'action', 'action_display',
+            'holiday_name', 'holiday_date',
+            'reason', 'made_by', 'made_by_name',
+            'made_at', 'holiday_snapshot',
+        ]

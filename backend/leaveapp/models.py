@@ -92,7 +92,90 @@ class LeaveType(models.Model):
     def __str__(self):
         return f"{self.code} - {self.name}"
 
+class AnnualCalendar(models.Model):
+    """A yearly holiday calendar that goes through approval workflow."""
 
+    STATUS_CHOICES = [
+        ('DRAFT', 'Draft'),
+        ('IN_REVIEW', 'In Review'),
+        ('APPROVED', 'Approved'),
+        ('PUBLISHED', 'Published'),
+        ('ARCHIVED', 'Archived'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    year = models.IntegerField(unique=True, db_index=True)
+    title = models.CharField(max_length=200, help_text="e.g., 'Annual Calendar 2027'")
+    description = models.TextField(blank=True)
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
+
+    # Ownership
+    created_by = models.ForeignKey(
+        'HRMSapp.Employee', on_delete=models.SET_NULL, null=True,
+        related_name='created_calendars',
+    )
+    published_at = models.DateTimeField(null=True, blank=True)
+    published_by = models.ForeignKey(
+        'HRMSapp.Employee', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='published_calendars',
+    )
+
+    # Return for changes
+    return_comments = models.TextField(blank=True)
+    returned_at = models.DateTimeField(null=True, blank=True)
+    returned_by = models.ForeignKey(
+        'HRMSapp.Employee', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='returned_calendars',
+    )
+
+    # Rejection
+    rejection_reason = models.TextField(blank=True)
+    rejected_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'annual_calendars'
+        ordering = ['-year']
+
+    def __str__(self):
+        return f"{self.year} - {self.get_status_display()}"
+
+    @property
+    def holiday_count(self):
+        return self.holidays.count()
+    
+
+
+
+class AnnualCalendarApproval(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+        ('RETURNED', 'Returned for Changes'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    calendar = models.ForeignKey(
+        AnnualCalendar, on_delete=models.CASCADE, related_name='approvals',
+    )
+    step_number = models.IntegerField()
+    step_name = models.CharField(max_length=100)
+    approver = models.ForeignKey(
+        'HRMSapp.Employee', on_delete=models.PROTECT,
+        related_name='calendar_approvals',
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    acted_at = models.DateTimeField(null=True, blank=True)
+    comments = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'annual_calendar_approvals'
+        ordering = ['calendar', 'step_number']
 # ==============================================================================
 # HOLIDAY
 # ==============================================================================
@@ -122,7 +205,13 @@ class Holiday(models.Model):
         blank=True,
         related_name='holidays',
     )
-
+    calendar = models.ForeignKey(
+        AnnualCalendar,
+        null=True, blank=True,
+        on_delete=models.CASCADE,
+        related_name='holidays',
+        help_text="Which annual calendar this holiday belongs to",
+    )
     is_optional = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
@@ -142,6 +231,41 @@ class Holiday(models.Model):
         super().save(*args, **kwargs)
 
 
+
+
+class CalendarAmendment(models.Model):
+    """Track amendments to published calendars."""
+
+    ACTION_CHOICES = [
+        ('ADD', 'Added Holiday'),
+        ('REMOVE', 'Removed Holiday'),
+        ('EDIT', 'Edited Holiday'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    calendar = models.ForeignKey(
+        AnnualCalendar, on_delete=models.CASCADE, related_name='amendments',
+    )
+    action = models.CharField(max_length=10, choices=ACTION_CHOICES)
+    holiday_name = models.CharField(max_length=150)
+    holiday_date = models.DateField()
+    reason = models.TextField(help_text="Why this amendment was made")
+
+    made_by = models.ForeignKey(
+        'HRMSapp.Employee', on_delete=models.SET_NULL, null=True,
+        related_name='calendar_amendments',
+    )
+    made_at = models.DateTimeField(auto_now_add=True)
+
+    # Snapshot of holiday data (for REMOVE actions where FK is gone)
+    holiday_snapshot = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = 'calendar_amendments'
+        ordering = ['-made_at']
+
+    def __str__(self):
+        return f"{self.calendar.year} - {self.action} - {self.holiday_name}"
 # ==============================================================================
 # LEAVE BALANCE
 # ==============================================================================
@@ -335,3 +459,49 @@ class LeaveApplicationApproval(models.Model):
 
     def __str__(self):
         return f"{self.application.application_number} - Step {self.step_number} - {self.status}"
+
+
+
+class WhatsAppNotificationLog(models.Model):
+    """Track all WhatsApp notifications for auditing."""
+    
+    NOTIFICATION_TYPE_CHOICES = [
+        ('LEAVE_APPROVAL_REQUEST', 'Leave Approval Request'),
+        ('LEAVE_APPROVED', 'Leave Approved'),
+        ('LEAVE_REJECTED', 'Leave Rejected'),
+        ('LEAVE_CANCELLED', 'Leave Cancelled'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('SUCCESS', 'Success'),
+        ('FAILED', 'Failed'),
+        ('SKIPPED', 'Skipped'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    notification_type = models.CharField(max_length=30, choices=NOTIFICATION_TYPE_CHOICES)
+    
+    recipient_employee = models.ForeignKey(
+        'HRMSapp.Employee', on_delete=models.SET_NULL, null=True,
+        related_name='whatsapp_notifications',
+    )
+    recipient_phone = models.CharField(max_length=20)
+    
+    leave_application = models.ForeignKey(
+        LeaveApplication, on_delete=models.CASCADE,
+        related_name='whatsapp_logs', null=True, blank=True,
+    )
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    message_id = models.CharField(max_length=200, blank=True)
+    error_message = models.TextField(blank=True)
+    
+    sent_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'whatsapp_notification_logs'
+        ordering = ['-sent_at']
+    
+    def __str__(self):
+        return f"{self.notification_type} → {self.recipient_phone} ({self.status})"
+

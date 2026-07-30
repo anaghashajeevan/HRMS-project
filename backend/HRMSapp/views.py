@@ -1,11 +1,7 @@
 from time import timezone
-
 from django.shortcuts import render
-
 from django.db import models
-
 from django.conf import settings
-# Create your views here.
 """
 Authentication views — flat class-based APIViews.
 """

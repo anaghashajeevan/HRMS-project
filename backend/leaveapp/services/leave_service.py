@@ -675,16 +675,21 @@ class LeaveApplicationService:
 
     @staticmethod
     def _notify_approver(application, is_escalation=False):
-        """Send in-app notification + EMAIL to current approver."""
+        """Send in-app + email + WhatsApp to approver."""
         try:
             from HRMSapp.models import Notification
             from .email_service import LeaveEmailService
+            from .whatsapp_service import (
+                send_leave_approval_request_whatsapp,
+                is_whatsapp_enabled,
+            )
+            from ..models import WhatsAppNotificationLog
             
             approver = application.current_approver
             if not approver:
                 return
             
-            # In-app notification
+            # 1. In-app notification
             Notification.objects.create(
                 recipient=approver,
                 notification_type='APPROVAL_REQUEST',
@@ -698,17 +703,50 @@ class LeaveApplicationService:
                 link=f'/leave/approvals',
             )
             
-            # Email with PDF
-            LeaveEmailService.send_approval_request(application, approver, is_escalation=is_escalation)
+            # 2. Email
+            LeaveEmailService.send_approval_request(
+                application, approver, is_escalation=is_escalation
+            )
+            
+            # 3. WhatsApp
+            if is_whatsapp_enabled():
+                if approver.phone_number:
+                    result = send_leave_approval_request_whatsapp(application, approver)
+                    WhatsAppNotificationLog.objects.create(
+                        notification_type='LEAVE_APPROVAL_REQUEST',
+                        recipient_employee=approver,
+                        recipient_phone=approver.phone_number,
+                        leave_application=application,
+                        status='SUCCESS' if result.get('success') else 'FAILED',
+                        message_id=result.get('message_id', ''),
+                        error_message=result.get('error', ''),
+                    )
+                else:
+                    WhatsAppNotificationLog.objects.create(
+                        notification_type='LEAVE_APPROVAL_REQUEST',
+                        recipient_employee=approver,
+                        recipient_phone='',
+                        leave_application=application,
+                        status='SKIPPED',
+                        error_message='No phone number',
+                    )
             
         except Exception as exc:
             logger.exception(f"Failed to send approver notification: {exc}")
 
     @staticmethod
     def _notify_approval(application, approver):
-        """Notify employee of approval."""
+        """Notify employee — in-app + email + WhatsApp."""
         try:
             from HRMSapp.models import Notification
+            from .email_service import LeaveEmailService
+            from .whatsapp_service import (
+                send_leave_approved_whatsapp,
+                is_whatsapp_enabled,
+            )
+            from ..models import WhatsAppNotificationLog
+            
+            # In-app
             Notification.objects.create(
                 recipient=application.employee,
                 notification_type='APPROVAL_APPROVED',
@@ -719,14 +757,38 @@ class LeaveApplicationService:
                 ),
                 link=f'/leave/my-applications',
             )
+            
+            # Email
+            LeaveEmailService.send_approval_notification(application, approver)
+            
+            # WhatsApp
+            if is_whatsapp_enabled() and application.employee.phone_number:
+                result = send_leave_approved_whatsapp(application, approver)
+                WhatsAppNotificationLog.objects.create(
+                    notification_type='LEAVE_APPROVED',
+                    recipient_employee=application.employee,
+                    recipient_phone=application.employee.phone_number,
+                    leave_application=application,
+                    status='SUCCESS' if result.get('success') else 'FAILED',
+                    message_id=result.get('message_id', ''),
+                    error_message=result.get('error', ''),
+                )
         except Exception as exc:
             logger.exception(f"Failed to send approval notification: {exc}")
 
     @staticmethod
     def _notify_rejection(application, approver, reason):
-        """Notify employee of rejection."""
+        """Notify employee — in-app + email + WhatsApp."""
         try:
             from HRMSapp.models import Notification
+            from .email_service import LeaveEmailService
+            from .whatsapp_service import (
+                send_leave_rejected_whatsapp,
+                is_whatsapp_enabled,
+            )
+            from ..models import WhatsAppNotificationLog
+            
+            # In-app
             Notification.objects.create(
                 recipient=application.employee,
                 notification_type='APPROVAL_REJECTED',
@@ -737,6 +799,22 @@ class LeaveApplicationService:
                 ),
                 link=f'/leave/my-applications',
             )
+            
+            # Email
+            LeaveEmailService.send_rejection_notification(application, approver, reason)
+            
+            # WhatsApp
+            if is_whatsapp_enabled() and application.employee.phone_number:
+                result = send_leave_rejected_whatsapp(application, approver, reason)
+                WhatsAppNotificationLog.objects.create(
+                    notification_type='LEAVE_REJECTED',
+                    recipient_employee=application.employee,
+                    recipient_phone=application.employee.phone_number,
+                    leave_application=application,
+                    status='SUCCESS' if result.get('success') else 'FAILED',
+                    message_id=result.get('message_id', ''),
+                    error_message=result.get('error', ''),
+                )
         except Exception as exc:
             logger.exception(f"Failed to send rejection notification: {exc}")
 

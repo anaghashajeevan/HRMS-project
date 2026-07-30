@@ -16,7 +16,10 @@ from .views import (
     RunAutomationView,
     SendMonthlyReportView,
     SendTestEmailView,
-    TestEsslConnectionView,
+    TestEsslConnectionView,MyAttendanceMonthView,
+    MyAttendanceDayView,
+    TeamAttendanceMonthView,
+    EmployeeAttendanceMonthView,AllEmployeesAttendanceView,
 )
 
 urlpatterns = [
@@ -42,4 +45,9 @@ urlpatterns = [
     # Report downloads
     path('reports/daily/<uuid:log_id>/download/', DownloadDailyReportView.as_view(), name='attendance-download-daily'),
     path('reports/monthly/<uuid:log_id>/download/', DownloadMonthlyReportView.as_view(), name='attendance-download-monthly'),
+    path('my-attendance/month/', MyAttendanceMonthView.as_view(), name='my-attendance-month'),
+    path('my-attendance/day/', MyAttendanceDayView.as_view(), name='my-attendance-day'),
+    path('team-attendance/month/', TeamAttendanceMonthView.as_view(), name='team-attendance-month'),
+    path('employee-attendance/<uuid:employee_id>/month/', EmployeeAttendanceMonthView.as_view(), name='employee-attendance-month'),
+    path('all-employees-attendance/',AllEmployeesAttendanceView.as_view(),name='all-employees-attendance'),
 ]
