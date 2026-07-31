@@ -210,3 +210,167 @@ def scan_and_credit_compoff():
     except Exception as exc:
         logger.exception(f"❌ Comp-Off scan failed: {exc}")
         raise
+
+
+
+"""
+Celery tasks for leave notifications (async).
+"""
+from celery import shared_task
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+# ==============================================================================
+# LEAVE APPROVAL REQUEST — Sent when leave is submitted
+# ==============================================================================
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def send_leave_approval_request_notifications(self, application_id):
+    """
+    Send email + WhatsApp to approver when leave is submitted.
+    Runs in background — doesn't block the API response.
+    """
+    from .models import LeaveApplication, WhatsAppNotificationLog
+    from .services.email_service import LeaveEmailService
+    from .services.whatsapp_service import (
+        send_leave_approval_request_whatsapp,
+        is_whatsapp_enabled,
+    )
+
+    try:
+        application = LeaveApplication.objects.select_related(
+            'employee', 'leave_type', 'current_approver',
+        ).get(id=application_id)
+    except LeaveApplication.DoesNotExist:
+        logger.error(f"Application {application_id} not found")
+        return
+
+    approver = application.current_approver
+    if not approver:
+        logger.warning(f"No approver for {application.application_number}")
+        return
+
+    # 1. EMAIL
+    try:
+        LeaveEmailService.send_approval_request(application, approver)
+        logger.info(f"📧 Email sent to {approver.official_email}")
+    except Exception as exc:
+        logger.exception(f"Email failed: {exc}")
+
+    # 2. WHATSAPP
+    if is_whatsapp_enabled() and approver.phone_number:
+        try:
+            result = send_leave_approval_request_whatsapp(application, approver)
+            WhatsAppNotificationLog.objects.create(
+                notification_type='LEAVE_APPROVAL_REQUEST',
+                recipient_employee=approver,
+                recipient_phone=approver.phone_number,
+                leave_application=application,
+                status='SUCCESS' if result.get('success') else 'FAILED',
+                message_id=result.get('message_id', ''),
+                error_message=result.get('error', ''),
+            )
+            if result.get('success'):
+                logger.info(f"📱 WhatsApp sent to {approver.phone_number}")
+            else:
+                logger.warning(f"WhatsApp failed: {result.get('error')}")
+        except Exception as exc:
+            logger.exception(f"WhatsApp exception: {exc}")
+
+
+# ==============================================================================
+# LEAVE APPROVED — Sent when leave is approved
+# ==============================================================================
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def send_leave_approved_notifications(self, application_id, approver_id):
+    """Send email + WhatsApp to employee when leave is approved."""
+    from .models import LeaveApplication, WhatsAppNotificationLog
+    from .services.email_service import LeaveEmailService
+    from .services.whatsapp_service import (
+        send_leave_approved_whatsapp,
+        is_whatsapp_enabled,
+    )
+    from HRMSapp.models import Employee
+
+    try:
+        application = LeaveApplication.objects.select_related(
+            'employee', 'leave_type',
+        ).get(id=application_id)
+        approver = Employee.objects.get(id=approver_id)
+    except (LeaveApplication.DoesNotExist, Employee.DoesNotExist) as exc:
+        logger.error(f"Not found: {exc}")
+        return
+
+    # 1. EMAIL
+    try:
+        LeaveEmailService.send_approval_notification(application, approver)
+        logger.info(f"📧 Approval email sent")
+    except Exception as exc:
+        logger.exception(f"Email failed: {exc}")
+
+    # 2. WHATSAPP
+    if is_whatsapp_enabled() and application.employee.phone_number:
+        try:
+            result = send_leave_approved_whatsapp(application, approver)
+            WhatsAppNotificationLog.objects.create(
+                notification_type='LEAVE_APPROVED',
+                recipient_employee=application.employee,
+                recipient_phone=application.employee.phone_number,
+                leave_application=application,
+                status='SUCCESS' if result.get('success') else 'FAILED',
+                message_id=result.get('message_id', ''),
+                error_message=result.get('error', ''),
+            )
+        except Exception as exc:
+            logger.exception(f"WhatsApp exception: {exc}")
+
+
+# ==============================================================================
+# LEAVE REJECTED — Sent when leave is rejected
+# ==============================================================================
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def send_leave_rejected_notifications(self, application_id, rejector_id, reason):
+    """Send email + WhatsApp to employee when leave is rejected."""
+    from .models import LeaveApplication, WhatsAppNotificationLog
+    from .services.email_service import LeaveEmailService
+    from .services.whatsapp_service import (
+        send_leave_rejected_whatsapp,
+        is_whatsapp_enabled,
+    )
+    from HRMSapp.models import Employee
+
+    try:
+        application = LeaveApplication.objects.select_related(
+            'employee', 'leave_type',
+        ).get(id=application_id)
+        rejector = Employee.objects.get(id=rejector_id)
+    except (LeaveApplication.DoesNotExist, Employee.DoesNotExist) as exc:
+        logger.error(f"Not found: {exc}")
+        return
+
+    # 1. EMAIL
+    try:
+        LeaveEmailService.send_rejection_notification(application, rejector, reason)
+        logger.info(f"📧 Rejection email sent")
+    except Exception as exc:
+        logger.exception(f"Email failed: {exc}")
+
+    # 2. WHATSAPP
+    if is_whatsapp_enabled() and application.employee.phone_number:
+        try:
+            result = send_leave_rejected_whatsapp(application, rejector, reason)
+            WhatsAppNotificationLog.objects.create(
+                notification_type='LEAVE_REJECTED',
+                recipient_employee=application.employee,
+                recipient_phone=application.employee.phone_number,
+                leave_application=application,
+                status='SUCCESS' if result.get('success') else 'FAILED',
+                message_id=result.get('message_id', ''),
+                error_message=result.get('error', ''),
+            )
+        except Exception as exc:
+            logger.exception(f"WhatsApp exception: {exc}")

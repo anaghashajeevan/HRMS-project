@@ -1,3 +1,4 @@
+// src/api/masterData.ts
 import api from './axios';
 import type {
   Role, CompanyStructure, JobPosition, EmployeeIdSetting,

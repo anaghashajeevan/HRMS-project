@@ -675,21 +675,20 @@ class LeaveApplicationService:
 
     @staticmethod
     def _notify_approver(application, is_escalation=False):
-        """Send in-app + email + WhatsApp to approver."""
+        """
+        Send notifications ASYNCHRONOUSLY (via Celery).
+        Only creates in-app notification synchronously (fast).
+        Email + WhatsApp are queued as background tasks.
+        """
         try:
             from HRMSapp.models import Notification
-            from .email_service import LeaveEmailService
-            from .whatsapp_service import (
-                send_leave_approval_request_whatsapp,
-                is_whatsapp_enabled,
-            )
-            from ..models import WhatsAppNotificationLog
+            from ..tasks import send_leave_approval_request_notifications
             
             approver = application.current_approver
             if not approver:
                 return
             
-            # 1. In-app notification
+            # 1. In-app notification (fast — synchronous)
             Notification.objects.create(
                 recipient=approver,
                 notification_type='APPROVAL_REQUEST',
@@ -703,50 +702,21 @@ class LeaveApplicationService:
                 link=f'/leave/approvals',
             )
             
-            # 2. Email
-            LeaveEmailService.send_approval_request(
-                application, approver, is_escalation=is_escalation
-            )
-            
-            # 3. WhatsApp
-            if is_whatsapp_enabled():
-                if approver.phone_number:
-                    result = send_leave_approval_request_whatsapp(application, approver)
-                    WhatsAppNotificationLog.objects.create(
-                        notification_type='LEAVE_APPROVAL_REQUEST',
-                        recipient_employee=approver,
-                        recipient_phone=approver.phone_number,
-                        leave_application=application,
-                        status='SUCCESS' if result.get('success') else 'FAILED',
-                        message_id=result.get('message_id', ''),
-                        error_message=result.get('error', ''),
-                    )
-                else:
-                    WhatsAppNotificationLog.objects.create(
-                        notification_type='LEAVE_APPROVAL_REQUEST',
-                        recipient_employee=approver,
-                        recipient_phone='',
-                        leave_application=application,
-                        status='SKIPPED',
-                        error_message='No phone number',
-                    )
+            # 2. Queue email + WhatsApp in background (INSTANT return)
+            send_leave_approval_request_notifications.delay(str(application.id))
+            logger.info(f"📨 Queued email + WhatsApp for {application.application_number}")
             
         except Exception as exc:
-            logger.exception(f"Failed to send approver notification: {exc}")
+            logger.exception(f"Notification queueing failed: {exc}")
 
     @staticmethod
     def _notify_approval(application, approver):
-        """Notify employee — in-app + email + WhatsApp."""
+        """Notify employee — async."""
         try:
             from HRMSapp.models import Notification
-            from .email_service import LeaveEmailService
-            from .whatsapp_service import (
-                send_leave_approved_whatsapp,
-                is_whatsapp_enabled,
-            )
-            from ..models import WhatsAppNotificationLog
+            from ..tasks import send_leave_approved_notifications
             
-            # In-app
+            # 1. In-app (fast)
             Notification.objects.create(
                 recipient=application.employee,
                 notification_type='APPROVAL_APPROVED',
@@ -758,37 +728,20 @@ class LeaveApplicationService:
                 link=f'/leave/my-applications',
             )
             
-            # Email
-            LeaveEmailService.send_approval_notification(application, approver)
+            # 2. Queue email + WhatsApp (INSTANT return)
+            send_leave_approved_notifications.delay(str(application.id), str(approver.id))
             
-            # WhatsApp
-            if is_whatsapp_enabled() and application.employee.phone_number:
-                result = send_leave_approved_whatsapp(application, approver)
-                WhatsAppNotificationLog.objects.create(
-                    notification_type='LEAVE_APPROVED',
-                    recipient_employee=application.employee,
-                    recipient_phone=application.employee.phone_number,
-                    leave_application=application,
-                    status='SUCCESS' if result.get('success') else 'FAILED',
-                    message_id=result.get('message_id', ''),
-                    error_message=result.get('error', ''),
-                )
         except Exception as exc:
-            logger.exception(f"Failed to send approval notification: {exc}")
+            logger.exception(f"Notification queueing failed: {exc}")
 
     @staticmethod
     def _notify_rejection(application, approver, reason):
-        """Notify employee — in-app + email + WhatsApp."""
+        """Notify employee — async."""
         try:
             from HRMSapp.models import Notification
-            from .email_service import LeaveEmailService
-            from .whatsapp_service import (
-                send_leave_rejected_whatsapp,
-                is_whatsapp_enabled,
-            )
-            from ..models import WhatsAppNotificationLog
+            from ..tasks import send_leave_rejected_notifications
             
-            # In-app
+            # 1. In-app (fast)
             Notification.objects.create(
                 recipient=application.employee,
                 notification_type='APPROVAL_REJECTED',
@@ -800,23 +753,13 @@ class LeaveApplicationService:
                 link=f'/leave/my-applications',
             )
             
-            # Email
-            LeaveEmailService.send_rejection_notification(application, approver, reason)
+            # 2. Queue email + WhatsApp (INSTANT return)
+            send_leave_rejected_notifications.delay(
+                str(application.id), str(approver.id), reason
+            )
             
-            # WhatsApp
-            if is_whatsapp_enabled() and application.employee.phone_number:
-                result = send_leave_rejected_whatsapp(application, approver, reason)
-                WhatsAppNotificationLog.objects.create(
-                    notification_type='LEAVE_REJECTED',
-                    recipient_employee=application.employee,
-                    recipient_phone=application.employee.phone_number,
-                    leave_application=application,
-                    status='SUCCESS' if result.get('success') else 'FAILED',
-                    message_id=result.get('message_id', ''),
-                    error_message=result.get('error', ''),
-                )
         except Exception as exc:
-            logger.exception(f"Failed to send rejection notification: {exc}")
+            logger.exception(f"Notification queueing failed: {exc}")
 
     @staticmethod
     def _update_attendance_records(application):
