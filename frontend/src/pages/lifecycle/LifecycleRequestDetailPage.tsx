@@ -219,24 +219,29 @@ export default function LifecycleRequestDetailPage() {
                 </h2>
                 <div className="space-y-3">
                   <ChangeRow
-                    label="Position"
-                    from={request.current_position_title}
-                    to={request.proposed_position_title}
+                      label="Position"
+                      from={request.current_position_title}
+                      to={request.proposed_position_title}
                   />
                   <ChangeRow
-                    label="Reporting Manager"
-                    from={request.current_manager_name}
-                    to={request.proposed_manager_name}
+                      label="Reporting Manager"
+                      from={request.current_manager_name}
+                      to={request.proposed_manager_name}
                   />
                   <ChangeRow
-                    label="Department / Location"
-                    from={request.current_location_name}
-                    to={request.proposed_location_name}
+                      label="Department"
+                      from={(request as any).current_department_name || request.current_location_name}
+                      to={(request as any).proposed_department_name || request.proposed_location_name}
                   />
                   <ChangeRow
-                    label="Status"
-                    from={request.current_status || null}
-                    to={request.proposed_status || null}
+                      label="Location"
+                      from={(request as any).current_location_display}
+                      to={(request as any).proposed_location_display}
+                  />
+                  <ChangeRow
+                      label="Status"
+                      from={request.current_status || null}
+                      to={request.proposed_status || null}
                   />
                 </div>
               </div>

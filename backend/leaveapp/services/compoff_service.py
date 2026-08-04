@@ -22,20 +22,27 @@ def _is_weekend(d: date) -> bool:
 
 
 def _get_holiday_dates_for_employee(employee, start_date, end_date):
+    """Get holiday dates — uses location field (falls back to structure_location)."""
     try:
         from ..models import Holiday
         from django.db.models import Q
 
         qs = Holiday.objects.filter(
-            date__gte=start_date, date__lte=end_date, is_active=True,
+            date__gte=start_date,
+            date__lte=end_date,
+            is_active=True,
         )
-        if employee.structure_location:
+        
+        emp_location = employee.location or employee.structure_location
+        
+        if emp_location and emp_location.type in ('LOCATION', 'HQ', 'COMPANY'):
             qs = qs.filter(
                 Q(applicable_to_all_locations=True) |
-                Q(applicable_locations=employee.structure_location)
+                Q(applicable_locations=emp_location)
             )
         else:
             qs = qs.filter(applicable_to_all_locations=True)
+
         return set(qs.distinct().values_list('date', flat=True))
     except Exception:
         return set()

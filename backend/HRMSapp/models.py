@@ -48,32 +48,75 @@ class Role(models.Model):
 # ==============================================================================
 
 class CompanyStructure(models.Model):
-    """Company/BU/Department/Location hierarchy (minimal for auth linkage)."""
+    """
+    Enhanced 7-level company hierarchy support.
+    Backward-compatible with existing 5-type structure.
+    """
     STRUCTURE_TYPES = [
-        ('COMPANY', 'Company'),
-        ('BUSINESS_UNIT', 'Business Unit'),
-        ('DEPARTMENT', 'Department'),
-        ('COST_CENTER', 'Cost Center'),
-        ('LOCATION', 'Location'),
+        ('COMPANY', 'Company'),           # Level 1
+        ('HQ', 'Headquarters'),           # Level 2 (NEW)
+        ('BUSINESS_UNIT', 'Business Unit'), # Level 3
+        ('LOCATION', 'Location'),         # Level 4
+        ('DEPARTMENT', 'Department'),     # Level 5
+        ('TEAM', 'Team'),                 # Level 6 (NEW)
+        ('COST_CENTER', 'Cost Center'),   # Level 7
     ]
+
+    # Map type -> level number (used for auto-setting)
+    LEVEL_MAP = {
+        'COMPANY': 1,
+        'HQ': 2,
+        'BUSINESS_UNIT': 3,
+        'LOCATION': 4,
+        'DEPARTMENT': 5,
+        'TEAM': 6,
+        'COST_CENTER': 7,
+    }
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100)
     type = models.CharField(max_length=20, choices=STRUCTURE_TYPES)
+    level = models.IntegerField(default=1, help_text="Auto-set from type (1=Company, 7=Cost Center)")
     parent = models.ForeignKey(
         'self', null=True, blank=True,
         on_delete=models.SET_NULL, related_name='children'
     )
     cost_center_code = models.CharField(max_length=20, unique=True, null=True, blank=True)
     is_active = models.BooleanField(default=True)
+
+    # Display customization (all optional)
+    display_name = models.CharField(
+        max_length=100, blank=True,
+        help_text="Custom display label (e.g., 'Branch' instead of 'Location')"
+    )
+    icon = models.CharField(max_length=50, default='building', blank=True)
+    color_code = models.CharField(max_length=7, default='#3B82F6', blank=True)
+
+    # Cached path for fast queries and display
+    path = models.CharField(
+        max_length=500, blank=True, db_index=True,
+        help_text="Cached hierarchy path: /Company/Location/Department"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'company_structures'
-        ordering = ['name']
+        ordering = ['level', 'name']
 
     def __str__(self):
         return f"{self.name} ({self.type})"
+
+    def save(self, *args, **kwargs):
+        # Auto-set level from type
+        self.level = self.LEVEL_MAP.get(self.type, 1)
+        # Auto-build path from parent chain
+        if self.parent:
+            parent_path = self.parent.path or f"/{self.parent.name}"
+            self.path = f"{parent_path}/{self.name}"
+        else:
+            self.path = f"/{self.name}"
+        super().save(*args, **kwargs)
 
 # ==============================================================================
 # JOB POSITION (Headcount management with budget controls)
@@ -174,6 +217,27 @@ class Employee(models.Model):
     structure_location = models.ForeignKey(
         CompanyStructure, null=True, blank=True,
         on_delete=models.SET_NULL, related_name='employees'
+    )
+    department = models.ForeignKey(
+        CompanyStructure, null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='dept_employees',
+        limit_choices_to={'type__in': ['DEPARTMENT', 'TEAM']},
+        help_text="Which department/team the employee belongs to"
+    )
+    location = models.ForeignKey(
+        CompanyStructure, null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='location_employees',
+        limit_choices_to={'type__in': ['LOCATION', 'HQ', 'COMPANY']},
+        help_text="Which physical location/office"
+    )
+    cost_center = models.ForeignKey(
+        CompanyStructure, null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='cc_employees',
+        limit_choices_to={'type': 'COST_CENTER'},
+        help_text="Financial cost center for reporting"
     )
     date_of_joining = models.DateField()
     date_of_exit = models.DateField(null=True, blank=True)

@@ -46,11 +46,12 @@ class LeaveApplicationService:
             )
             
             # Filter by employee's location
-            if employee.structure_location:
+            emp_location = employee.location or employee.structure_location
+            if emp_location and emp_location.type in ('LOCATION', 'HQ', 'COMPANY'):
                 from django.db.models import Q
                 holiday_query = holiday_query.filter(
                     Q(applicable_to_all_locations=True) |
-                    Q(applicable_locations=employee.structure_location)
+                    Q(applicable_locations=emp_location)
                 )
             else:
                 holiday_query = holiday_query.filter(applicable_to_all_locations=True)

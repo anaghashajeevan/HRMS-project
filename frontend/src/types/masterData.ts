@@ -13,7 +13,7 @@ export interface Role {
 export interface CompanyStructure {
   id: string;
   name: string;
-  type: 'COMPANY' | 'BUSINESS_UNIT' | 'DEPARTMENT' | 'COST_CENTER' | 'LOCATION';
+  type: 'COMPANY' | 'HQ' | 'BUSINESS_UNIT' | 'LOCATION' | 'DEPARTMENT' | 'TEAM' | 'COST_CENTER';
   parent: string | null;
   parent_name: string | null;
   cost_center_code: string | null;
@@ -21,6 +21,11 @@ export interface CompanyStructure {
   children_count: number;
   employee_count: number;
   created_at?: string;
+  level: number;
+  display_name: string;
+  icon: string;
+  color_code: string;
+  path: string;
 }
 
 export interface JobPosition {

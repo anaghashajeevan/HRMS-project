@@ -260,7 +260,9 @@ def process_monthly_logs(year, month, settings_obj=None, today=None, logs=None):
 def _hrms_employee_display(hrms_employee):
     """Get display info from HRMS Employee."""
     department = ""
-    if hrms_employee.structure_location:
+    if hrms_employee.department:
+        department = hrms_employee.department.name
+    elif hrms_employee.structure_location:
         department = hrms_employee.structure_location.name
     return {
         "employee_code": hrms_employee.employee_id,
@@ -310,7 +312,7 @@ def collect_monthly_attendance(year, month, settings_obj=None, today=None, atten
         Employee.objects.filter(
             is_deleted=False,
             status__in=['ACTIVE', 'PROBATION'],
-        ).select_related('structure_location').order_by('employee_id')
+        ).select_related('structure_location', 'department', 'location').order_by('employee_id')
     )
     # Build a set of normalized HRMS codes for quick lookup
     active_codes_normalized = {

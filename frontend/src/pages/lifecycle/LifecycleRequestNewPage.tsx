@@ -27,6 +27,8 @@ export default function LifecycleRequestNewPage() {
   const [allEmployees, setAllEmployees] = useState<any[]>([]);
   const [positions, setPositions] = useState<DropdownOption[]>([]);
   const [locations, setLocations] = useState<DropdownOption[]>([]);
+  const [departments, setDepartments] = useState<DropdownOption[]>([]);
+  const [proposedDepartment, setProposedDepartment] = useState<string>('');
   const [managers, setManagers] = useState<any[]>([]);
 
   // Selected employee + current snapshot
@@ -54,20 +56,34 @@ export default function LifecycleRequestNewPage() {
   employeesApi.getManagers(),
 ]);
 setAllEmployees(emps.results);
+const allStructures = deps.results || deps;
+
 setPositions(
-  pos.results.map((p: any) => ({               // ⬅ FIXED (.results)
+  (pos.results || pos).map((p: any) => ({
     id: p.id,
     label: `${p.title} (${p.grade_band}) - ${p.department_name}`,
   }))
 );
+
+// 🆕 Separate departments and locations
 setLocations(
-  deps.results                                  // ⬅ FIXED (.results)
-    .filter((d: any) => d.is_active)
+  allStructures
+    .filter((d: any) => d.is_active && ['LOCATION', 'HQ'].includes(d.type))
     .map((d: any) => ({
       id: d.id,
-      label: `${d.name} (${d.type})`,
+      label: d.name,
     }))
 );
+
+setDepartments(
+  allStructures
+    .filter((d: any) => d.is_active && ['DEPARTMENT', 'TEAM'].includes(d.type))
+    .map((d: any) => ({
+      id: d.id,
+      label: d.path ? `${d.path.split('/').slice(-2, -1)[0]} → ${d.name}` : d.name,
+    }))
+);
+
 setManagers(mgrs);
       } catch (err) {
         toast.error('Failed to load dropdown data');
@@ -130,15 +146,15 @@ setManagers(mgrs);
       return 'Reason must be at least 10 characters';
 
     const hasChange =
-      proposedPosition || proposedManager || proposedLocation || proposedStatus;
+      proposedPosition || proposedManager || proposedLocation || proposedDepartment || proposedStatus;
     if (!hasChange)
       return 'At least one proposed change (position/manager/location/status) is required';
 
     // Change type specific validation
     if (changeType === 'PROMOTION' && !proposedPosition)
       return 'Promotion requires a new position';
-    if (changeType === 'TRANSFER' && !proposedLocation && !proposedPosition)
-      return 'Transfer requires a new location or position';
+    if (changeType === 'TRANSFER' && !proposedLocation && !proposedPosition && !proposedDepartment)
+      return 'Transfer requires a new location, department, or position';
     if (changeType === 'MANAGER_CHANGE' && !proposedManager)
       return 'Manager change requires a new manager';
     if (changeType === 'CONFIRMATION' && proposedStatus !== 'ACTIVE')
@@ -158,15 +174,17 @@ setManagers(mgrs);
     setSaving(true);
     try {
       const payload = {
-        employee: selectedEmployeeId,
-        change_type: changeType,
-        proposed_position: proposedPosition || null,
-        proposed_manager: proposedManager || null,
-        proposed_location: proposedLocation || null,
-        proposed_status: proposedStatus || '',
-        effective_date: effectiveDate,
-        reason: reason.trim(),
-      };
+    employee: selectedEmployeeId,
+    change_type: changeType,
+    proposed_position: proposedPosition || null,
+    proposed_manager: proposedManager || null,
+    // Send department as proposed_location (backend uses this field for both)
+    // Priority: department change > location change
+    proposed_location: proposedDepartment || proposedLocation || null,
+    proposed_status: proposedStatus || '',
+    effective_date: effectiveDate,
+    reason: reason.trim(),
+};
       const created = await lifecycleRequestsApi.create(payload);
       toast.success(`Request ${created.request_number} submitted for approval`);
       navigate(`/lifecycle-requests/${created.id}`);
@@ -277,31 +295,38 @@ setManagers(mgrs);
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   {/* CURRENT (read-only) */}
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                    <h3 className="mb-3 text-xs font-bold uppercase text-gray-500">
-                      Current
-                    </h3>
-                    <FieldRow
-                      label="Position"
-                      value={
-                        employeeDetail.position
-                          ? `${employeeDetail.position.title} (${employeeDetail.position.grade_band})`
-                          : '—'
-                      }
-                    />
-                    <FieldRow
-                      label="Department"
-                      value={employeeDetail.position?.department_name || '—'}
-                    />
-                    <FieldRow
-                      label="Reporting Manager"
-                      value={employeeDetail.reporting_manager?.full_name || '—'}
-                    />
-                    <FieldRow
-                      label="Location"
-                      value={employeeDetail.structure_location?.name || '—'}
-                    />
-                    <FieldRow label="Status" value={employeeDetail.status} />
-                  </div>
+    <h3 className="mb-3 text-xs font-bold uppercase text-gray-500">
+        Current
+    </h3>
+    <FieldRow
+        label="Position"
+        value={
+            employeeDetail.position
+                ? `${employeeDetail.position.title} (${employeeDetail.position.grade_band})`
+                : '—'
+        }
+    />
+    <FieldRow
+        label="Department"
+        value={
+            (employeeDetail as any).department_detail?.name
+            || employeeDetail.position?.department_name
+            || '—'
+        }
+    />
+    <FieldRow
+        label="Reporting Manager"
+        value={employeeDetail.reporting_manager?.full_name || '—'}
+    />
+    <FieldRow
+        label="Location"
+        value={
+            (employeeDetail as any).location_detail?.name
+            || '—'
+        }
+    />
+    <FieldRow label="Status" value={employeeDetail.status} />
+</div>
 
                   {/* PROPOSED */}
                   <div className="rounded-xl border-2 border-primary-200 bg-primary-50/40 p-4">
@@ -328,11 +353,18 @@ setManagers(mgrs);
                         placeholder="— No change —"
                       />
                       <SelectField
-                        label="New Location / Department"
-                        value={proposedLocation}
-                        onChange={setProposedLocation}
-                        options={locations}
-                        placeholder="— No change —"
+                          label="New Department"
+                          value={proposedDepartment}
+                          onChange={setProposedDepartment}
+                          options={departments}
+                          placeholder="— No change —"
+                      />
+                      <SelectField
+                          label="New Location"
+                          value={proposedLocation}
+                          onChange={setProposedLocation}
+                          options={locations}
+                          placeholder="— No change —"
                       />
                       <SelectField
                         label="New Status"

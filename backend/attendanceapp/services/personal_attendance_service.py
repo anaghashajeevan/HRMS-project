@@ -471,7 +471,7 @@ def _is_holiday(d: date, holiday_dates: set) -> bool:
 
 
 def _get_holidays_for_period(start_date, end_date, employee):
-    """Get holiday dates for employee's location."""
+    """Get holiday dates — uses location field (falls back to structure_location)."""
     try:
         from leaveapp.models import Holiday
         from django.db.models import Q
@@ -481,10 +481,14 @@ def _get_holidays_for_period(start_date, end_date, employee):
             date__lte=end_date,
             is_active=True,
         )
-        if employee.structure_location:
+        
+        # Use location field first, fallback to structure_location
+        emp_location = employee.location or employee.structure_location
+        
+        if emp_location and emp_location.type in ('LOCATION', 'HQ', 'COMPANY'):
             qs = qs.filter(
                 Q(applicable_to_all_locations=True) |
-                Q(applicable_locations=employee.structure_location)
+                Q(applicable_locations=emp_location)
             )
         else:
             qs = qs.filter(applicable_to_all_locations=True)
@@ -805,8 +809,13 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int):
             'employee_id': employee.employee_id,
             'full_name': employee.full_name,
             'department': (
-                employee.structure_location.name
-                if employee.structure_location else None
+                employee.department.name if employee.department
+                else employee.structure_location.name if employee.structure_location
+                else None
+            ),
+            'location': (
+                employee.location.name if employee.location
+                else None
             ),
             'position': (
                 employee.position.title if employee.position else None

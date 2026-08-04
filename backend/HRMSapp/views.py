@@ -493,7 +493,7 @@ class EmployeeViewSet(ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Employee.objects.filter(is_deleted=False).select_related(
-            'position', 'position__department', 'reporting_manager', 'structure_location'
+            'position', 'position__department', 'reporting_manager', 'structure_location','department', 'location', 'cost_center',
         )
 
         if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
@@ -522,6 +522,9 @@ class EmployeeViewSet(ModelViewSet):
         employee_id = generate_employee_id()
         instance = serializer.save(employee_id=employee_id)
 
+        if instance.department and not instance.structure_location:
+            instance.structure_location = instance.department
+            instance.save(update_fields=['structure_location'])
         # Increment position actual_count
         if instance.position:
             instance.position.actual_count = instance.position.employees.filter(is_deleted=False).count()
@@ -542,7 +545,10 @@ class EmployeeViewSet(ModelViewSet):
 
         # Now save — signal fires with correct modified_by
         instance = serializer.save()
-
+        
+        if instance.department and instance.structure_location != instance.department:
+            instance.structure_location = instance.department
+            instance.save(update_fields=['structure_location'])
         # Update position counts if position changed
         if old_position_id != instance.position_id:
             if old_instance.position:
@@ -710,6 +716,9 @@ class EmployeeViewSet(ModelViewSet):
             'position_id': 'Position',
             'reporting_manager_id': 'Reporting Manager',
             'structure_location_id': 'Department / Location',
+            'department_id': 'Department',          # 🆕
+            'location_id': 'Location',              # 🆕
+            'cost_center_id': 'Cost Center', 
             'status': 'Employment Status',
         }
 
@@ -732,10 +741,10 @@ class EmployeeViewSet(ModelViewSet):
                     position_ids.add(val)
                 elif log.field_name == 'reporting_manager_id':
                     manager_ids.add(val)
-                elif log.field_name == 'structure_location_id':
+                elif log.field_name in ('structure_location_id', 'department_id', 'location_id', 'cost_center_id'):
                     location_ids.add(val)
 
-        # Bulk fetch names
+        
         positions_map = {
             str(p.id): f"{p.title} ({p.grade_band})"
             for p in JobPosition.objects.filter(id__in=position_ids)
@@ -745,7 +754,7 @@ class EmployeeViewSet(ModelViewSet):
             for e in EmpModel.objects.filter(id__in=manager_ids)
         }
         locations_map = {
-            str(c.id): c.name
+            str(c.id): f"{c.name} ({c.type})"
             for c in CompanyStructure.objects.filter(id__in=location_ids)
         }
 
@@ -754,13 +763,21 @@ class EmployeeViewSet(ModelViewSet):
             if not value or value == 'None':
                 return '—'
             if field_name == 'position_id':
-                return positions_map.get(value, f'Unknown Position ({value[:8]})')
+                pos = JobPosition.objects.filter(id=value).first()
+                return f"{pos.title} ({pos.grade_band})" if pos else 'Unknown Position'
+
             if field_name == 'reporting_manager_id':
-                return managers_map.get(value, f'Unknown Manager ({value[:8]})')
-            if field_name == 'structure_location_id':
-                return locations_map.get(value, f'Unknown Location ({value[:8]})')
+                mgr = EmpModel.objects.filter(id=value).first()
+                return f"{mgr.full_name} ({mgr.employee_id})" if mgr else 'Unknown Manager'
+
+            if field_name in ('structure_location_id', 'department_id', 'location_id', 'cost_center_id'):
+                struct = CompanyStructure.objects.filter(id=value).first()
+                if struct:
+                    return f"{struct.name} ({struct.type})"
+                return 'Unknown'
+
             if field_name == 'status':
-                return value  # status is already readable (ACTIVE, PROBATION, etc.)
+                return value
             return value
 
         # ---------- Build timeline entries ----------
@@ -1335,7 +1352,7 @@ class LifecycleChangeRequestViewSet(ModelViewSet):
             requested_by=user.employee,
             current_position=employee.position,
             current_manager=employee.reporting_manager,
-            current_location=employee.structure_location,
+            current_location=employee.department or employee.structure_location,
             current_status=employee.status,
         )
         

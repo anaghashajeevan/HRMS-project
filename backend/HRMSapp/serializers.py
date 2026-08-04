@@ -425,7 +425,7 @@ from .models import Employee, CompanyStructure, JobPosition
 class CompanyStructureMiniSerializer(serializers.ModelSerializer):
     class Meta:
         model = CompanyStructure
-        fields = ['id', 'name', 'type']
+        fields = ['id', 'name', 'type','path', 'cost_center_code']
 
 
 class JobPositionMiniSerializer(serializers.ModelSerializer):
@@ -454,7 +454,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
     position_title = serializers.CharField(source='position.title', read_only=True, default=None)
     department_name = serializers.SerializerMethodField()
     manager_name = serializers.SerializerMethodField()
-
+    location_name = serializers.SerializerMethodField()
     class Meta:
         model = Employee
         fields = [
@@ -467,7 +467,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             'phone_number',
             'status',
             'position_title',
-            'department_name',
+            'department_name','location_name', 
             'manager_name',
             'date_of_joining',
         ]
@@ -479,13 +479,115 @@ class EmployeeListSerializer(serializers.ModelSerializer):
         return None
     
     def get_department_name(self, obj):
+        #  Try new department field first, fallback to structure_location
+        if obj.department:
+            return obj.department.name
         if obj.structure_location:
             return obj.structure_location.name
+        return None
+    
+    def get_location_name(self, obj):  
+        if obj.location:
+            return obj.location.name
         return None
 
 # ------------------------------------------------------------------------------
 # DETAIL SERIALIZER (full profile view)
 # ------------------------------------------------------------------------------
+
+# class EmployeeDetailSerializer(serializers.ModelSerializer):
+#     full_name = serializers.CharField(read_only=True)
+#     position = JobPositionMiniSerializer(read_only=True)
+#     reporting_manager = EmployeeManagerMiniSerializer(read_only=True)
+#     structure_location = CompanyStructureMiniSerializer(read_only=True)
+
+#     # NEW: Check if user account exists
+#     has_user_account = serializers.SerializerMethodField()
+#     user_account_info = serializers.SerializerMethodField()
+
+#     # Masked encrypted fields
+#     bank_account = serializers.SerializerMethodField()
+#     pan_number = serializers.SerializerMethodField()
+#     aadhaar_number = serializers.SerializerMethodField()
+#     uan_number = serializers.SerializerMethodField()
+
+#     department_info = CompanyStructureMiniSerializer(source='department', read_only=True)
+#     location_info = CompanyStructureMiniSerializer(source='location', read_only=True)
+#     cost_center_info = CompanyStructureMiniSerializer(source='cost_center', read_only=True)
+
+
+#     class Meta:
+#         model = Employee
+#         fields = [
+#             # Identification
+#             'id', 'employee_id', 'status',
+
+#             # Personal
+#             'first_name', 'last_name', 'full_name',
+#             'official_email', 'personal_email', 'phone_number',
+#             'date_of_birth', 'gender',
+
+#             # Employment
+#             'position', 'reporting_manager', 'structure_location',
+#             'date_of_joining', 'date_of_exit',
+
+#             # Bank / Statutory (masked)
+#             'bank_account', 'bank_ifsc_code',
+#             'pan_number', 'aadhaar_number', 'uan_number',
+
+#             # NEW: User account info
+#             'has_user_account', 'user_account_info',
+
+#             # Timestamps
+#             'created_at', 'updated_at', 'department_info', 'location_info', 'cost_center_info',
+#         ]
+#         read_only_fields = fields
+
+#     # ---------- User Account Check ----------
+#     def get_has_user_account(self, obj):
+#         return hasattr(obj, 'user_account')
+
+#     def get_user_account_info(self, obj):
+#         if hasattr(obj, 'user_account'):
+#             user = obj.user_account
+#             return {
+#                 'username': user.username,
+#                 'email': user.email,
+#                 'is_active': user.is_active,
+#                 'is_locked_out': user.is_locked_out,
+#                 'last_login': user.last_login,
+#                 'roles': list(user.roles.values_list('role_name', flat=True)),
+#             }
+#         return None
+
+#     # ---------- Masking Logic ----------
+#     def _can_see_full_pii(self):
+#         request = self.context.get('request')
+#         if not request or not request.user.is_authenticated:
+#             return False
+#         user = request.user
+#         return user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+
+#     def _mask(self, value, visible_chars=4):
+#         if not value:
+#             return None
+#         if self._can_see_full_pii():
+#             return value
+#         if len(value) <= visible_chars:
+#             return '*' * len(value)
+#         return '*' * (len(value) - visible_chars) + value[-visible_chars:]
+
+#     def get_bank_account(self, obj):
+#         return self._mask(obj.bank_account_encrypted)
+
+#     def get_pan_number(self, obj):
+#         return self._mask(obj.pan_number_encrypted)
+
+#     def get_aadhaar_number(self, obj):
+#         return self._mask(obj.aadhaar_number_encrypted)
+
+#     def get_uan_number(self, obj):
+#         return self._mask(obj.uan_number_encrypted)
 
 class EmployeeDetailSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
@@ -493,7 +595,12 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
     reporting_manager = EmployeeManagerMiniSerializer(read_only=True)
     structure_location = CompanyStructureMiniSerializer(read_only=True)
 
-    # NEW: Check if user account exists
+    # 🆕 NEW: Hierarchy detail fields
+    department_detail = serializers.SerializerMethodField()
+    location_detail = serializers.SerializerMethodField()
+    cost_center_detail = serializers.SerializerMethodField()
+
+    # User account check
     has_user_account = serializers.SerializerMethodField()
     user_account_info = serializers.SerializerMethodField()
 
@@ -518,17 +625,58 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
             'position', 'reporting_manager', 'structure_location',
             'date_of_joining', 'date_of_exit',
 
+            # 🆕 NEW: Hierarchy details
+            'department_detail', 'location_detail', 'cost_center_detail',
+
             # Bank / Statutory (masked)
             'bank_account', 'bank_ifsc_code',
             'pan_number', 'aadhaar_number', 'uan_number',
 
-            # NEW: User account info
+            # User account info
             'has_user_account', 'user_account_info',
 
             # Timestamps
             'created_at', 'updated_at',
         ]
         read_only_fields = fields
+
+    # ---------- 🆕 Hierarchy Methods ----------
+    def get_department_detail(self, obj):
+        dept = obj.department
+        if not dept:
+            # Fallback: use structure_location if it's a department
+            if obj.structure_location and obj.structure_location.type in ('DEPARTMENT', 'TEAM'):
+                dept = obj.structure_location
+        if not dept:
+            return None
+        return {
+            'id': str(dept.id),
+            'name': dept.name,
+            'type': dept.type,
+            'path': dept.path or '',
+        }
+
+    def get_location_detail(self, obj):
+        loc = obj.location
+        if not loc:
+            return None
+        return {
+            'id': str(loc.id),
+            'name': loc.name,
+            'type': loc.type,
+            'path': loc.path or '',
+        }
+
+    def get_cost_center_detail(self, obj):
+        cc = obj.cost_center
+        if not cc:
+            return None
+        return {
+            'id': str(cc.id),
+            'name': cc.name,
+            'type': cc.type,
+            'cost_center_code': cc.cost_center_code or '',
+        }
 
     # ---------- User Account Check ----------
     def get_has_user_account(self, obj):
@@ -575,8 +723,6 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
 
     def get_uan_number(self, obj):
         return self._mask(obj.uan_number_encrypted)
-
-
 
 # ==============================================================================
 # MASTER DATA SERIALIZERS
@@ -626,9 +772,9 @@ class CompanyStructureSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'type', 'parent', 'parent_name',
             'cost_center_code', 'is_active',
-            'children_count', 'employee_count', 'created_at',
+            'children_count', 'employee_count', 'created_at','level', 'path', 'display_name', 'icon', 'color_code',
         ]
-        read_only_fields = ['id', 'children_count', 'employee_count', 'created_at']
+        read_only_fields = ['id', 'children_count', 'employee_count', 'created_at', 'level', 'path']
 
     def get_children_count(self, obj):
         return obj.children.count()
@@ -723,6 +869,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
             'first_name', 'last_name', 'official_email', 'personal_email',
             'phone_number', 'date_of_birth', 'gender',
             'status', 'position', 'reporting_manager', 'structure_location',
+            'department', 'location', 'cost_center',
             'date_of_joining', 'date_of_exit',
             'bank_account_encrypted', 'bank_ifsc_code',
             'pan_number_encrypted', 'aadhaar_number_encrypted', 'uan_number_encrypted',
@@ -917,7 +1064,10 @@ class EmployeeAuditLogSerializer(serializers.ModelSerializer):
             'status': 'Status',
             'position_id': 'Position',
             'reporting_manager_id': 'Reporting Manager',
-            'structure_location_id': 'Department/Location',
+            'structure_location_id': 'Department/Location (Legacy)',
+            'department_id': 'Department',
+            'location_id': 'Location',
+            'cost_center_id': 'Cost Center',
             'date_of_joining': 'Date of Joining',
             'date_of_exit': 'Date of Exit',
             'bank_ifsc_code': 'Bank IFSC Code',
@@ -929,25 +1079,26 @@ class EmployeeAuditLogSerializer(serializers.ModelSerializer):
         if not value or value in ('None', 'null', ''):
             return None
 
-        # Import inside function to avoid circular imports
         from .models import JobPosition, Employee, CompanyStructure
 
         try:
             if field_name == 'position_id':
                 pos = JobPosition.objects.filter(id=value).first()
-                return f"{pos.title} ({pos.grade_band})" if pos else f"Unknown Position"
+                return f"{pos.title} ({pos.grade_band})" if pos else 'Unknown Position'
 
             if field_name == 'reporting_manager_id':
                 mgr = Employee.objects.filter(id=value).first()
-                return f"{mgr.full_name} ({mgr.employee_id})" if mgr else f"Unknown Manager"
+                return f"{mgr.full_name} ({mgr.employee_id})" if mgr else 'Unknown Manager'
 
-            if field_name == 'structure_location_id':
-                loc = CompanyStructure.objects.filter(id=value).first()
-                return loc.name if loc else f"Unknown Location"
+            if field_name in ('structure_location_id', 'department_id', 'location_id', 'cost_center_id'):
+                struct = CompanyStructure.objects.filter(id=value).first()
+                if struct:
+                    return f"{struct.name} ({struct.get_type_display()})"
+                return 'Unknown'
         except Exception:
-            return value  # Fallback to raw value on error
+            return value
 
-        return value  # Non-UUID fields — return as-is
+        return value
 
     def get_old_value_display(self, obj):
         return self._resolve_uuid(obj.field_name, obj.old_value)
@@ -1107,7 +1258,10 @@ class LifecycleChangeRequestDetailSerializer(serializers.ModelSerializer):
     workflow_total_steps = serializers.SerializerMethodField()
     approval_actions = LifecycleApprovalActionSerializer(many=True, read_only=True)
     letter_url = serializers.SerializerMethodField()
-
+    current_department_name = serializers.SerializerMethodField()
+    current_location_display = serializers.SerializerMethodField()
+    proposed_department_name = serializers.SerializerMethodField()
+    proposed_location_display = serializers.SerializerMethodField()
     class Meta:
         model = LifecycleChangeRequest
         fields = [
@@ -1128,7 +1282,8 @@ class LifecycleChangeRequestDetailSerializer(serializers.ModelSerializer):
             'rejection_reason', 'completed_at',
             'letter_template', 'generated_document', 'letter_url',
             'approval_actions','workflow_total_steps',
-            'created_at', 'updated_at',
+            'created_at', 'updated_at','current_department_name', 'current_location_display',
+            'proposed_department_name', 'proposed_location_display',
         ]
         read_only_fields = fields
     def get_workflow_total_steps(self, obj):
@@ -1140,7 +1295,36 @@ class LifecycleChangeRequestDetailSerializer(serializers.ModelSerializer):
             if request:
                 return request.build_absolute_uri(obj.generated_document.file_path.url)
         return None
+    
+    def get_current_department_name(self, obj):
+        """Get department from employee's actual department field."""
+        emp = obj.employee
+        if emp.department:
+            return emp.department.name
+        if emp.structure_location and emp.structure_location.type in ('DEPARTMENT', 'TEAM'):
+            return emp.structure_location.name
+        return None
 
+    def get_current_location_display(self, obj):
+        """Get actual physical location."""
+        emp = obj.employee
+        if emp.location:
+            return emp.location.name
+        return None
+
+    def get_proposed_department_name(self, obj):
+        """If proposed_location is a department, show it here."""
+        loc = obj.proposed_location
+        if loc and loc.type in ('DEPARTMENT', 'TEAM'):
+            return loc.name
+        return None
+
+    def get_proposed_location_display(self, obj):
+        """If proposed_location is a location, show it here."""
+        loc = obj.proposed_location
+        if loc and loc.type in ('LOCATION', 'HQ'):
+            return loc.name
+        return None
 
 class LifecycleChangeRequestCreateSerializer(serializers.ModelSerializer):
     class Meta:

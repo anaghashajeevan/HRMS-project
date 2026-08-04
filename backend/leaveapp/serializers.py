@@ -91,8 +91,11 @@ class LeaveBalanceSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
     def get_employee_department(self, obj):
-        if obj.employee and obj.employee.structure_location:
-            return obj.employee.structure_location.name
+        if obj.employee:
+            if obj.employee.department:
+                return obj.employee.department.name
+            if obj.employee.structure_location:
+                return obj.employee.structure_location.name
         return None
 
 # ==============================================================================

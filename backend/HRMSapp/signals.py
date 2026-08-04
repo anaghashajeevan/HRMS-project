@@ -11,6 +11,7 @@ AUDITED_FIELDS = [
     'first_name', 'last_name', 'official_email', 'personal_email',
     'phone_number', 'gender', 'status',
     'position_id', 'reporting_manager_id', 'structure_location_id',
+    'department_id', 'location_id', 'cost_center_id',   # 🆕 Track hierarchy changes
     'date_of_joining', 'date_of_exit',
     'bank_ifsc_code',
 ]

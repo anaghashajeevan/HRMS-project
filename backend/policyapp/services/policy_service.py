@@ -641,19 +641,19 @@ class PolicyService:
             locations = policy.applicable_locations.all()
 
             if depts.exists():
-                filters |= Q(structure_location__in=depts)
+                # Use new department field first, fallback to structure_location
+                filters |= Q(department__in=depts) | Q(structure_location__in=depts)
 
             if positions.exists():
                 filters |= Q(position__in=positions)
 
             if locations.exists():
-                filters |= Q(structure_location__in=locations)
+                # Use new location field first, fallback to structure_location
+                filters |= Q(location__in=locations) | Q(structure_location__in=locations)
 
-            # If no filters set but applies_to_all is False, return nobody
             if not (depts.exists() or positions.exists() or locations.exists()):
                 logger.warning(
-                    f"Policy {policy.policy_number} applies_to_all=False but no departments/positions selected. "
-                    f"No employees will receive this policy."
+                    f"Policy {policy.policy_number} applies_to_all=False but no targets set."
                 )
                 return Employee.objects.none()
 
