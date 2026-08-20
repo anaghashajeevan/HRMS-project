@@ -1,3 +1,4 @@
+// src/api/auth.ts
 import api from './axios';
 import type { LoginPayload, LoginResponse, UserProfile } from '../types/auth';
 

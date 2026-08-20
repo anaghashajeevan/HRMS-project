@@ -194,6 +194,7 @@ INSTALLED_APPS = [
     'attendanceapp',
     'leaveapp',
     'policyapp',
+    'assetapp',
 ]
 
 MIDDLEWARE = [

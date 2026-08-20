@@ -37,6 +37,7 @@ urlpatterns = [
     path('api/v1/attendance/', include('attendanceapp.urls')), 
     path('api/v1/leave/', include('leaveapp.urls')),
     path('api/v1/policies/', include('policyapp.urls')),
+    path('api/v1/assets/', include('assetapp.urls')),
 ]
 
 if settings.DEBUG:
