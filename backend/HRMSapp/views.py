@@ -3132,4 +3132,96 @@ class ReportExportView(APIView):
             return Response({'detail': f'Response error: {str(e)}'}, status=500)
 
 
+# hrms - lms connection
+import requests
+import logging
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
 
+logger = logging.getLogger(__name__)
+
+LMS_API_URL = 'http://localhost:8001'
+LMS_FRONTEND_URL = 'http://localhost:5174'
+SHARED_SECRET = 'hrms-lms-shared-secret-2024'
+
+
+class GetLMSTokenView(APIView):
+    """
+    POST /api/v1/lms/get-token/
+
+    Flow:
+    - User EXISTS in LMS  → return token → direct login
+    - User NOT in LMS     → return email/name → registration page
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        email = user.email
+
+        try:
+            login_res = requests.post(
+                f'{LMS_API_URL}/api/v2/auth/cross-app-login/',
+                json={
+                    'email': email,
+                    'shared_secret': SHARED_SECRET,
+                },
+                timeout=10,
+            )
+        except requests.exceptions.ConnectionError:
+            return Response(
+                {'error': 'LMS server is not running'},
+                status=503
+            )
+        except requests.exceptions.Timeout:
+            return Response(
+                {'error': 'LMS server timed out'},
+                status=504
+            )
+
+        # ── User EXISTS: return token for direct login ─────────
+        if login_res.status_code == 200:
+            logger.info(f'HRMS→LMS login: {email}')
+            return Response({
+                'action': 'login',
+                'lms_token': login_res.json()['access'],
+                'lms_url': LMS_FRONTEND_URL,
+            })
+
+        # ── User NOT FOUND: send to registration page ──────────
+        if login_res.status_code == 404:
+            logger.info(
+                f'HRMS→LMS: user not found, sending to register: '
+                f'{email}'
+            )
+
+            # Extract name from HRMS user
+            first_name = getattr(user, 'first_name', '') or ''
+            last_name = getattr(user, 'last_name', '') or ''
+
+            # Fallback: try full_name field if exists
+            if not first_name and hasattr(user, 'full_name'):
+                full = (user.full_name or '').strip()
+                parts = full.split(' ', 1)
+                first_name = parts[0] if parts else ''
+                last_name = (
+                    parts[1] if len(parts) > 1 else ''
+                )
+
+            return Response({
+                'action': 'register',
+                'lms_url': LMS_FRONTEND_URL,
+                'email': email,
+                'first_name': first_name,
+                'last_name': last_name,
+            })
+
+        logger.error(
+            f'HRMS→LMS unexpected response: '
+            f'{login_res.status_code}'
+        )
+        return Response(
+            {'error': 'LMS authentication failed'},
+            status=502
+        )

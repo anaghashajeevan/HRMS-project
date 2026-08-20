@@ -20,6 +20,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     # Authentication
     EmployeeDocumentViewSet,
+    GetLMSTokenView,
     LoginView,
     LogoutView,
     CustomTokenRefreshView,
@@ -112,7 +113,7 @@ urlpatterns = [
     # ---------- Audit Logs ----------
     path('auth/audit-logs/', AuthAuditLogListView.as_view(), name='audit_logs'),
     path('peer-search/', PeerSearchView.as_view(), name='peer-search'),
-
+    path('lms/get-token/', GetLMSTokenView.as_view()),
     # ---------- Router URLs (ViewSets) ----------
     path('', include(router.urls)),
 ]

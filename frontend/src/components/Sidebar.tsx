@@ -1555,6 +1555,76 @@ export default function Sidebar() {
               </div>
             </div>
           )}
+          {/* LMS Module */}
+          <div className="mt-6">
+            <div className="flex items-center gap-2 px-3 pb-2 text-xs font-semibold uppercase tracking-widest text-amber-300/70">
+              <BookOpen className="h-3.5 w-3.5" />
+              Modules
+            </div>
+            <div className="space-y-1">
+              <button
+  onClick={async () => {
+    try {
+      const token = localStorage.getItem('access_token')
+
+      const res = await fetch(
+        'http://localhost:8000/api/v1/lms/get-token/',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        alert(data.error || 'Cannot connect to LMS')
+        return
+      }
+
+      if (data.action === 'login') {
+        // ✅ User exists - direct SSO login
+        window.open(
+          `${data.lms_url}/auth/cross-app` +
+          `?token=${data.lms_token}` +
+          `&redirect=/home`,
+          '_blank'
+        )
+      } else if (data.action === 'register') {
+        // ✅ User not in LMS - open registration page
+        // with pre-filled email and name
+        const params = new URLSearchParams({
+          email: data.email || '',
+          first_name: data.first_name || '',
+          last_name: data.last_name || '',
+          source: 'hrms',
+        })
+        window.open(
+          `${data.lms_url}/auth/register?${params.toString()}`,
+          '_blank'
+        )
+      }
+    } catch (err) {
+      alert(
+        'LMS server is not running. ' +
+        'Please start it on port 8001.'
+      )
+    }
+  }}
+  className={`${itemBase} ${itemInactive} w-full`}
+  style={entranceStyle(0)}
+>
+  <BookOpen className={iconClass()} />
+  <span className="flex-1 text-left tracking-wide">LMS</span>
+  <span className="flex h-5 items-center rounded-full bg-amber-400/20 px-2 text-[10px] font-bold text-amber-300">
+    NEW
+  </span>
+</button>
+            </div>
+          </div>
         </nav>
       </div>
     </aside>
