@@ -1,5 +1,7 @@
 from django.shortcuts import render
 
+from assetapp.tasks import notify_asset_allocation,notify_asset_return
+
 # Create your views here.
 """
 Asset Management Views.
@@ -245,6 +247,8 @@ class AssetAllocationViewSet(ModelViewSet):
         asset.status = 'ALLOCATED'
         asset.save(update_fields=['status'])
 
+        notify_asset_allocation.delay(str(allocation.id))
+        
         return Response(
             AssetAllocationSerializer(allocation, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
@@ -296,7 +300,7 @@ class AssetAllocationViewSet(ModelViewSet):
             asset.status = 'DISPOSED'
 
         asset.save(update_fields=['status'])
-
+        notify_asset_return.delay(str(allocation.id))
         return Response({
             'status': 'SUCCESS',
             'message': f'Asset marked as {return_status}',

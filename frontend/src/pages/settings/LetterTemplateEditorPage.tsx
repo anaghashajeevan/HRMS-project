@@ -69,6 +69,22 @@ const AVAILABLE_VARIABLES = [
   { key: 'manager_name', desc: 'Reporting manager name', group: 'Leave' },
   { key: 'is_lop', desc: '"Yes" or "No"', group: 'Leave' },
   { key: 'lop_days', desc: 'Days that will be Loss of Pay', group: 'Leave' },
+
+  // ===== ASSET ALLOCATION =====
+{ key: 'asset_name', desc: 'Asset name (e.g. MacBook Pro)', group: 'Asset' },
+{ key: 'asset_tag', desc: 'Asset tag (e.g. AST-LAP-001)', group: 'Asset' },
+{ key: 'serial_number', desc: 'Serial number', group: 'Asset' },
+{ key: 'category', desc: 'Asset category (Laptops, etc.)', group: 'Asset' },
+{ key: 'brand', desc: 'Brand', group: 'Asset' },
+{ key: 'model_number', desc: 'Model number', group: 'Asset' },
+{ key: 'allocated_date', desc: 'Date allocated', group: 'Asset' },
+{ key: 'expected_return_date', desc: 'Expected return date', group: 'Asset' },
+{ key: 'handover_notes', desc: 'Handover / accessories notes', group: 'Asset' },
+{ key: 'allocated_by', desc: 'Who allocated the asset', group: 'Asset' },
+{ key: 'portal_url', desc: 'Link to My Assets page', group: 'Asset' },
+{ key: 'return_status', desc: 'Status (Returned/Damaged/Lost)', group: 'Asset' },
+{ key: 'return_notes', desc: 'Condition upon return', group: 'Asset' },
+{ key: 'recovery_cost', desc: 'Cost recovered from employee', group: 'Asset' },
 ];
 
 // Preview data — used to render sample PDF with realistic values
@@ -117,6 +133,24 @@ const PREVIEW_DATA: Record<string, string> = {
   manager_name: 'John Manager',
   is_lop: 'No',
   lop_days: '0',
+
+
+  // Asset
+asset_name: 'MacBook Pro 16" M3 Pro',
+asset_tag: 'AST-LAP-001',
+serial_number: 'C02XG2MDMD6T',
+category: 'Laptops',
+brand: 'Apple',
+model_number: 'MBP16-M3-2024',
+allocated_date: '20 August 2026',
+expected_return_date: 'N/A',
+handover_notes: 'Charger + laptop bag included. Handle with care.',
+allocated_by: 'Sarah HR',
+portal_url: 'http://localhost:5173/assets/my-assets',
+returned_date: '25 August 2026',
+return_status: 'Returned (Good Condition)',
+return_notes: 'Minor scratch on lid.',
+recovery_cost: '0',
 };
 
 // ==============================================================================
@@ -347,17 +381,29 @@ export default function LetterTemplateEditorPage() {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-medium uppercase text-gray-500">
-                      Type <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={templateType}
-                      onChange={(e) =>
-                        setTemplateType(e.target.value as LetterTemplateType)
-                      }
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                    >
-                     <optgroup label="🔄 Lifecycle Letters">
+  <label className="mb-1 block text-xs font-medium uppercase text-gray-500">
+    Type <span className="text-red-500">*</span>
+  </label>
+  <select
+  value={templateType}
+  onChange={(e) => {
+    const next = e.target.value as LetterTemplateType;
+    setTemplateType(next);
+    
+    // Auto-fill AI prompt for Assets
+    if (next === 'ASSET_ALLOCATION' && !aiPrompt.trim()) {
+      setAiPrompt(
+        'Write a professional asset allocation letter informing the employee that {{asset_name}} (Tag: {{asset_tag}}, Serial: {{serial_number}}) has been allocated to them on {{allocated_date}}. Mention they are responsible for safe custody and must return it on exit. Include handover notes {{handover_notes}}.'
+      );
+    } else if (next === 'ASSET_RETURN' && !aiPrompt.trim()) {
+      setAiPrompt(
+        'Write an asset return confirmation letter acknowledging that {{asset_name}} (Tag: {{asset_tag}}) was returned on {{returned_date}}. The condition was marked as {{return_status}} with notes: {{return_notes}}. Recovery cost if any: ₹{{recovery_cost}}.'
+      );
+    }
+  }}
+  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+>
+  <optgroup label="🔄 Lifecycle Letters">
     <option value="PROMOTION">Promotion Letter</option>
     <option value="TRANSFER">Transfer Letter</option>
     <option value="REDESIGNATION">Re-designation Letter</option>
@@ -367,14 +413,18 @@ export default function LetterTemplateEditorPage() {
   <optgroup label="🎯 Performance Letters">
     <option value="PERFORMANCE_RATING">Performance Rating Letter</option>
     <option value="APPRAISAL_LETTER">Appraisal Letter</option>
-    <option value="PIP_LETTER">Performance Improvement Plan (PIP)</option>
+    <option value="PIP_LETTER">PIP Letter</option>
   </optgroup>
   <optgroup label="🏖️ Leave Letters">
     <option value="LEAVE_APPLICATION">Leave Application Letter</option>
     <option value="LEAVE_APPROVAL">Leave Approval Letter</option>
   </optgroup>
-                    </select>
-                  </div>
+  <optgroup label="📦 Asset Letters">
+    <option value="ASSET_ALLOCATION">Asset Allocation Letter</option>
+    <option value="ASSET_RETURN">Asset Return Confirmation</option>
+  </optgroup>
+</select>
+</div>
                   <div className="md:col-span-2">
                     <label className="mb-1 block text-xs font-medium uppercase text-gray-500">
                       Email Subject <span className="text-red-500">*</span>
@@ -548,7 +598,7 @@ export default function LetterTemplateEditorPage() {
   </div>
 
   {/* Group by category */}
-  {['Common', 'Lifecycle', 'Performance', 'Leave'].map((group) => {
+ {['Common', 'Lifecycle', 'Performance', 'Leave', 'Asset'].map((group) => {
   const groupVars = AVAILABLE_VARIABLES.filter((v) => {
     if (v.group !== group) return false;
     
@@ -557,32 +607,38 @@ export default function LetterTemplateEditorPage() {
       'PROMOTION', 'TRANSFER', 'REDESIGNATION', 'CONFIRMATION', 'MANAGER_CHANGE'
     ].includes(templateType);
     const isLeaveTemplate = ['LEAVE_APPLICATION', 'LEAVE_APPROVAL'].includes(templateType);
+    const isAssetTemplate = templateType === 'ASSET_ALLOCATION';
     
     if (group === 'Lifecycle' && !isLifecycleTemplate) return false;
     if (group === 'Performance' && !isPerformanceTemplate) return false;
     if (group === 'Leave' && !isLeaveTemplate) return false;
+    if (group === 'Asset' && !isAssetTemplate) return false;
     
     return true;
   });
   if (groupVars.length === 0) return null;
 
   const groupColor =
-    group === 'Common'
-      ? 'text-gray-600'
-      : group === 'Lifecycle'
-      ? 'text-blue-600'
-      : group === 'Performance'
-      ? 'text-purple-600'
-      : 'text-green-600';  // 🆕 Leave = green
+  group === 'Common'
+    ? 'text-gray-600'
+    : group === 'Lifecycle'
+    ? 'text-blue-600'
+    : group === 'Performance'
+    ? 'text-purple-600'
+    : group === 'Leave'
+    ? 'text-green-600'
+    : 'text-orange-600';
 
   const groupBadge =
-    group === 'Common'
-      ? '📌 All Letters'
-      : group === 'Lifecycle'
-      ? '🔄 Promotion/Transfer'
-      : group === 'Performance'
-      ? '🎯 Rating/PIP'
-      : '🏖️ Leave Letters';  // 🆕
+  group === 'Common'
+    ? '📌 All Letters'
+    : group === 'Lifecycle'
+    ? '🔄 Promotion/Transfer'
+    : group === 'Performance'
+    ? '🎯 Rating/PIP'
+    : group === 'Leave'
+    ? '🏖️ Leave Letters'
+    : '📦 Asset Allocation';
 
   return (
     <div key={group} className="mb-3 last:mb-0">

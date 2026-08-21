@@ -67,7 +67,9 @@ export type LetterTemplateType =
   | 'MANAGER_CHANGE'
   | 'PERFORMANCE_RATING'
   | 'APPRAISAL_LETTER'
-  | 'PIP_LETTER';
+  | 'PIP_LETTER'
+  | 'ASSET_ALLOCATION'
+  | 'ASSET_RETURN';
 
 export type CreationMethod = 'AI' | 'MANUAL' | 'AI_EDITED';
 

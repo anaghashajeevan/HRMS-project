@@ -927,6 +927,7 @@ import {
   Clock,
   Activity,
   MessageCircle,Gift,
+  Package,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -1080,6 +1081,38 @@ const mainNav: NavEntry[] = [
     ],
   },
 
+  // ==================== Asset Management (Dropdown) ====================
+{
+  label: 'Asset Management',
+  icon: Package,
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  children: [
+    {
+      label: 'My Assets',
+      icon: Package,
+      to: '/assets/my-assets',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    },
+    {
+      label: 'Dashboard',
+      icon: LayoutDashboard,
+      to: '/assets/dashboard',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    },
+    {
+      label: 'Asset Directory',
+      icon: ClipboardList,
+      to: '/assets',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    },
+    {
+      label: 'Categories',
+      icon: FileText,
+      to: '/assets/categories',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    },
+  ],
+},
   // ==================== Other Modules ====================
   {
   label: 'Attendance',

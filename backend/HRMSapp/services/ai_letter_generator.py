@@ -38,6 +38,16 @@ Leave-specific (only for LEAVE_APPLICATION and LEAVE_APPROVAL templates):
 - {{approver_name}} - Current approver name
 - {{is_lop}} - "Yes" or "No"
 - {{lop_days}} - Days that will be LOP
+
+
+Asset-specific (only for ASSET_ALLOCATION templates):
+- {{asset_name}} - Name of equipment (e.g., MacBook Pro)
+- {{asset_tag}} - Barcode/Tag (e.g., AST-LAP-001)
+- {{serial_number}} - Serial number
+- {{category}} - Category (e.g., Laptops)
+- {{allocated_date}} - Date assigned
+- {{expected_return_date}} - Due date (if temporary)
+- {{handover_notes}} - Accessories/condition notes
 """
 
 SYSTEM_PROMPT = f"""You are a professional HR letter template generator.

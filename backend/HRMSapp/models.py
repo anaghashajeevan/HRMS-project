@@ -708,6 +708,8 @@ class LetterTemplate(models.Model):
         ('PIP_LETTER', 'Performance Improvement Plan Letter'),
         ('LEAVE_APPLICATION', 'Leave Application Letter'), 
         ('LEAVE_APPROVAL', 'Leave Approval Letter'), 
+        ('ASSET_ALLOCATION', 'Asset Allocation Letter'),
+        ('ASSET_RETURN', 'Asset Return Letter'),
     ]
     CREATION_METHOD_CHOICES = [
         ('AI', 'AI Generated'),
@@ -875,6 +877,8 @@ class Notification(models.Model):
         ('APPROVAL_REJECTED', 'Request Rejected'),
         ('LETTER_GENERATED', 'Letter Generated'),
         ('SYSTEM', 'System Notification'),
+        ('ASSET_ALLOCATED', 'Asset Allocated'),
+        ('ASSET_RETURNED', 'Asset Returned'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

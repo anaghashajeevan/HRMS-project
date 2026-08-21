@@ -19,6 +19,8 @@ const templateTypeColors: Record<LetterTemplateType, string> = {
   PERFORMANCE_RATING: 'bg-primary-100 text-primary-700',
   APPRAISAL_LETTER: 'bg-teal-100 text-teal-700',
   PIP_LETTER: 'bg-red-100 text-red-700',
+  ASSET_ALLOCATION: 'bg-orange-100 text-orange-700',
+  ASSET_RETURN: 'bg-stone-100 text-stone-700',
 };
 
 const templateTypeLabels: Record<LetterTemplateType, string> = {
@@ -30,6 +32,8 @@ const templateTypeLabels: Record<LetterTemplateType, string> = {
   PERFORMANCE_RATING: 'Performance Rating',
   APPRAISAL_LETTER: 'Appraisal',
   PIP_LETTER: 'PIP',
+  ASSET_ALLOCATION: 'Asset Allocation', 
+  ASSET_RETURN: 'Asset Return',
 };
 
 export default function LetterTemplatesPage() {
@@ -128,6 +132,14 @@ export default function LetterTemplatesPage() {
     <option value="APPRAISAL_LETTER">Appraisal</option>
     <option value="PIP_LETTER">PIP</option>
   </optgroup>
+  <optgroup label="🏖️ Leave">
+    <option value="LEAVE_APPLICATION">Leave Application</option>
+    <option value="LEAVE_APPROVAL">Leave Approval</option>
+  </optgroup>
+   <optgroup label="📦 Assets">
+    <option value="ASSET_ALLOCATION">Asset Allocation</option>
+    <option value="ASSET_RETURN">Asset Return</option>
+  </optgroup>
             </select>
           </div>
 
@@ -149,10 +161,10 @@ export default function LetterTemplatesPage() {
                   <div className="mb-3 flex items-start justify-between">
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                        templateTypeColors[template.template_type]
+                        templateTypeColors[template.template_type] || 'bg-gray-100 text-gray-700'
                       }`}
                     >
-                      {templateTypeLabels[template.template_type]}
+                      {templateTypeLabels[template.template_type] || template.template_type_display || template.template_type}
                     </span>
                     {template.is_default && (
                       <span

@@ -338,6 +338,13 @@ import AllEmployeesAttendancePage from './pages/attendance/AllEmployeesAttendanc
 import WhatsAppSettingsPage from './pages/settings/WhatsAppSettingsPage';
 import CompOffLogsPage from './pages/leave/CompOffLogsPage';
 
+import MyAssetsPage from './pages/assets/MyAssetsPage';
+import AssetDashboardPage from './pages/assets/AssetDashboardPage';
+import AssetListPage from './pages/assets/AssetListPage';
+import AssetDetailPage from './pages/assets/AssetDetailPage';
+import AssetFormPage from './pages/assets/AssetFormPage';
+import AssetCategoriesPage from './pages/assets/AssetCategoriesPage';
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -980,6 +987,79 @@ export default function App() {
   element={
     <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
       <CompOffLogsPage />
+    </ProtectedRoute>
+  }
+/>
+{/* ==================== ASSET MANAGEMENT ==================== */}
+
+{/* My Assets (Employee ESS) */}
+<Route
+  path="/assets/my-assets"
+  element={
+    <ProtectedRoute
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}
+    >
+      <MyAssetsPage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* Asset Dashboard (HR) */}
+<Route
+  path="/assets/dashboard"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <AssetDashboardPage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* Categories — MUST come BEFORE :id */}
+<Route
+  path="/assets/categories"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <AssetCategoriesPage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* Create new asset — MUST come BEFORE :id */}
+<Route
+  path="/assets/new"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <AssetFormPage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* Edit asset */}
+<Route
+  path="/assets/:id/edit"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <AssetFormPage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* Asset Directory (list) */}
+<Route
+  path="/assets"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <AssetListPage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* Asset Detail — dynamic :id MUST be LAST */}
+<Route
+  path="/assets/:id"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+      <AssetDetailPage />
     </ProtectedRoute>
   }
 />
