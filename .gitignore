@@ -31,6 +31,8 @@ backend/.env
 frontend/.env
 frontend/.env.local
 
+venv/
+
 # ===========================================
 # Node / React / Frontend
 # ===========================================
