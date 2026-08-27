@@ -1,6 +1,6 @@
 from time import timezone
 from django.shortcuts import render
-from django.db import models
+from django.db import models, transaction
 from django.conf import settings
 """
 Authentication views — flat class-based APIViews.
@@ -12,8 +12,11 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework.decorators import action
-from .models import KRAPeerNomination, PeerRating, UserAccount, UserActiveSession, AuthAuditLog, Role,EmployeeAuditLog
+from decimal import Decimal
+from .models import  CommonKPIMaster, UserAccount, UserActiveSession, AuthAuditLog, Role,EmployeeAuditLog
+# from .models import KRAPeerNomination, PeerRating
 from .serializers import (
+    CommonKPIMasterSerializer,
     EmployeeCreateUpdateSerializer,
     LoginSerializer,
     LogoutSerializer,
@@ -1761,134 +1764,40 @@ class KPILibraryItemViewSet(ModelViewSet):
             return [IsAuthenticated()]
         return [IsAuthenticated(), IsHRAdmin()]
 
+# NEW KRA and KPI restructuring
+
+# ==============================================================================
+# PERFORMANCE MANAGEMENT — NEW VIEWS
+# ==============================================================================
+from rest_framework.viewsets import ModelViewSet
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django_filters.rest_framework import DjangoFilterBackend
+from django.db import models
+
 from .models import (
-    PerformanceCycle, EmployeeScorecard,
-    EmployeeKRA, EmployeeKPI, EmployeeKPIEvidence,
-    KRALibrary,
+    AnnualPerformancePlan, QuarterlyReview, MonthlyPerformancePlan,
+    MonthlyKRA, MonthlyKPI
 )
 from .serializers import (
-    PerformanceCycleSerializer,
-    EmployeeScorecardListSerializer,
-    EmployeeScorecardDetailSerializer,
-    EmployeeKRASerializer,
-    EmployeeKPISerializer,
-    EmployeeKPIEvidenceSerializer,
-    AddLibraryKRASerializer,
-    SendBackSerializer,KRAPeerNominationSerializer,
-    PeerRatingSerializer,
-    PeerRatingSubmitSerializer,
-    PeerRatingDeclineSerializer,
-    NominatePeersSerializer,
-    PendingPeerReviewSerializer,
-    EmployeeForPeerSerializer,
+    AnnualPerformancePlanListSerializer, AnnualPerformancePlanDetailSerializer,
+    MonthlyPerformancePlanSerializer, MonthlyKRASerializer, MonthlyKPISerializer
 )
-from .services.scorecard_service import ScorecardService
-
-
-# ------------------------------------------------------------------------------
-# PERFORMANCE CYCLE
-# ------------------------------------------------------------------------------
-
-class PerformanceCycleViewSet(ModelViewSet):
-    """
-    Manage performance review cycles.
-    HR Admin can create/edit; anyone can view.
-    """
-    queryset = PerformanceCycle.objects.all().prefetch_related(
-        'applicable_departments', 'scorecards'
-    )
-    serializer_class = PerformanceCycleSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['cycle_type', 'status', 'financial_year']
-    search_fields = ['name']
-    ordering_fields = ['period_start', 'created_at']
-    ordering = ['-period_start']
-
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve', 'my_active', 'current_phase_info']:
-            return [IsAuthenticated()]
-        return [IsAuthenticated(), IsHRAdmin()]
-
-    def perform_create(self, serializer):
-        employee = getattr(self.request.user, 'employee', None)
-        serializer.save(created_by=employee)
-
-    @action(detail=True, methods=['post'], url_path='activate')
-    def activate(self, request, pk=None):
-        """
-        Activate a cycle: change status to ACTIVE and auto-create scorecards
-        for all applicable employees.
-        """
-        cycle = self.get_object()
-        
-        if cycle.status == 'ACTIVE':
-            return Response({'detail': 'Cycle is already active'}, status=400)
-        
-        cycle.status = 'ACTIVE'
-        cycle.save()
-        
-        count = ScorecardService.auto_create_scorecards_for_cycle(cycle)
-        
-        return Response({
-            'status': 'success',
-            'message': f'Cycle activated. {count} scorecards created.',
-            'scorecards_created': count,
-        })
-
-    @action(detail=True, methods=['post'], url_path='close')
-    def close(self, request, pk=None):
-        """Close a cycle - locks all scorecards."""
-        cycle = self.get_object()
-        cycle.status = 'CLOSED'
-        cycle.save()
-        return Response({'status': 'success', 'message': 'Cycle closed'})
-
-    @action(detail=False, methods=['get'], url_path='my-active')
-    def my_active(self, request):
-        """Get active cycles applicable to current user."""
-        user = request.user
-        if not hasattr(user, 'employee'):
-            return Response([])
-        
-        employee = user.employee
-        active_cycles = self.get_queryset().filter(status='ACTIVE')
-        
-        # Filter to cycles applicable to employee's department
-        if employee.structure_location:
-            active_cycles = active_cycles.filter(
-                models.Q(applicable_departments__isnull=True) |
-                models.Q(applicable_departments=employee.structure_location)
-            ).distinct()
-        
-        serializer = self.get_serializer(active_cycles, many=True)
-        return Response(serializer.data)
-
-
-# ------------------------------------------------------------------------------
-# EMPLOYEE SCORECARD
-# ------------------------------------------------------------------------------
-
-class EmployeeScorecardViewSet(ModelViewSet):
-    """
-    Employee scorecards for performance cycles.
-    - Employees see their own
-    - Managers see their team's
-    - HR sees all
-    """
-    queryset = EmployeeScorecard.objects.all().select_related(
-        'employee', 'employee__position', 'employee__structure_location',
-        'employee__reporting_manager', 'cycle', 'manager_signed_off_by'
-    ).prefetch_related('kras__kpis__evidences')
+from .services.annual_plan_service import AnnualPlanService
+class AnnualPerformancePlanViewSet(ModelViewSet):
+    """Manage annual plans."""
+    queryset = AnnualPerformancePlan.objects.select_related('employee').prefetch_related(
+        'quarterly_reviews__monthly_plans__kras__kpis'
+    ).all()
     permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['employee', 'cycle', 'status']
-    ordering_fields = ['created_at', 'employee__first_name']
-    http_method_names = ['get', 'post', 'patch', 'delete']
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['financial_year', 'status', 'employee']
 
     def get_serializer_class(self):
         if self.action == 'list':
-            return EmployeeScorecardListSerializer
-        return EmployeeScorecardDetailSerializer
+            return AnnualPerformancePlanListSerializer
+        return AnnualPerformancePlanDetailSerializer
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1896,490 +1805,84 @@ class EmployeeScorecardViewSet(ModelViewSet):
         
         if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
             return qs
-        
         if user.has_role('MANAGER') and hasattr(user, 'employee'):
             return qs.filter(
                 models.Q(employee__reporting_manager=user.employee) |
                 models.Q(employee=user.employee)
             )
-        
         if hasattr(user, 'employee'):
             return qs.filter(employee=user.employee)
-        
         return qs.none()
-
-    @action(detail=False, methods=['get'], url_path='my-scorecards')
-    def my_scorecards(self, request):
-        """Get current user's own scorecards."""
-        user = request.user
-        if not hasattr(user, 'employee'):
-            return Response([])
-        
-        qs = self.queryset.filter(employee=user.employee)
-        serializer = EmployeeScorecardListSerializer(qs, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=['get'], url_path='team-scorecards')
-    def team_scorecards(self, request):
-        """Get scorecards of team members (for managers)."""
-        user = request.user
-        if not hasattr(user, 'employee'):
-            return Response([])
-        
-        qs = self.queryset.filter(employee__reporting_manager=user.employee)
-        
-        cycle_id = request.query_params.get('cycle')
-        if cycle_id:
-            qs = qs.filter(cycle_id=cycle_id)
-        
-        serializer = EmployeeScorecardListSerializer(qs, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['post'], url_path='add-library-kra')
-    def add_library_kra(self, request, pk=None):
-        """Add a KRA from library to this scorecard."""
-        scorecard = self.get_object()
-        serializer = AddLibraryKRASerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        try:
-            lib_kra = KRALibrary.objects.get(
-                id=serializer.validated_data['library_kra_id'],
-                is_active=True,
-            )
-        except KRALibrary.DoesNotExist:
-            return Response({'detail': 'Library KRA not found'}, status=404)
-        
-        emp_kra = ScorecardService.add_library_kra_to_scorecard(
-            scorecard,
-            lib_kra,
-            weight=serializer.validated_data.get('weight'),
-            include_all_kpis=serializer.validated_data.get('include_all_kpis', True),
-        )
-        
-        return Response(EmployeeKRASerializer(emp_kra).data, status=201)
-
-    @action(detail=True, methods=['post'], url_path='submit')
-    def submit(self, request, pk=None):
-        """Employee submits scorecard for manager review."""
-        scorecard = self.get_object()
-        user = request.user
-        
-        # Only employee themselves can submit
-        if not hasattr(user, 'employee') or user.employee.id != scorecard.employee.id:
-            return Response({'detail': 'Only the employee can submit'}, status=403)
-        
-        if scorecard.status not in ['DRAFT', 'SENT_BACK']:
-            return Response(
-                {'detail': f'Cannot submit from status {scorecard.status}'},
-                status=400
-            )
-        
-        # Validate
-        is_valid, errors = ScorecardService.validate_scorecard(scorecard)
-        if not is_valid:
-            return Response({'detail': 'Validation failed', 'errors': errors}, status=400)
-        
-        scorecard.status = 'SUBMITTED'
-        scorecard.save()
-        
-        return Response({'status': 'success', 'message': 'Scorecard submitted for review'})
-
-    @action(detail=True, methods=['post'], url_path='approve')
-    def approve(self, request, pk=None):
-        """Manager approves the scorecard."""
-        from django.utils import timezone as dj_timezone  # ← Local import — guaranteed correct
-        
-        scorecard = self.get_object()
-        user = request.user
-        
-        if not hasattr(user, 'employee'):
-            return Response({'detail': 'No employee record'}, status=400)
-        
-        # Only reporting manager or HR can approve
-        is_manager = scorecard.employee.reporting_manager_id == user.employee.id
-        is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
-        
-        if not (is_manager or is_hr):
-            return Response({'detail': 'Only reporting manager or HR can approve'}, status=403)
-        
-        if scorecard.status not in ['SUBMITTED', 'MANAGER_REVIEWING']:
-            return Response(
-                {'detail': f'Cannot approve from status {scorecard.status}'},
-                status=400
-            )
-        
-        scorecard.status = 'APPROVED'
-        scorecard.manager_signed_off_at = dj_timezone.now()   # ← Use dj_timezone
-        scorecard.manager_signed_off_by = user.employee
-        scorecard.save()
-        
-        return Response({'status': 'success', 'message': 'Scorecard approved'})
-
-    @action(detail=True, methods=['post'], url_path='send-back')
-    def send_back(self, request, pk=None):
-        """Manager sends scorecard back for revision."""
-        from django.utils import timezone as dj_timezone
-        scorecard = self.get_object()
-        user = request.user
-        
-        if not hasattr(user, 'employee'):
-            return Response({'detail': 'No employee record'}, status=400)
-        
-        is_manager = scorecard.employee.reporting_manager_id == user.employee.id
-        is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
-        
-        if not (is_manager or is_hr):
-            return Response({'detail': 'Only manager can send back'}, status=403)
-        
-        serializer = SendBackSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        scorecard.status = 'SENT_BACK'
-        scorecard.sent_back_reason = serializer.validated_data['reason']
-        scorecard.sent_back_at = dj_timezone.now()
-        scorecard.save()
-        
-        return Response({'status': 'success', 'message': 'Scorecard sent back for revision'})
-
-    @action(detail=True, methods=['post'], url_path='sign-off')
-    def sign_off(self, request, pk=None):
-        """Employee signs off on approved scorecard."""
-        from django.utils import timezone as dj_timezone
-        scorecard = self.get_object()
-        user = request.user
-        
-        if not hasattr(user, 'employee') or user.employee.id != scorecard.employee.id:
-            return Response({'detail': 'Only the employee can sign off'}, status=403)
-        
-        if scorecard.status != 'APPROVED':
-            return Response(
-                {'detail': 'Scorecard must be approved before sign-off'},
-                status=400
-            )
-        
-        scorecard.status = 'SIGNED_OFF'
-        scorecard.employee_signed_off_at = dj_timezone.now()
-        scorecard.save()
-        
-        return Response({'status': 'success', 'message': 'Scorecard signed off'})
-
-    @action(detail=True, methods=['post'], url_path='submit-self-review')
-    def submit_self_review(self, request, pk=None):
-        """Employee submits self-review (after entering actuals + evidence)."""
-        from django.utils import timezone as dj_timezone
-        scorecard = self.get_object()
-        user = request.user
-        
-        if not hasattr(user, 'employee') or user.employee.id != scorecard.employee_id:
-            return Response({'detail': 'Only the employee can submit self-review'}, status=403)
-        
-        if scorecard.status not in ['SIGNED_OFF', 'SELF_REVIEW_PENDING']:
-            return Response(
-                {'detail': f'Cannot submit self-review from status {scorecard.status}'},
-                status=400
-            )
-        
-        # Validate: at least one KPI has self_actual filled
-        has_data = any(
-            kpi.self_actual.strip() 
-            for kra in scorecard.kras.all() 
-            for kpi in kra.kpis.all()
-        )
-        if not has_data:
-            return Response(
-                {'detail': 'Please fill in actuals for at least one KPI'},
-                status=400
-            )
-        
-        # Mark all KPIs as self-reviewed
-        for kra in scorecard.kras.all():
-            for kpi in kra.kpis.all():
-                if kpi.self_actual.strip() and not kpi.self_reviewed_at:
-                    kpi.self_reviewed_at = dj_timezone.now()
-                    kpi.save(update_fields=['self_reviewed_at'])
-        
-        scorecard.status = 'SELF_REVIEWED'
-        scorecard.save(update_fields=['status'])
-        
-        return Response({'status': 'success', 'message': 'Self-review submitted'})
-
-    @action(detail=True, methods=['post'], url_path='submit-final-review')
-    def submit_final_review(self, request, pk=None):
-        """Manager submits final review with scoring."""
-        from django.utils import timezone as dj_timezone
-        scorecard = self.get_object()
-        user = request.user
-        
-        if not hasattr(user, 'employee'):
-            return Response({'detail': 'No employee record'}, status=400)
-        
-        is_manager = scorecard.employee.reporting_manager_id == user.employee.id
-        is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
-        
-        if not (is_manager or is_hr):
-            return Response({'detail': 'Only manager or HR can submit final review'}, status=403)
-        
-        if scorecard.status not in ['SELF_REVIEWED', 'MANAGER_REVIEW_PENDING']:
-            return Response(
-                {'detail': f'Cannot submit from status {scorecard.status}'},
-                status=400
-            )
-        
-        # Validate: at least one KPI has manager_actual filled
-        has_data = any(
-            kpi.manager_actual.strip() 
-            for kra in scorecard.kras.all() 
-            for kpi in kra.kpis.all()
-        )
-        if not has_data:
-            return Response(
-                {'detail': 'Please fill in manager actuals for at least one KPI'},
-                status=400
-            )
-        
-        # Mark KPIs as manager-reviewed
-        for kra in scorecard.kras.all():
-            for kpi in kra.kpis.all():
-                if kpi.manager_actual.strip() and not kpi.manager_reviewed_at:
-                    kpi.manager_reviewed_at = dj_timezone.now()
-                    kpi.save(update_fields=['manager_reviewed_at'])
-        
-        # Calculate final scores
-        scores = ScorecardService.calculate_final_score(scorecard)
-        
-        scorecard.status = 'MANAGER_REVIEWED'
-        scorecard.save(update_fields=['status'])
-        
-        return Response({
-            'status': 'success',
-            'message': 'Final review submitted and scored',
-            **scores,
-        })
-
-    @action(detail=True, methods=['post'], url_path='finalize')
-    def finalize(self, request, pk=None):
-        """HR finalizes the scorecard, generates rating letter."""
-        from .tasks import finalize_scorecard_and_send_letter
-        
-        scorecard = self.get_object()
-        user = request.user
-
-        if not (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
-            return Response({'detail': 'Only HR can finalize'}, status=403)
-
-        if scorecard.status != 'MANAGER_REVIEWED':
-            return Response(
-                {'detail': 'Manager review must be complete before finalization'},
-                status=400
-            )
-
-        scorecard.status = 'FINALIZED'
-        scorecard.save(update_fields=['status'])
-
-        # Trigger async letter generation
-        finalize_scorecard_and_send_letter.delay(str(scorecard.id))
-
-        return Response({
-            'status': 'success',
-            'message': 'Scorecard finalized. Rating letter is being generated and will be emailed shortly.',
-        })
-
-
-    @action(detail=False, methods=['post'], url_path='bulk-finalize')
-    def bulk_finalize(self, request):
-        """HR finalizes ALL MANAGER_REVIEWED scorecards for a cycle."""
-        from .tasks import finalize_scorecard_and_send_letter
-        
-        user = request.user
-        if not (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
-            return Response({'detail': 'Only HR can bulk finalize'}, status=403)
-
-        cycle_id = request.data.get('cycle_id')
-        if not cycle_id:
-            return Response({'detail': 'cycle_id required'}, status=400)
-
-        scorecards = EmployeeScorecard.objects.filter(
-            cycle_id=cycle_id,
-            status='MANAGER_REVIEWED',
-        )
-        
-        count = 0
-        for sc in scorecards:
-            sc.status = 'FINALIZED'
-            sc.save(update_fields=['status'])
-            finalize_scorecard_and_send_letter.delay(str(sc.id))
-            count += 1
-
-        return Response({
-            'status': 'success',
-            'message': f'Finalized {count} scorecards. Letters being generated.',
-            'count': count,
-        })
     
-    @action(detail=False, methods=['get'], url_path='all-scorecards')
-    def all_scorecards(self, request):
+    @action(detail=False, methods=['post'], url_path='generate')
+    def generate(self, request):
         """
-        HR-only endpoint: Returns ALL scorecards across the organization.
-        Supports filtering by cycle, status, department, rating band.
-        Used by the HR Calibration page.
+        POST /api/v1/annual-plans/generate/
+        Body: { "employee_id": "<uuid>", "financial_year": "2026-27" }
         """
-        user = request.user
-        
-        # Only HR and System Admin
-        if not (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
+        employee_id = request.data.get('employee_id')
+        financial_year = request.data.get('financial_year', '2026-27')
+
+        if not employee_id:
+            return Response({'detail': 'employee_id is required.'}, status=400)
+
+        try:
+            plan = AnnualPlanService.generate_annual_plan(
+                employee_id=employee_id,
+                financial_year=financial_year,
+                created_by_user=request.user
+            )
             return Response(
-                {'detail': 'Only HR can access all scorecards.'},
-                status=403
+                AnnualPerformancePlanDetailSerializer(plan).data,
+                status=201
             )
-        
-        qs = self.queryset
-        
-        # Optional filters
-        cycle_id = request.query_params.get('cycle')
-        if cycle_id:
-            qs = qs.filter(cycle_id=cycle_id)
-        
-        status_filter = request.query_params.get('status')
-        if status_filter:
-            qs = qs.filter(status=status_filter)
-        
-        dept_id = request.query_params.get('department')
-        if dept_id:
-            qs = qs.filter(employee__structure_location_id=dept_id)
-        
-        rating = request.query_params.get('rating')
-        if rating:
-            qs = qs.filter(final_rating=int(rating))
-        
-        search = request.query_params.get('search', '').strip()
-        if search:
-            qs = qs.filter(
-                models.Q(employee__first_name__icontains=search) |
-                models.Q(employee__last_name__icontains=search) |
-                models.Q(employee__employee_id__icontains=search)
-            )
-        
-        serializer = EmployeeScorecardListSerializer(qs, many=True)
-        return Response(serializer.data)
+        except ValueError as ve:
+            return Response({'detail': str(ve)}, status=400)
+        except Exception as e:
+            return Response({'detail': f'Plan generation failed: {str(e)}'}, status=500)
 
+    @action(detail=False, methods=['get'], url_path='my-plan')
+    def my_plan(self, request):
+        """Get current user's plan for a financial year."""
+        if not hasattr(request.user, 'employee') or not request.user.employee:
+            return Response({'detail': 'No employee profile linked to your user account.'}, status=404)
 
-    @action(detail=False, methods=['get'], url_path='calibration-stats')
-    def calibration_stats(self, request):
-        """
-        HR-only: Returns aggregate statistics for a cycle.
-        Used to display the calibration dashboard header cards + bell curve.
-        """
-        user = request.user
-        if not (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
-            return Response({'detail': 'HR only'}, status=403)
-        
-        cycle_id = request.query_params.get('cycle')
-        if not cycle_id:
-            return Response({'detail': 'cycle query param required'}, status=400)
-        
-        qs = self.queryset.filter(cycle_id=cycle_id)
-        
-        total = qs.count()
-        if total == 0:
-            return Response({
-                'total': 0,
-                'by_status': {},
-                'by_rating': {},
-                'avg_final_score': 0,
-            })
-        
-        # Group by status
-        from django.db.models import Count, Avg
-        status_counts = dict(
-            qs.values('status').annotate(cnt=Count('id')).values_list('status', 'cnt')
-        )
-        
-        # Group by rating band (1-5)
-        rating_counts = dict(
-            qs.filter(final_rating__isnull=False)
-            .values('final_rating')
-            .annotate(cnt=Count('id'))
-            .values_list('final_rating', 'cnt')
-        )
-        
-        # Average final score
-        avg_score = qs.filter(final_score__isnull=False).aggregate(
-            avg=Avg('final_score')
-        )['avg']
-        
-        # Department breakdown
-        dept_breakdown = list(
-            qs.values(
-                'employee__structure_location__id',
-                'employee__structure_location__name',
-            )
-            .annotate(cnt=Count('id'), avg_score=Avg('final_score'))
-            .order_by('-cnt')
-        )
-        
-        return Response({
-            'total': total,
-            'by_status': status_counts,
-            'by_rating': rating_counts,
-            'avg_final_score': round(avg_score, 2) if avg_score else 0,
-            'department_breakdown': [
-                {
-                    'id': d['employee__structure_location__id'],
-                    'name': d['employee__structure_location__name'] or 'No Dept',
-                    'count': d['cnt'],
-                    'avg_score': round(d['avg_score'], 2) if d['avg_score'] else 0,
-                }
-                for d in dept_breakdown
-            ],
-        })
-# ------------------------------------------------------------------------------
-# EMPLOYEE KRA (Nested under scorecard)
-# ------------------------------------------------------------------------------
+        fy = request.query_params.get('fy', '2026-27')
+        plan = AnnualPerformancePlan.objects.filter(
+            employee=request.user.employee, financial_year=fy
+        ).select_related('employee').prefetch_related(
+            'quarterly_reviews__monthly_plans__kras__kpis'
+        ).first()
 
-class EmployeeKRAViewSet(ModelViewSet):
-    """CRUD for KRAs within a scorecard."""
-    queryset = EmployeeKRA.objects.all().select_related('scorecard').prefetch_related('kpis')
-    serializer_class = EmployeeKRASerializer
+        if not plan:
+            return Response({'detail': f'No annual plan generated for FY {fy} yet.'}, status=404)
+
+        return Response(AnnualPerformancePlanDetailSerializer(plan, context={'request': request}).data)    
+class MonthlyPerformancePlanViewSet(ModelViewSet):
+    queryset = MonthlyPerformancePlan.objects.prefetch_related('kras__kpis').all()
+    serializer_class = MonthlyPerformancePlanSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['scorecard']
-
-    def perform_create(self, serializer):
-        instance = serializer.save()
-        ScorecardService.recalculate_total_weight(instance.scorecard)
+    filterset_fields = ['annual_plan', 'month', 'year', 'status']
 
     def perform_update(self, serializer):
         instance = serializer.save()
-        ScorecardService.recalculate_total_weight(instance.scorecard)
+        new_status = serializer.validated_data.get('status')
+        
+        # If trying to submit, enforce weight validation in backend
+        if new_status == 'EMPLOYEE_SUBMITTED':
+            is_valid, errors = AnnualPlanService.validate_monthly_plan_weights(instance)
+            if not is_valid:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({'detail': errors[0], 'errors': errors})
 
-    def perform_destroy(self, instance):
-        scorecard = instance.scorecard
-        instance.delete()
-        ScorecardService.recalculate_total_weight(scorecard)
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from .models import MonthlyKPIEvidence
+from .serializers import MonthlyKPIEvidenceSerializer
 
-
-# ------------------------------------------------------------------------------
-# EMPLOYEE KPI
-# ------------------------------------------------------------------------------
-
-class EmployeeKPIViewSet(ModelViewSet):
-    """CRUD for KPIs within a KRA."""
-    queryset = EmployeeKPI.objects.all().select_related('employee_kra').prefetch_related('evidences')
-    serializer_class = EmployeeKPISerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['employee_kra']
-
-
-# ------------------------------------------------------------------------------
-# KPI EVIDENCE UPLOADS
-# ------------------------------------------------------------------------------
-
-class EmployeeKPIEvidenceViewSet(ModelViewSet):
-    """Upload/manage evidence files for KPIs."""
-    queryset = EmployeeKPIEvidence.objects.all().select_related('kpi', 'uploaded_by')
-    serializer_class = EmployeeKPIEvidenceSerializer
+class MonthlyKPIEvidenceViewSet(ModelViewSet):
+    queryset = MonthlyKPIEvidence.objects.all()
+    serializer_class = MonthlyKPIEvidenceSerializer
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend]
@@ -2387,232 +1890,1335 @@ class EmployeeKPIEvidenceViewSet(ModelViewSet):
 
     def perform_create(self, serializer):
         employee = getattr(self.request.user, 'employee', None)
-        serializer.save(uploaded_by=employee)
+        file_obj = self.request.FILES.get('file')
+        size_kb = round(file_obj.size / 1024) if file_obj else 0
+        serializer.save(uploaded_by=employee, file_size_kb=size_kb)
 
 
-
-class KRAPeerNominationViewSet(ModelViewSet):
-    """Manager nominates peers for peer-rated KRAs."""
-    queryset = KRAPeerNomination.objects.all().select_related(
-        'employee_kra', 'nominated_peer', 'nominated_by', 'rating'
-    )
-    serializer_class = KRAPeerNominationSerializer
+class MonthlyKRAViewSet(ModelViewSet):
+    queryset = MonthlyKRA.objects.all()
+    serializer_class = MonthlyKRASerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['employee_kra', 'nominated_peer']
+    filterset_fields = ['monthly_plan', 'kra_type']
 
-    def get_queryset(self):
-        qs = super().get_queryset()
-        user = self.request.user
-        
-        if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
-            return qs
-        
-        # Manager sees nominations for their team's KRAs
-        if user.has_role('MANAGER') and hasattr(user, 'employee'):
-            return qs.filter(
-                models.Q(employee_kra__scorecard__employee__reporting_manager=user.employee) |
-                models.Q(nominated_peer=user.employee)
-            )
-        
-        # Employee sees their own nominations (as a peer, not as rated employee)
-        if hasattr(user, 'employee'):
-            return qs.filter(nominated_peer=user.employee)
-        
-        return qs.none()
+class MonthlyKPIViewSet(ModelViewSet):
+    queryset = MonthlyKPI.objects.all()
+    serializer_class = MonthlyKPISerializer
+    permission_classes = [IsAuthenticated]
 
-    @action(detail=False, methods=['post'], url_path='nominate-peers')
-    def nominate_peers(self, request):
-        """
-        Manager nominates peers for a KRA.
-        POST body: { "employee_kra_id": "...", "peer_ids": ["uuid1", "uuid2"] }
-        """
-        user = request.user
-        if not hasattr(user, 'employee'):
-            return Response({'detail': 'No employee record'}, status=400)
-        
-        serializer = NominatePeersSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        try:
-            employee_kra = EmployeeKRA.objects.select_related(
-                'scorecard__employee'
-            ).get(id=serializer.validated_data['employee_kra_id'])
-        except EmployeeKRA.DoesNotExist:
-            return Response({'detail': 'KRA not found'}, status=404)
-        
-        # Permission check: only reporting manager or HR
-        is_manager = employee_kra.scorecard.employee.reporting_manager_id == user.employee.id
-        is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
-        
-        if not (is_manager or is_hr):
-            return Response({'detail': 'Only reporting manager or HR can nominate peers'}, status=403)
-        
-        if not employee_kra.peer_rating_required:
-            return Response({'detail': 'This KRA does not require peer rating'}, status=400)
-        
-        # Prevent nominating the employee themselves
-        peer_ids = serializer.validated_data['peer_ids']
-        if str(employee_kra.scorecard.employee.id) in [str(p) for p in peer_ids]:
-            return Response({'detail': 'Cannot nominate the employee as their own peer'}, status=400)
-        
-        try:
-            count = ScorecardService.nominate_peers(
-                employee_kra=employee_kra,
-                peer_ids=peer_ids,
-                nominated_by=user.employee,
-            )
-        except ValueError as e:
-            return Response({'detail': str(e)}, status=400)
-        
-        return Response({
-            'status': 'success',
-            'message': f'Nominated {count} new peer(s)',
-        })
+    def perform_create(self, serializer):
+        kpi = serializer.save()
+        AnnualPlanService.recalculate_monthly_score(kpi.monthly_kra.monthly_plan)
+
+    def perform_update(self, serializer):
+        kpi = serializer.save()
+        AnnualPlanService.recalculate_monthly_score(kpi.monthly_kra.monthly_plan)
+
+    def perform_destroy(self, instance):
+        monthly_plan = instance.monthly_kra.monthly_plan
+        instance.delete()
+        AnnualPlanService.recalculate_monthly_score(monthly_plan)
 
 
-# ------------------------------------------------------------------------------
-# PEER RATING (Peer submits rating)
-# ------------------------------------------------------------------------------
+# ==============================================================================
+# COMMON + DEPARTMENTAL KRA MASTER VIEWSETS
+# ==============================================================================
+from rest_framework.viewsets import ModelViewSet
+from rest_framework.permissions import IsAuthenticated
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import filters
 
-class PeerRatingViewSet(ModelViewSet):
-    """Peer submits their rating."""
-    queryset = PeerRating.objects.all().select_related(
-        'nomination', 'nomination__nominated_peer',
-        'nomination__employee_kra__scorecard__employee',
-        'nomination__employee_kra__scorecard__cycle',
+from .models import CommonKRAMaster, DepartmentalKRAMaster
+from .serializers import CommonKRAMasterSerializer, DepartmentalKRAMasterSerializer
+from .permissions import IsHRAdmin
+
+
+class CommonKRAMasterViewSet(ModelViewSet):
+    """
+    CRUD for Common KRA masters.
+    Used by: /settings/common-kras
+    Auto-injected into employee monthly plans during annual plan generation.
+    """
+    queryset = CommonKRAMaster.objects.prefetch_related('kpis').all().order_by('name')
+    serializer_class = CommonKRAMasterSerializer
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['financial_year', 'is_active', 'applies_to_all']
+    search_fields = ['name', 'description']
+    ordering_fields = ['name', 'default_weight', 'created_at']
+
+
+class CommonKPIMasterViewSet(ModelViewSet):
+    queryset = CommonKPIMaster.objects.all()
+    serializer_class = CommonKPIMasterSerializer
+    permission_classes = [IsAuthenticated]
+class DepartmentalKRAMasterViewSet(ModelViewSet):
+    """
+    CRUD for Departmental KRA masters.
+    Used by: /settings/departmental-kras
+    Auto-injected by employee.department during annual plan generation.
+    """
+    queryset = (
+        DepartmentalKRAMaster.objects
+        .select_related('department')
+        .prefetch_related('kpis')
+        .all()
+        .order_by('department__name', 'name')
     )
-    serializer_class = PeerRatingSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['status', 'nomination']
-    http_method_names = ['get', 'post', 'patch']
+    serializer_class = DepartmentalKRAMasterSerializer
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['financial_year', 'department', 'is_active']
+    search_fields = ['name', 'description', 'department__name']
+    ordering_fields = ['name', 'default_weight', 'created_at']
 
-    def get_queryset(self):
-        qs = super().get_queryset()
-        user = self.request.user
-        
-        if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
-            return qs
-        
-        # Manager sees ratings for their team + their own submissions
-        if user.has_role('MANAGER') and hasattr(user, 'employee'):
-            return qs.filter(
-                models.Q(nomination__employee_kra__scorecard__employee__reporting_manager=user.employee) |
-                models.Q(nomination__nominated_peer=user.employee)
-            )
-        
-        # Employee: only their own peer submissions
-        if hasattr(user, 'employee'):
-            return qs.filter(nomination__nominated_peer=user.employee)
-        
-        return qs.none()
-
-    @action(detail=False, methods=['get'], url_path='my-pending-reviews')
-    def my_pending_reviews(self, request):
-        """
-        Get peer reviews assigned to me that are still pending.
-        Shows on /my-peer-reviews page.
-        """
-        user = request.user
-        if not hasattr(user, 'employee'):
-            return Response([])
-        
-        qs = PeerRating.objects.filter(
-            nomination__nominated_peer=user.employee,
-        ).select_related(
-            'nomination__employee_kra__scorecard__employee',
-            'nomination__employee_kra__scorecard__cycle',
-        ).order_by('status', 'due_at')
-        
-        serializer = PendingPeerReviewSerializer(qs, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=['post'], url_path='submit')
-    def submit_rating(self, request, pk=None):
-        """Peer submits their rating."""
-        peer_rating = self.get_object()
-        user = request.user
-        
-        # Only nominated peer can submit
-        if not hasattr(user, 'employee') or user.employee.id != peer_rating.nomination.nominated_peer_id:
-            return Response({'detail': 'You are not the nominated peer'}, status=403)
-        
-        if peer_rating.status == 'SUBMITTED':
-            return Response({'detail': 'Already submitted'}, status=400)
-        
-        serializer = PeerRatingSubmitSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        peer_rating.rating = serializer.validated_data['rating']
-        peer_rating.strengths_comment = serializer.validated_data.get('strengths_comment', '')
-        peer_rating.improvements_comment = serializer.validated_data.get('improvements_comment', '')
-        peer_rating.additional_comments = serializer.validated_data.get('additional_comments', '')
-        peer_rating.status = 'SUBMITTED'
-        peer_rating.submitted_at = dj_timezone.now()
-        peer_rating.save()
-        
-        return Response({'status': 'success', 'message': 'Peer rating submitted. Thank you!'})
-
-    @action(detail=True, methods=['post'], url_path='decline')
-    def decline_rating(self, request, pk=None):
-        """Peer declines to rate (with reason)."""
-        peer_rating = self.get_object()
-        user = request.user
-        
-        if not hasattr(user, 'employee') or user.employee.id != peer_rating.nomination.nominated_peer_id:
-            return Response({'detail': 'You are not the nominated peer'}, status=403)
-        
-        if peer_rating.status != 'PENDING':
-            return Response({'detail': 'Cannot decline — status is not pending'}, status=400)
-        
-        serializer = PeerRatingDeclineSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        peer_rating.status = 'DECLINED'
-        peer_rating.decline_reason = serializer.validated_data['decline_reason']
-        peer_rating.save()
-        
-        return Response({'status': 'success', 'message': 'Declined'})
+# from .models import (
+#     PerformanceCycle, EmployeeScorecard,
+#     EmployeeKRA, EmployeeKPI, EmployeeKPIEvidence,
+#     KRALibrary,
+# )
+# from .serializers import (
+#     PerformanceCycleSerializer,
+#     EmployeeScorecardListSerializer,
+#     EmployeeScorecardDetailSerializer,
+#     EmployeeKRASerializer,
+#     EmployeeKPISerializer,
+#     EmployeeKPIEvidenceSerializer,
+#     AddLibraryKRASerializer,
+#     SendBackSerializer,KRAPeerNominationSerializer,
+#     PeerRatingSerializer,
+#     PeerRatingSubmitSerializer,
+#     PeerRatingDeclineSerializer,
+#     NominatePeersSerializer,
+#     PendingPeerReviewSerializer,
+#     EmployeeForPeerSerializer,
+# )
+# from .services.scorecard_service import ScorecardService
 
 
-# ------------------------------------------------------------------------------
-# PEER SEARCH (for nomination dropdown)
-# ------------------------------------------------------------------------------
+# # ------------------------------------------------------------------------------
+# # PERFORMANCE CYCLE
+# # ------------------------------------------------------------------------------
 
-class PeerSearchView(APIView):
-    """
-    Search for employees who can be peers.
-    GET /api/v1/peer-search/?exclude_employee=<uuid>&search=<query>
-    """
-    permission_classes = [IsAuthenticated]
+# class PerformanceCycleViewSet(ModelViewSet):
+#     """
+#     Manage performance review cycles.
+#     HR Admin can create/edit; anyone can view.
+#     """
+#     queryset = PerformanceCycle.objects.all().prefetch_related(
+#         'applicable_departments', 'scorecards'
+#     )
+#     serializer_class = PerformanceCycleSerializer
+#     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+#     filterset_fields = ['cycle_type', 'status', 'financial_year']
+#     search_fields = ['name']
+#     ordering_fields = ['period_start', 'created_at']
+#     ordering = ['-period_start']
 
-    def get(self, request):
-        exclude_employee_id = request.query_params.get('exclude_employee')
-        search = request.query_params.get('search', '').strip()
+#     def get_permissions(self):
+#         if self.action in ['list', 'retrieve', 'my_active', 'current_phase_info']:
+#             return [IsAuthenticated()]
+#         return [IsAuthenticated(), IsHRAdmin()]
+
+#     def perform_create(self, serializer):
+#         employee = getattr(self.request.user, 'employee', None)
+#         serializer.save(created_by=employee)
+
+#     @action(detail=True, methods=['post'], url_path='activate')
+#     def activate(self, request, pk=None):
+#         """
+#         Activate a cycle: change status to ACTIVE and auto-create scorecards
+#         for all applicable employees.
+#         """
+#         cycle = self.get_object()
         
-        qs = Employee.objects.filter(
-            is_deleted=False,
-            status__in=['ACTIVE', 'PROBATION'],
-        ).select_related('position', 'structure_location')
+#         if cycle.status == 'ACTIVE':
+#             return Response({'detail': 'Cycle is already active'}, status=400)
         
-        if exclude_employee_id:
-            qs = qs.exclude(id=exclude_employee_id)
+#         cycle.status = 'ACTIVE'
+#         cycle.save()
         
-        if search:
-            qs = qs.filter(
-                models.Q(first_name__icontains=search) |
-                models.Q(last_name__icontains=search) |
-                models.Q(employee_id__icontains=search)
-            )
+#         count = ScorecardService.auto_create_scorecards_for_cycle(cycle)
         
-        qs = qs[:50]
-        serializer = EmployeeForPeerSerializer(qs, many=True)
-        return Response(serializer.data)
+#         return Response({
+#             'status': 'success',
+#             'message': f'Cycle activated. {count} scorecards created.',
+#             'scorecards_created': count,
+#         })
+
+#     @action(detail=True, methods=['post'], url_path='close')
+#     def close(self, request, pk=None):
+#         """Close a cycle - locks all scorecards."""
+#         cycle = self.get_object()
+#         cycle.status = 'CLOSED'
+#         cycle.save()
+#         return Response({'status': 'success', 'message': 'Cycle closed'})
+
+#     @action(detail=False, methods=['get'], url_path='my-active')
+#     def my_active(self, request):
+#         """Get active cycles applicable to current user."""
+#         user = request.user
+#         if not hasattr(user, 'employee'):
+#             return Response([])
+        
+#         employee = user.employee
+#         active_cycles = self.get_queryset().filter(status='ACTIVE')
+        
+#         # Filter to cycles applicable to employee's department
+#         if employee.structure_location:
+#             active_cycles = active_cycles.filter(
+#                 models.Q(applicable_departments__isnull=True) |
+#                 models.Q(applicable_departments=employee.structure_location)
+#             ).distinct()
+        
+#         serializer = self.get_serializer(active_cycles, many=True)
+#         return Response(serializer.data)
+
+
+# # ------------------------------------------------------------------------------
+# # EMPLOYEE SCORECARD
+# # ------------------------------------------------------------------------------
+
+# class EmployeeScorecardViewSet(ModelViewSet):
+#     """
+#     Employee scorecards for performance cycles.
+#     - Employees see their own
+#     - Managers see their team's
+#     - HR sees all
+#     """
+#     queryset = EmployeeScorecard.objects.all().select_related(
+#         'employee', 'employee__position', 'employee__structure_location',
+#         'employee__reporting_manager', 'cycle', 'manager_signed_off_by'
+#     ).prefetch_related('kras__kpis__evidences')
+#     permission_classes = [IsAuthenticated]
+#     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+#     filterset_fields = ['employee', 'cycle', 'status']
+#     ordering_fields = ['created_at', 'employee__first_name']
+#     http_method_names = ['get', 'post', 'patch', 'delete']
+
+#     def get_serializer_class(self):
+#         if self.action == 'list':
+#             return EmployeeScorecardListSerializer
+#         return EmployeeScorecardDetailSerializer
+
+#     def get_queryset(self):
+#         qs = super().get_queryset()
+#         user = self.request.user
+        
+#         if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
+#             return qs
+        
+#         if user.has_role('MANAGER') and hasattr(user, 'employee'):
+#             return qs.filter(
+#                 models.Q(employee__reporting_manager=user.employee) |
+#                 models.Q(employee=user.employee)
+#             )
+        
+#         if hasattr(user, 'employee'):
+#             return qs.filter(employee=user.employee)
+        
+#         return qs.none()
+
+#     @action(detail=False, methods=['get'], url_path='my-scorecards')
+#     def my_scorecards(self, request):
+#         """Get current user's own scorecards."""
+#         user = request.user
+#         if not hasattr(user, 'employee'):
+#             return Response([])
+        
+#         qs = self.queryset.filter(employee=user.employee)
+#         serializer = EmployeeScorecardListSerializer(qs, many=True)
+#         return Response(serializer.data)
+
+#     @action(detail=False, methods=['get'], url_path='team-scorecards')
+#     def team_scorecards(self, request):
+#         """Get scorecards of team members (for managers)."""
+#         user = request.user
+#         if not hasattr(user, 'employee'):
+#             return Response([])
+        
+#         qs = self.queryset.filter(employee__reporting_manager=user.employee)
+        
+#         cycle_id = request.query_params.get('cycle')
+#         if cycle_id:
+#             qs = qs.filter(cycle_id=cycle_id)
+        
+#         serializer = EmployeeScorecardListSerializer(qs, many=True)
+#         return Response(serializer.data)
+
+#     @action(detail=True, methods=['post'], url_path='add-library-kra')
+#     def add_library_kra(self, request, pk=None):
+#         """Add a KRA from library to this scorecard."""
+#         scorecard = self.get_object()
+#         serializer = AddLibraryKRASerializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+        
+#         try:
+#             lib_kra = KRALibrary.objects.get(
+#                 id=serializer.validated_data['library_kra_id'],
+#                 is_active=True,
+#             )
+#         except KRALibrary.DoesNotExist:
+#             return Response({'detail': 'Library KRA not found'}, status=404)
+        
+#         emp_kra = ScorecardService.add_library_kra_to_scorecard(
+#             scorecard,
+#             lib_kra,
+#             weight=serializer.validated_data.get('weight'),
+#             include_all_kpis=serializer.validated_data.get('include_all_kpis', True),
+#         )
+        
+#         return Response(EmployeeKRASerializer(emp_kra).data, status=201)
+
+#     @action(detail=True, methods=['post'], url_path='submit')
+#     def submit(self, request, pk=None):
+#         """Employee submits scorecard for manager review."""
+#         scorecard = self.get_object()
+#         user = request.user
+        
+#         # Only employee themselves can submit
+#         if not hasattr(user, 'employee') or user.employee.id != scorecard.employee.id:
+#             return Response({'detail': 'Only the employee can submit'}, status=403)
+        
+#         if scorecard.status not in ['DRAFT', 'SENT_BACK']:
+#             return Response(
+#                 {'detail': f'Cannot submit from status {scorecard.status}'},
+#                 status=400
+#             )
+        
+#         # Validate
+#         is_valid, errors = ScorecardService.validate_scorecard(scorecard)
+#         if not is_valid:
+#             return Response({'detail': 'Validation failed', 'errors': errors}, status=400)
+        
+#         scorecard.status = 'SUBMITTED'
+#         scorecard.save()
+        
+#         return Response({'status': 'success', 'message': 'Scorecard submitted for review'})
+
+#     @action(detail=True, methods=['post'], url_path='approve')
+#     def approve(self, request, pk=None):
+#         """Manager approves the scorecard."""
+#         from django.utils import timezone as dj_timezone  # ← Local import — guaranteed correct
+        
+#         scorecard = self.get_object()
+#         user = request.user
+        
+#         if not hasattr(user, 'employee'):
+#             return Response({'detail': 'No employee record'}, status=400)
+        
+#         # Only reporting manager or HR can approve
+#         is_manager = scorecard.employee.reporting_manager_id == user.employee.id
+#         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+        
+#         if not (is_manager or is_hr):
+#             return Response({'detail': 'Only reporting manager or HR can approve'}, status=403)
+        
+#         if scorecard.status not in ['SUBMITTED', 'MANAGER_REVIEWING']:
+#             return Response(
+#                 {'detail': f'Cannot approve from status {scorecard.status}'},
+#                 status=400
+#             )
+        
+#         scorecard.status = 'APPROVED'
+#         scorecard.manager_signed_off_at = dj_timezone.now()   # ← Use dj_timezone
+#         scorecard.manager_signed_off_by = user.employee
+#         scorecard.save()
+        
+#         return Response({'status': 'success', 'message': 'Scorecard approved'})
+
+#     @action(detail=True, methods=['post'], url_path='send-back')
+#     def send_back(self, request, pk=None):
+#         """Manager sends scorecard back for revision."""
+#         from django.utils import timezone as dj_timezone
+#         scorecard = self.get_object()
+#         user = request.user
+        
+#         if not hasattr(user, 'employee'):
+#             return Response({'detail': 'No employee record'}, status=400)
+        
+#         is_manager = scorecard.employee.reporting_manager_id == user.employee.id
+#         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+        
+#         if not (is_manager or is_hr):
+#             return Response({'detail': 'Only manager can send back'}, status=403)
+        
+#         serializer = SendBackSerializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+        
+#         scorecard.status = 'SENT_BACK'
+#         scorecard.sent_back_reason = serializer.validated_data['reason']
+#         scorecard.sent_back_at = dj_timezone.now()
+#         scorecard.save()
+        
+#         return Response({'status': 'success', 'message': 'Scorecard sent back for revision'})
+
+#     @action(detail=True, methods=['post'], url_path='sign-off')
+#     def sign_off(self, request, pk=None):
+#         """Employee signs off on approved scorecard."""
+#         from django.utils import timezone as dj_timezone
+#         scorecard = self.get_object()
+#         user = request.user
+        
+#         if not hasattr(user, 'employee') or user.employee.id != scorecard.employee.id:
+#             return Response({'detail': 'Only the employee can sign off'}, status=403)
+        
+#         if scorecard.status != 'APPROVED':
+#             return Response(
+#                 {'detail': 'Scorecard must be approved before sign-off'},
+#                 status=400
+#             )
+        
+#         scorecard.status = 'SIGNED_OFF'
+#         scorecard.employee_signed_off_at = dj_timezone.now()
+#         scorecard.save()
+        
+#         return Response({'status': 'success', 'message': 'Scorecard signed off'})
+
+#     @action(detail=True, methods=['post'], url_path='submit-self-review')
+#     def submit_self_review(self, request, pk=None):
+#         """Employee submits self-review (after entering actuals + evidence)."""
+#         from django.utils import timezone as dj_timezone
+#         scorecard = self.get_object()
+#         user = request.user
+        
+#         if not hasattr(user, 'employee') or user.employee.id != scorecard.employee_id:
+#             return Response({'detail': 'Only the employee can submit self-review'}, status=403)
+        
+#         if scorecard.status not in ['SIGNED_OFF', 'SELF_REVIEW_PENDING']:
+#             return Response(
+#                 {'detail': f'Cannot submit self-review from status {scorecard.status}'},
+#                 status=400
+#             )
+        
+#         # Validate: at least one KPI has self_actual filled
+#         has_data = any(
+#             kpi.self_actual.strip() 
+#             for kra in scorecard.kras.all() 
+#             for kpi in kra.kpis.all()
+#         )
+#         if not has_data:
+#             return Response(
+#                 {'detail': 'Please fill in actuals for at least one KPI'},
+#                 status=400
+#             )
+        
+#         # Mark all KPIs as self-reviewed
+#         for kra in scorecard.kras.all():
+#             for kpi in kra.kpis.all():
+#                 if kpi.self_actual.strip() and not kpi.self_reviewed_at:
+#                     kpi.self_reviewed_at = dj_timezone.now()
+#                     kpi.save(update_fields=['self_reviewed_at'])
+        
+#         scorecard.status = 'SELF_REVIEWED'
+#         scorecard.save(update_fields=['status'])
+        
+#         return Response({'status': 'success', 'message': 'Self-review submitted'})
+
+#     @action(detail=True, methods=['post'], url_path='submit-final-review')
+#     def submit_final_review(self, request, pk=None):
+#         """Manager submits final review with scoring."""
+#         from django.utils import timezone as dj_timezone
+#         scorecard = self.get_object()
+#         user = request.user
+        
+#         if not hasattr(user, 'employee'):
+#             return Response({'detail': 'No employee record'}, status=400)
+        
+#         is_manager = scorecard.employee.reporting_manager_id == user.employee.id
+#         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+        
+#         if not (is_manager or is_hr):
+#             return Response({'detail': 'Only manager or HR can submit final review'}, status=403)
+        
+#         if scorecard.status not in ['SELF_REVIEWED', 'MANAGER_REVIEW_PENDING']:
+#             return Response(
+#                 {'detail': f'Cannot submit from status {scorecard.status}'},
+#                 status=400
+#             )
+        
+#         # Validate: at least one KPI has manager_actual filled
+#         has_data = any(
+#             kpi.manager_actual.strip() 
+#             for kra in scorecard.kras.all() 
+#             for kpi in kra.kpis.all()
+#         )
+#         if not has_data:
+#             return Response(
+#                 {'detail': 'Please fill in manager actuals for at least one KPI'},
+#                 status=400
+#             )
+        
+#         # Mark KPIs as manager-reviewed
+#         for kra in scorecard.kras.all():
+#             for kpi in kra.kpis.all():
+#                 if kpi.manager_actual.strip() and not kpi.manager_reviewed_at:
+#                     kpi.manager_reviewed_at = dj_timezone.now()
+#                     kpi.save(update_fields=['manager_reviewed_at'])
+        
+#         # Calculate final scores
+#         scores = ScorecardService.calculate_final_score(scorecard)
+        
+#         scorecard.status = 'MANAGER_REVIEWED'
+#         scorecard.save(update_fields=['status'])
+        
+#         return Response({
+#             'status': 'success',
+#             'message': 'Final review submitted and scored',
+#             **scores,
+#         })
+
+#     @action(detail=True, methods=['post'], url_path='finalize')
+#     def finalize(self, request, pk=None):
+#         """HR finalizes the scorecard, generates rating letter."""
+#         from .tasks import finalize_scorecard_and_send_letter
+        
+#         scorecard = self.get_object()
+#         user = request.user
+
+#         if not (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
+#             return Response({'detail': 'Only HR can finalize'}, status=403)
+
+#         if scorecard.status != 'MANAGER_REVIEWED':
+#             return Response(
+#                 {'detail': 'Manager review must be complete before finalization'},
+#                 status=400
+#             )
+
+#         scorecard.status = 'FINALIZED'
+#         scorecard.save(update_fields=['status'])
+
+#         # Trigger async letter generation
+#         finalize_scorecard_and_send_letter.delay(str(scorecard.id))
+
+#         return Response({
+#             'status': 'success',
+#             'message': 'Scorecard finalized. Rating letter is being generated and will be emailed shortly.',
+#         })
+
+
+#     @action(detail=False, methods=['post'], url_path='bulk-finalize')
+#     def bulk_finalize(self, request):
+#         """HR finalizes ALL MANAGER_REVIEWED scorecards for a cycle."""
+#         from .tasks import finalize_scorecard_and_send_letter
+        
+#         user = request.user
+#         if not (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
+#             return Response({'detail': 'Only HR can bulk finalize'}, status=403)
+
+#         cycle_id = request.data.get('cycle_id')
+#         if not cycle_id:
+#             return Response({'detail': 'cycle_id required'}, status=400)
+
+#         scorecards = EmployeeScorecard.objects.filter(
+#             cycle_id=cycle_id,
+#             status='MANAGER_REVIEWED',
+#         )
+        
+#         count = 0
+#         for sc in scorecards:
+#             sc.status = 'FINALIZED'
+#             sc.save(update_fields=['status'])
+#             finalize_scorecard_and_send_letter.delay(str(sc.id))
+#             count += 1
+
+#         return Response({
+#             'status': 'success',
+#             'message': f'Finalized {count} scorecards. Letters being generated.',
+#             'count': count,
+#         })
+    
+#     @action(detail=False, methods=['get'], url_path='all-scorecards')
+#     def all_scorecards(self, request):
+#         """
+#         HR-only endpoint: Returns ALL scorecards across the organization.
+#         Supports filtering by cycle, status, department, rating band.
+#         Used by the HR Calibration page.
+#         """
+#         user = request.user
+        
+#         # Only HR and System Admin
+#         if not (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
+#             return Response(
+#                 {'detail': 'Only HR can access all scorecards.'},
+#                 status=403
+#             )
+        
+#         qs = self.queryset
+        
+#         # Optional filters
+#         cycle_id = request.query_params.get('cycle')
+#         if cycle_id:
+#             qs = qs.filter(cycle_id=cycle_id)
+        
+#         status_filter = request.query_params.get('status')
+#         if status_filter:
+#             qs = qs.filter(status=status_filter)
+        
+#         dept_id = request.query_params.get('department')
+#         if dept_id:
+#             qs = qs.filter(employee__structure_location_id=dept_id)
+        
+#         rating = request.query_params.get('rating')
+#         if rating:
+#             qs = qs.filter(final_rating=int(rating))
+        
+#         search = request.query_params.get('search', '').strip()
+#         if search:
+#             qs = qs.filter(
+#                 models.Q(employee__first_name__icontains=search) |
+#                 models.Q(employee__last_name__icontains=search) |
+#                 models.Q(employee__employee_id__icontains=search)
+#             )
+        
+#         serializer = EmployeeScorecardListSerializer(qs, many=True)
+#         return Response(serializer.data)
+
+
+#     @action(detail=False, methods=['get'], url_path='calibration-stats')
+#     def calibration_stats(self, request):
+#         """
+#         HR-only: Returns aggregate statistics for a cycle.
+#         Used to display the calibration dashboard header cards + bell curve.
+#         """
+#         user = request.user
+#         if not (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
+#             return Response({'detail': 'HR only'}, status=403)
+        
+#         cycle_id = request.query_params.get('cycle')
+#         if not cycle_id:
+#             return Response({'detail': 'cycle query param required'}, status=400)
+        
+#         qs = self.queryset.filter(cycle_id=cycle_id)
+        
+#         total = qs.count()
+#         if total == 0:
+#             return Response({
+#                 'total': 0,
+#                 'by_status': {},
+#                 'by_rating': {},
+#                 'avg_final_score': 0,
+#             })
+        
+#         # Group by status
+#         from django.db.models import Count, Avg
+#         status_counts = dict(
+#             qs.values('status').annotate(cnt=Count('id')).values_list('status', 'cnt')
+#         )
+        
+#         # Group by rating band (1-5)
+#         rating_counts = dict(
+#             qs.filter(final_rating__isnull=False)
+#             .values('final_rating')
+#             .annotate(cnt=Count('id'))
+#             .values_list('final_rating', 'cnt')
+#         )
+        
+#         # Average final score
+#         avg_score = qs.filter(final_score__isnull=False).aggregate(
+#             avg=Avg('final_score')
+#         )['avg']
+        
+#         # Department breakdown
+#         dept_breakdown = list(
+#             qs.values(
+#                 'employee__structure_location__id',
+#                 'employee__structure_location__name',
+#             )
+#             .annotate(cnt=Count('id'), avg_score=Avg('final_score'))
+#             .order_by('-cnt')
+#         )
+        
+#         return Response({
+#             'total': total,
+#             'by_status': status_counts,
+#             'by_rating': rating_counts,
+#             'avg_final_score': round(avg_score, 2) if avg_score else 0,
+#             'department_breakdown': [
+#                 {
+#                     'id': d['employee__structure_location__id'],
+#                     'name': d['employee__structure_location__name'] or 'No Dept',
+#                     'count': d['cnt'],
+#                     'avg_score': round(d['avg_score'], 2) if d['avg_score'] else 0,
+#                 }
+#                 for d in dept_breakdown
+#             ],
+#         })
+# # ------------------------------------------------------------------------------
+# # EMPLOYEE KRA (Nested under scorecard)
+# # ------------------------------------------------------------------------------
+
+# class EmployeeKRAViewSet(ModelViewSet):
+#     """CRUD for KRAs within a scorecard."""
+#     queryset = EmployeeKRA.objects.all().select_related('scorecard').prefetch_related('kpis')
+#     serializer_class = EmployeeKRASerializer
+#     permission_classes = [IsAuthenticated]
+#     filter_backends = [DjangoFilterBackend]
+#     filterset_fields = ['scorecard']
+
+#     def perform_create(self, serializer):
+#         instance = serializer.save()
+#         ScorecardService.recalculate_total_weight(instance.scorecard)
+
+#     def perform_update(self, serializer):
+#         instance = serializer.save()
+#         ScorecardService.recalculate_total_weight(instance.scorecard)
+
+#     def perform_destroy(self, instance):
+#         scorecard = instance.scorecard
+#         instance.delete()
+#         ScorecardService.recalculate_total_weight(scorecard)
+
+
+# # ------------------------------------------------------------------------------
+# # EMPLOYEE KPI
+# # ------------------------------------------------------------------------------
+
+# class EmployeeKPIViewSet(ModelViewSet):
+#     """CRUD for KPIs within a KRA."""
+#     queryset = EmployeeKPI.objects.all().select_related('employee_kra').prefetch_related('evidences')
+#     serializer_class = EmployeeKPISerializer
+#     permission_classes = [IsAuthenticated]
+#     filter_backends = [DjangoFilterBackend]
+#     filterset_fields = ['employee_kra']
+
+
+# # ------------------------------------------------------------------------------
+# # KPI EVIDENCE UPLOADS
+# # ------------------------------------------------------------------------------
+
+# class EmployeeKPIEvidenceViewSet(ModelViewSet):
+#     """Upload/manage evidence files for KPIs."""
+#     queryset = EmployeeKPIEvidence.objects.all().select_related('kpi', 'uploaded_by')
+#     serializer_class = EmployeeKPIEvidenceSerializer
+#     permission_classes = [IsAuthenticated]
+#     parser_classes = [MultiPartParser, FormParser, JSONParser]
+#     filter_backends = [DjangoFilterBackend]
+#     filterset_fields = ['kpi']
+
+#     def perform_create(self, serializer):
+#         employee = getattr(self.request.user, 'employee', None)
+#         serializer.save(uploaded_by=employee)
+
+
+
+# class KRAPeerNominationViewSet(ModelViewSet):
+#     """Manager nominates peers for peer-rated KRAs."""
+#     queryset = KRAPeerNomination.objects.all().select_related(
+#         'employee_kra', 'nominated_peer', 'nominated_by', 'rating'
+#     )
+#     serializer_class = KRAPeerNominationSerializer
+#     permission_classes = [IsAuthenticated]
+#     filter_backends = [DjangoFilterBackend]
+#     filterset_fields = ['employee_kra', 'nominated_peer']
+
+#     def get_queryset(self):
+#         qs = super().get_queryset()
+#         user = self.request.user
+        
+#         if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
+#             return qs
+        
+#         # Manager sees nominations for their team's KRAs
+#         if user.has_role('MANAGER') and hasattr(user, 'employee'):
+#             return qs.filter(
+#                 models.Q(employee_kra__scorecard__employee__reporting_manager=user.employee) |
+#                 models.Q(nominated_peer=user.employee)
+#             )
+        
+#         # Employee sees their own nominations (as a peer, not as rated employee)
+#         if hasattr(user, 'employee'):
+#             return qs.filter(nominated_peer=user.employee)
+        
+#         return qs.none()
+
+#     @action(detail=False, methods=['post'], url_path='nominate-peers')
+#     def nominate_peers(self, request):
+#         """
+#         Manager nominates peers for a KRA.
+#         POST body: { "employee_kra_id": "...", "peer_ids": ["uuid1", "uuid2"] }
+#         """
+#         user = request.user
+#         if not hasattr(user, 'employee'):
+#             return Response({'detail': 'No employee record'}, status=400)
+        
+#         serializer = NominatePeersSerializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+        
+#         try:
+#             employee_kra = EmployeeKRA.objects.select_related(
+#                 'scorecard__employee'
+#             ).get(id=serializer.validated_data['employee_kra_id'])
+#         except EmployeeKRA.DoesNotExist:
+#             return Response({'detail': 'KRA not found'}, status=404)
+        
+#         # Permission check: only reporting manager or HR
+#         is_manager = employee_kra.scorecard.employee.reporting_manager_id == user.employee.id
+#         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+        
+#         if not (is_manager or is_hr):
+#             return Response({'detail': 'Only reporting manager or HR can nominate peers'}, status=403)
+        
+#         if not employee_kra.peer_rating_required:
+#             return Response({'detail': 'This KRA does not require peer rating'}, status=400)
+        
+#         # Prevent nominating the employee themselves
+#         peer_ids = serializer.validated_data['peer_ids']
+#         if str(employee_kra.scorecard.employee.id) in [str(p) for p in peer_ids]:
+#             return Response({'detail': 'Cannot nominate the employee as their own peer'}, status=400)
+        
+#         try:
+#             count = ScorecardService.nominate_peers(
+#                 employee_kra=employee_kra,
+#                 peer_ids=peer_ids,
+#                 nominated_by=user.employee,
+#             )
+#         except ValueError as e:
+#             return Response({'detail': str(e)}, status=400)
+        
+#         return Response({
+#             'status': 'success',
+#             'message': f'Nominated {count} new peer(s)',
+#         })
+
+
+# # ------------------------------------------------------------------------------
+# # PEER RATING (Peer submits rating)
+# # ------------------------------------------------------------------------------
+
+# class PeerRatingViewSet(ModelViewSet):
+#     """Peer submits their rating."""
+#     queryset = PeerRating.objects.all().select_related(
+#         'nomination', 'nomination__nominated_peer',
+#         'nomination__employee_kra__scorecard__employee',
+#         'nomination__employee_kra__scorecard__cycle',
+#     )
+#     serializer_class = PeerRatingSerializer
+#     permission_classes = [IsAuthenticated]
+#     filter_backends = [DjangoFilterBackend]
+#     filterset_fields = ['status', 'nomination']
+#     http_method_names = ['get', 'post', 'patch']
+
+#     def get_queryset(self):
+#         qs = super().get_queryset()
+#         user = self.request.user
+        
+#         if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
+#             return qs
+        
+#         # Manager sees ratings for their team + their own submissions
+#         if user.has_role('MANAGER') and hasattr(user, 'employee'):
+#             return qs.filter(
+#                 models.Q(nomination__employee_kra__scorecard__employee__reporting_manager=user.employee) |
+#                 models.Q(nomination__nominated_peer=user.employee)
+#             )
+        
+#         # Employee: only their own peer submissions
+#         if hasattr(user, 'employee'):
+#             return qs.filter(nomination__nominated_peer=user.employee)
+        
+#         return qs.none()
+
+#     @action(detail=False, methods=['get'], url_path='my-pending-reviews')
+#     def my_pending_reviews(self, request):
+#         """
+#         Get peer reviews assigned to me that are still pending.
+#         Shows on /my-peer-reviews page.
+#         """
+#         user = request.user
+#         if not hasattr(user, 'employee'):
+#             return Response([])
+        
+#         qs = PeerRating.objects.filter(
+#             nomination__nominated_peer=user.employee,
+#         ).select_related(
+#             'nomination__employee_kra__scorecard__employee',
+#             'nomination__employee_kra__scorecard__cycle',
+#         ).order_by('status', 'due_at')
+        
+#         serializer = PendingPeerReviewSerializer(qs, many=True)
+#         return Response(serializer.data)
+
+#     @action(detail=True, methods=['post'], url_path='submit')
+#     def submit_rating(self, request, pk=None):
+#         """Peer submits their rating."""
+#         peer_rating = self.get_object()
+#         user = request.user
+        
+#         # Only nominated peer can submit
+#         if not hasattr(user, 'employee') or user.employee.id != peer_rating.nomination.nominated_peer_id:
+#             return Response({'detail': 'You are not the nominated peer'}, status=403)
+        
+#         if peer_rating.status == 'SUBMITTED':
+#             return Response({'detail': 'Already submitted'}, status=400)
+        
+#         serializer = PeerRatingSubmitSerializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+        
+#         peer_rating.rating = serializer.validated_data['rating']
+#         peer_rating.strengths_comment = serializer.validated_data.get('strengths_comment', '')
+#         peer_rating.improvements_comment = serializer.validated_data.get('improvements_comment', '')
+#         peer_rating.additional_comments = serializer.validated_data.get('additional_comments', '')
+#         peer_rating.status = 'SUBMITTED'
+#         peer_rating.submitted_at = dj_timezone.now()
+#         peer_rating.save()
+        
+#         return Response({'status': 'success', 'message': 'Peer rating submitted. Thank you!'})
+
+#     @action(detail=True, methods=['post'], url_path='decline')
+#     def decline_rating(self, request, pk=None):
+#         """Peer declines to rate (with reason)."""
+#         peer_rating = self.get_object()
+#         user = request.user
+        
+#         if not hasattr(user, 'employee') or user.employee.id != peer_rating.nomination.nominated_peer_id:
+#             return Response({'detail': 'You are not the nominated peer'}, status=403)
+        
+#         if peer_rating.status != 'PENDING':
+#             return Response({'detail': 'Cannot decline — status is not pending'}, status=400)
+        
+#         serializer = PeerRatingDeclineSerializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+        
+#         peer_rating.status = 'DECLINED'
+#         peer_rating.decline_reason = serializer.validated_data['decline_reason']
+#         peer_rating.save()
+        
+#         return Response({'status': 'success', 'message': 'Declined'})
+
+
+# # ------------------------------------------------------------------------------
+# # PEER SEARCH (for nomination dropdown)
+# # ------------------------------------------------------------------------------
+
+# class PeerSearchView(APIView):
+#     """
+#     Search for employees who can be peers.
+#     GET /api/v1/peer-search/?exclude_employee=<uuid>&search=<query>
+#     """
+#     permission_classes = [IsAuthenticated]
+
+#     def get(self, request):
+#         exclude_employee_id = request.query_params.get('exclude_employee')
+#         search = request.query_params.get('search', '').strip()
+        
+#         qs = Employee.objects.filter(
+#             is_deleted=False,
+#             status__in=['ACTIVE', 'PROBATION'],
+#         ).select_related('position', 'structure_location')
+        
+#         if exclude_employee_id:
+#             qs = qs.exclude(id=exclude_employee_id)
+        
+#         if search:
+#             qs = qs.filter(
+#                 models.Q(first_name__icontains=search) |
+#                 models.Q(last_name__icontains=search) |
+#                 models.Q(employee_id__icontains=search)
+#             )
+        
+#         qs = qs[:50]
+#         serializer = EmployeeForPeerSerializer(qs, many=True)
+#         return Response(serializer.data)
 
 
 # ==============================================================================
 # DASHBOARD STATS
+# ==============================================================================
+
+# class DashboardStatsView(APIView):
+#     """
+#     Real-time dashboard statistics.
+#     Returns different data based on user role.
+#     """
+#     permission_classes = [IsAuthenticated]
+
+#     def get(self, request):
+#         from django.utils import timezone as dj_tz
+#         from django.db.models import Count, Avg, Q
+#         from datetime import timedelta
+#         from .models import (
+#             Employee, EmployeeScorecard, PerformanceCycle,
+#             LifecycleChangeRequest, Notification,
+#             EmployeeDocument, KRALibrary,
+#         )
+        
+#         user = request.user
+#         today = dj_tz.now().date()
+#         month_start = today.replace(day=1)
+        
+#         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+#         is_manager = user.has_role('MANAGER')
+        
+#         stats = {
+#             'user_role': 'HR' if is_hr else ('MANAGER' if is_manager else 'EMPLOYEE'),
+#         }
+        
+#         # ==========================================================================
+#         # HR / SYSTEM ADMIN DASHBOARD
+#         # ==========================================================================
+#         if is_hr:
+#             # Employee stats
+#             employees = Employee.objects.filter(is_deleted=False)
+#             total_emp = employees.count()
+#             active_emp = employees.filter(status='ACTIVE').count()
+#             probation_emp = employees.filter(status='PROBATION').count()
+            
+#             new_hires_this_month = employees.filter(
+#                 date_of_joining__gte=month_start,
+#                 date_of_joining__lte=today,
+#             ).count()
+            
+#             # Compare with last month
+#             last_month_start = (month_start - timedelta(days=1)).replace(day=1)
+#             new_hires_last_month = employees.filter(
+#                 date_of_joining__gte=last_month_start,
+#                 date_of_joining__lt=month_start,
+#             ).count()
+            
+#             hire_change = new_hires_this_month - new_hires_last_month
+            
+#             # Attrition — separations this month
+#             attrition = employees.filter(
+#                 date_of_exit__gte=month_start,
+#                 date_of_exit__lte=today,
+#             ).count()
+            
+#             attrition_rate = round((attrition / total_emp * 100), 2) if total_emp else 0
+            
+#             # Performance stats (active cycle)
+#             active_cycle = PerformanceCycle.objects.filter(status='ACTIVE').first()
+#             perf_stats = {}
+#             if active_cycle:
+#                 scorecards = active_cycle.scorecards.all()
+#                 finalized = scorecards.filter(final_score__isnull=False)
+#                 perf_stats = {
+#                     'cycle_name': active_cycle.name,
+#                     'total_scorecards': scorecards.count(),
+#                     'in_progress': scorecards.filter(
+#                         status__in=['DRAFT', 'SUBMITTED', 'APPROVED', 'SIGNED_OFF']
+#                     ).count(),
+#                     'awaiting_finalization': scorecards.filter(status='MANAGER_REVIEWED').count(),
+#                     'finalized': scorecards.filter(status='FINALIZED').count(),
+#                     'avg_score': round(
+#                         finalized.aggregate(avg=Avg('final_score'))['avg'] or 0, 2
+#                     ),
+#                 }
+            
+#             # Lifecycle requests
+#             pending_lifecycle = LifecycleChangeRequest.objects.filter(
+#                 status='IN_PROGRESS'
+#             ).count()
+            
+#             # Document expiries (next 90 days)
+#             expiry_alerts = EmployeeDocument.objects.filter(
+#                 expiry_date__isnull=False,
+#                 expiry_date__gte=today,
+#                 expiry_date__lte=today + timedelta(days=90),
+#             ).count()
+            
+#             # KRA library size
+#             active_kras = KRALibrary.objects.filter(is_active=True).count()
+            
+#             stats.update({
+#                 'total_employees': total_emp,
+#                 'active_employees': active_emp,
+#                 'probation_employees': probation_emp,
+#                 'new_hires_month': new_hires_this_month,
+#                 'new_hires_change': hire_change,
+#                 'attrition_count': attrition,
+#                 'attrition_rate': attrition_rate,
+#                 'performance': perf_stats,
+#                 'pending_lifecycle_requests': pending_lifecycle,
+#                 'document_expiry_alerts': expiry_alerts,
+#                 'active_kra_count': active_kras,
+                
+#                 # Recent activity data
+#                 'recent_hires': list(
+#                     employees.filter(
+#                         date_of_joining__gte=today - timedelta(days=30)
+#                     ).order_by('-date_of_joining').values(
+#                         'id', 'employee_id', 'first_name', 'last_name',
+#                         'date_of_joining'
+#                     )[:5]
+#                 ),
+                
+#                 # Department distribution
+#                 'department_distribution': list(
+#                     employees.values('structure_location__name')
+#                     .annotate(count=Count('id'))
+#                     .order_by('-count')[:6]
+#                 ),
+#             })
+        
+#         # ==========================================================================
+#         # MANAGER DASHBOARD
+#         # ==========================================================================
+#         elif is_manager and hasattr(user, 'employee'):
+#             manager_emp = user.employee
+#             team = Employee.objects.filter(
+#                 reporting_manager=manager_emp,
+#                 is_deleted=False,
+#             )
+            
+#             team_size = team.count()
+            
+#             # Team scorecards
+#             active_cycle = PerformanceCycle.objects.filter(status='ACTIVE').first()
+#             team_perf = {}
+#             if active_cycle:
+#                 team_scorecards = EmployeeScorecard.objects.filter(
+#                     employee__reporting_manager=manager_emp,
+#                     cycle=active_cycle,
+#                 )
+#                 team_perf = {
+#                     'cycle_name': active_cycle.name,
+#                     'total': team_scorecards.count(),
+#                     'pending_review': team_scorecards.filter(
+#                         status__in=['SUBMITTED', 'SELF_REVIEWED']
+#                     ).count(),
+#                     'approved': team_scorecards.filter(
+#                         status__in=['APPROVED', 'SIGNED_OFF', 'FINALIZED']
+#                     ).count(),
+#                     'avg_score': round(
+#                         team_scorecards.filter(final_score__isnull=False)
+#                         .aggregate(avg=Avg('final_score'))['avg'] or 0, 2
+#                     ),
+#                 }
+            
+#             # Pending approvals (lifecycle)
+#             pending_approvals = LifecycleChangeRequest.objects.filter(
+#                 status='IN_PROGRESS',
+#                 approval_actions__assigned_to=manager_emp,
+#                 approval_actions__status='PENDING',
+#             ).distinct().count()
+            
+#             stats.update({
+#                 'team_size': team_size,
+#                 'team_active': team.filter(status='ACTIVE').count(),
+#                 'team_probation': team.filter(status='PROBATION').count(),
+#                 'team_performance': team_perf,
+#                 'pending_approvals': pending_approvals,
+                
+#                 # Team roster
+#                 'team_roster': list(
+#                     team.values(
+#                         'id', 'employee_id', 'first_name', 'last_name',
+#                         'position__title', 'status'
+#                     )[:10]
+#                 ),
+#             })
+        
+#         # ==========================================================================
+#         # EMPLOYEE DASHBOARD
+#         # ==========================================================================
+#         if hasattr(user, 'employee'):
+#             emp = user.employee
+            
+#             # My current scorecard
+#             active_cycle = PerformanceCycle.objects.filter(status='ACTIVE').first()
+#             my_scorecard = None
+#             if active_cycle:
+#                 sc = EmployeeScorecard.objects.filter(
+#                     employee=emp, cycle=active_cycle
+#                 ).first()
+#                 if sc:
+#                     my_scorecard = {
+#                         'id': str(sc.id),
+#                         'cycle_name': sc.cycle.name,
+#                         'status': sc.status,
+#                         'status_display': sc.get_status_display(),
+#                         'total_weight': float(sc.total_weight),
+#                         'kra_count': sc.kras.count(),
+#                         'final_score': float(sc.final_score) if sc.final_score else None,
+#                         'final_rating': sc.final_rating,
+#                     }
+            
+#             # My unread notifications
+#             unread_notifs = Notification.objects.filter(
+#                 recipient=emp, is_read=False
+#             ).count()
+            
+#             # Past scorecards count
+#             # past_scorecards = EmployeeScorecard.objects.filter(
+#             #     employee=emp, status='FINALIZED'
+#             # ).count()
+            
+#             # Documents I own
+#             my_documents = EmployeeDocument.objects.filter(employee=emp).count()
+            
+#             stats.update({
+#                 'my_scorecard': my_scorecard,
+#                 'my_unread_notifications': unread_notifs,
+#                 'my_past_scorecards': past_scorecards,
+#                 'my_documents': my_documents,
+#                 'my_employee_id': emp.employee_id,
+#                 'my_position': emp.position.title if emp.position else None,
+#                 'my_department': emp.structure_location.name if emp.structure_location else None,
+#                 'my_manager': emp.reporting_manager.full_name if emp.reporting_manager else None,
+#             })
+        
+#         # ==========================================================================
+#         # RECENT NOTIFICATIONS (for everyone)
+#         # ==========================================================================
+#         if hasattr(user, 'employee'):
+#             recent_notifs = Notification.objects.filter(
+#                 recipient=user.employee
+#             ).order_by('-created_at')[:5]
+            
+#             stats['recent_notifications'] = [
+#                 {
+#                     'id': str(n.id),
+#                     'title': n.title,
+#                     'message': n.message[:100],
+#                     'type': n.notification_type,
+#                     'is_read': n.is_read,
+#                     'link': n.link,
+#                     'created_at': n.created_at.isoformat(),
+#                 }
+#                 for n in recent_notifs
+#             ]
+        
+#         return Response(stats)
+
+# ==============================================================================
+# DASHBOARD STATS
+# ==============================================================================
+
+# class DashboardStatsView(APIView):
+#     """
+#     Real-time dashboard statistics.
+#     Returns different data based on user role.
+#     """
+#     permission_classes = [IsAuthenticated]
+
+#     def get(self, request):
+#         from django.utils import timezone as dj_tz
+#         from django.db.models import Count, Avg
+#         from datetime import timedelta
+#         from .models import (
+#             Employee, LifecycleChangeRequest, Notification,
+#             EmployeeDocument, KRALibrary, AnnualPerformancePlan
+#         )
+        
+#         user = request.user
+#         today = dj_tz.now().date()
+#         month_start = today.replace(day=1)
+        
+#         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+#         is_manager = user.has_role('MANAGER')
+        
+#         stats = {
+#             'user_role': 'HR' if is_hr else ('MANAGER' if is_manager else 'EMPLOYEE'),
+#         }
+        
+#         current_fy = '2026-27'  # Defaulting to current FY for dashboard
+        
+#         # ==========================================================================
+#         # HR / SYSTEM ADMIN DASHBOARD
+#         # ==========================================================================
+#         if is_hr:
+#             employees = Employee.objects.filter(is_deleted=False)
+#             total_emp = employees.count()
+            
+#             new_hires_this_month = employees.filter(date_of_joining__gte=month_start, date_of_joining__lte=today).count()
+#             last_month_start = (month_start - timedelta(days=1)).replace(day=1)
+#             new_hires_last_month = employees.filter(date_of_joining__gte=last_month_start, date_of_joining__lt=month_start).count()
+            
+#             # Performance stats (Using new AnnualPerformancePlan)
+#             active_plans = AnnualPerformancePlan.objects.filter(financial_year=current_fy)
+#             perf_stats = {}
+#             if active_plans.exists():
+#                 perf_stats = {
+#                     'cycle_name': f'FY {current_fy}',
+#                     'total_scorecards': active_plans.count(),
+#                     'in_progress': active_plans.filter(status='ACTIVE').count(),
+#                     'awaiting_finalization': 0, # Will be implemented in Phase 5
+#                     'finalized': active_plans.filter(status='CLOSED').count(),
+#                     'avg_score': round(active_plans.aggregate(avg=Avg('annual_score'))['avg'] or 0, 2),
+#                 }
+            
+#             stats.update({
+#                 'total_employees': total_emp,
+#                 'active_employees': employees.filter(status='ACTIVE').count(),
+#                 'probation_employees': employees.filter(status='PROBATION').count(),
+#                 'new_hires_month': new_hires_this_month,
+#                 'new_hires_change': new_hires_this_month - new_hires_last_month,
+#                 'attrition_count': employees.filter(date_of_exit__gte=month_start, date_of_exit__lte=today).count(),
+#                 'attrition_rate': round((employees.filter(date_of_exit__isnull=False).count() / total_emp * 100), 2) if total_emp else 0,
+#                 'performance': perf_stats,
+#                 'pending_lifecycle_requests': LifecycleChangeRequest.objects.filter(status='IN_PROGRESS').count(),
+#                 'document_expiry_alerts': EmployeeDocument.objects.filter(expiry_date__gte=today, expiry_date__lte=today + timedelta(days=90)).count(),
+#                 'active_kra_count': KRALibrary.objects.filter(is_active=True).count(),
+#                 'recent_hires': list(employees.order_by('-date_of_joining').values('id', 'employee_id', 'first_name', 'last_name', 'date_of_joining')[:5]),
+#                 'department_distribution': list(employees.values('structure_location__name').annotate(count=Count('id')).order_by('-count')[:6]),
+#             })
+        
+#         # ==========================================================================
+#         # MANAGER DASHBOARD
+#         # ==========================================================================
+#         elif is_manager and hasattr(user, 'employee'):
+#             manager_emp = user.employee
+#             team = Employee.objects.filter(reporting_manager=manager_emp, is_deleted=False)
+            
+#             team_plans = AnnualPerformancePlan.objects.filter(employee__reporting_manager=manager_emp, financial_year=current_fy)
+#             team_perf = {
+#                 'cycle_name': f'FY {current_fy}',
+#                 'total': team_plans.count(),
+#                 'pending_review': 0,
+#                 'approved': team_plans.filter(status='ACTIVE').count(),
+#                 'avg_score': round(team_plans.aggregate(avg=Avg('annual_score'))['avg'] or 0, 2),
+#             }
+            
+#             stats.update({
+#                 'team_size': team.count(),
+#                 'team_active': team.filter(status='ACTIVE').count(),
+#                 'team_probation': team.filter(status='PROBATION').count(),
+#                 'team_performance': team_perf,
+#                 'pending_approvals': LifecycleChangeRequest.objects.filter(status='IN_PROGRESS', approval_actions__assigned_to=manager_emp, approval_actions__status='PENDING').distinct().count(),
+#                 'team_roster': list(team.values('id', 'employee_id', 'first_name', 'last_name', 'position__title', 'status')[:10]),
+#             })
+        
+#         # ==========================================================================
+#         # EMPLOYEE DASHBOARD
+#         # ==========================================================================
+#         if hasattr(user, 'employee'):
+#             emp = user.employee
+#             my_plan = AnnualPerformancePlan.objects.filter(employee=emp, financial_year=current_fy).first()
+            
+#             my_scorecard = None
+#             if my_plan:
+#                 my_scorecard = {
+#                     'id': str(my_plan.id),
+#                     'cycle_name': f'FY {current_fy}',
+#                     'status': my_plan.status,
+#                     'status_display': my_plan.get_status_display(),
+#                     'total_weight': 100,
+#                     'kra_count': 0, 
+#                     'final_score': float(my_plan.annual_score) if my_plan.annual_score else None,
+#                     'final_rating': my_plan.annual_rating,
+#                 }
+            
+#             recent_notifs = Notification.objects.filter(recipient=emp).order_by('-created_at')[:5]
+            
+#             stats.update({
+#                 'my_scorecard': my_scorecard,
+#                 'my_unread_notifications': Notification.objects.filter(recipient=emp, is_read=False).count(),
+#                 'my_past_scorecards': AnnualPerformancePlan.objects.filter(employee=emp, status='CLOSED').count(),
+#                 'my_documents': EmployeeDocument.objects.filter(employee=emp).count(),
+#                 'my_employee_id': emp.employee_id,
+#                 'my_position': emp.position.title if emp.position else None,
+#                 'my_department': emp.structure_location.name if emp.structure_location else None,
+#                 'my_manager': emp.reporting_manager.full_name if emp.reporting_manager else None,
+#                 'recent_notifications': [{'id': str(n.id), 'title': n.title, 'message': n.message[:100], 'type': n.notification_type, 'is_read': n.is_read, 'link': n.link, 'created_at': n.created_at.isoformat()} for n in recent_notifs]
+#             })
+        
+#         return Response(stats)
+
+
+# ==============================================================================
+# DASHBOARD STATS (Updated for New Monthly KRA Architecture)
 # ==============================================================================
 
 class DashboardStatsView(APIView):
@@ -2627,14 +3233,23 @@ class DashboardStatsView(APIView):
         from django.db.models import Count, Avg, Q
         from datetime import timedelta
         from .models import (
-            Employee, EmployeeScorecard, PerformanceCycle,
-            LifecycleChangeRequest, Notification,
-            EmployeeDocument, KRALibrary,
+            Employee, LifecycleChangeRequest, Notification,
+            EmployeeDocument, KRALibrary, CommonKRAMaster, DepartmentalKRAMaster,
+            AnnualPerformancePlan, MonthlyPerformancePlan, MonthlyKRA
         )
         
         user = request.user
         today = dj_tz.now().date()
         month_start = today.replace(day=1)
+        current_month_num = today.month
+        current_year_num = today.year
+        
+        # Calculate Financial Year string (e.g., 2026-27)
+        if current_month_num >= 4:
+            start_year = current_year_num
+        else:
+            start_year = current_year_num - 1
+        current_fy = f"{start_year}-{str(start_year + 1)[-2:]}"
         
         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
         is_manager = user.has_role('MANAGER')
@@ -2647,97 +3262,50 @@ class DashboardStatsView(APIView):
         # HR / SYSTEM ADMIN DASHBOARD
         # ==========================================================================
         if is_hr:
-            # Employee stats
             employees = Employee.objects.filter(is_deleted=False)
             total_emp = employees.count()
-            active_emp = employees.filter(status='ACTIVE').count()
-            probation_emp = employees.filter(status='PROBATION').count()
             
-            new_hires_this_month = employees.filter(
-                date_of_joining__gte=month_start,
-                date_of_joining__lte=today,
-            ).count()
-            
-            # Compare with last month
+            new_hires_this_month = employees.filter(date_of_joining__gte=month_start, date_of_joining__lte=today).count()
             last_month_start = (month_start - timedelta(days=1)).replace(day=1)
-            new_hires_last_month = employees.filter(
-                date_of_joining__gte=last_month_start,
-                date_of_joining__lt=month_start,
-            ).count()
+            new_hires_last_month = employees.filter(date_of_joining__gte=last_month_start, date_of_joining__lt=month_start).count()
             
-            hire_change = new_hires_this_month - new_hires_last_month
+            # Current Month's Performance Stats
+            monthly_plans = MonthlyPerformancePlan.objects.filter(
+                annual_plan__financial_year=current_fy,
+                month=current_month_num,
+                year=current_year_num,
+            )
             
-            # Attrition — separations this month
-            attrition = employees.filter(
-                date_of_exit__gte=month_start,
-                date_of_exit__lte=today,
-            ).count()
+            perf_stats = {
+                'cycle_name': f'FY {current_fy} — {today.strftime("%B")}',
+                'total_scorecards': monthly_plans.count(),
+                'in_progress': monthly_plans.filter(status__in=['OPEN', 'DRAFT']).count(),
+                'awaiting_finalization': monthly_plans.filter(status__in=['EMPLOYEE_SUBMITTED', 'UNDER_REVIEW']).count(),
+                'finalized': monthly_plans.filter(status__in=['APPROVED', 'CLOSED']).count(),
+                'avg_score': round(monthly_plans.filter(monthly_score__isnull=False).aggregate(avg=Avg('monthly_score'))['avg'] or 0, 2),
+            }
             
-            attrition_rate = round((attrition / total_emp * 100), 2) if total_emp else 0
-            
-            # Performance stats (active cycle)
-            active_cycle = PerformanceCycle.objects.filter(status='ACTIVE').first()
-            perf_stats = {}
-            if active_cycle:
-                scorecards = active_cycle.scorecards.all()
-                finalized = scorecards.filter(final_score__isnull=False)
-                perf_stats = {
-                    'cycle_name': active_cycle.name,
-                    'total_scorecards': scorecards.count(),
-                    'in_progress': scorecards.filter(
-                        status__in=['DRAFT', 'SUBMITTED', 'APPROVED', 'SIGNED_OFF']
-                    ).count(),
-                    'awaiting_finalization': scorecards.filter(status='MANAGER_REVIEWED').count(),
-                    'finalized': scorecards.filter(status='FINALIZED').count(),
-                    'avg_score': round(
-                        finalized.aggregate(avg=Avg('final_score'))['avg'] or 0, 2
-                    ),
-                }
-            
-            # Lifecycle requests
-            pending_lifecycle = LifecycleChangeRequest.objects.filter(
-                status='IN_PROGRESS'
-            ).count()
-            
-            # Document expiries (next 90 days)
-            expiry_alerts = EmployeeDocument.objects.filter(
-                expiry_date__isnull=False,
-                expiry_date__gte=today,
-                expiry_date__lte=today + timedelta(days=90),
-            ).count()
-            
-            # KRA library size
-            active_kras = KRALibrary.objects.filter(is_active=True).count()
+            # 💡 Count ALL Active Master KRAs (Common + Departmental + Library)
+            total_master_kras = (
+                CommonKRAMaster.objects.filter(financial_year=current_fy, is_active=True).count() +
+                DepartmentalKRAMaster.objects.filter(financial_year=current_fy, is_active=True).count() +
+                KRALibrary.objects.filter(is_active=True).count()
+            )
             
             stats.update({
                 'total_employees': total_emp,
-                'active_employees': active_emp,
-                'probation_employees': probation_emp,
+                'active_employees': employees.filter(status='ACTIVE').count(),
+                'probation_employees': employees.filter(status='PROBATION').count(),
                 'new_hires_month': new_hires_this_month,
-                'new_hires_change': hire_change,
-                'attrition_count': attrition,
-                'attrition_rate': attrition_rate,
+                'new_hires_change': new_hires_this_month - new_hires_last_month,
+                'attrition_count': employees.filter(date_of_exit__gte=month_start, date_of_exit__lte=today).count(),
+                'attrition_rate': round((employees.filter(date_of_exit__isnull=False).count() / total_emp * 100), 2) if total_emp else 0,
                 'performance': perf_stats,
-                'pending_lifecycle_requests': pending_lifecycle,
-                'document_expiry_alerts': expiry_alerts,
-                'active_kra_count': active_kras,
-                
-                # Recent activity data
-                'recent_hires': list(
-                    employees.filter(
-                        date_of_joining__gte=today - timedelta(days=30)
-                    ).order_by('-date_of_joining').values(
-                        'id', 'employee_id', 'first_name', 'last_name',
-                        'date_of_joining'
-                    )[:5]
-                ),
-                
-                # Department distribution
-                'department_distribution': list(
-                    employees.values('structure_location__name')
-                    .annotate(count=Count('id'))
-                    .order_by('-count')[:6]
-                ),
+                'pending_lifecycle_requests': LifecycleChangeRequest.objects.filter(status='IN_PROGRESS').count(),
+                'document_expiry_alerts': EmployeeDocument.objects.filter(expiry_date__gte=today, expiry_date__lte=today + timedelta(days=90)).count(),
+                'active_kra_count': total_master_kras, # 👈 REAL MASTER KRA COUNT
+                'recent_hires': list(employees.order_by('-date_of_joining').values('id', 'employee_id', 'first_name', 'last_name', 'date_of_joining')[:5]),
+                'department_distribution': list(employees.values('structure_location__name').annotate(count=Count('id')).order_by('-count')[:6]),
             })
         
         # ==========================================================================
@@ -2745,131 +3313,95 @@ class DashboardStatsView(APIView):
         # ==========================================================================
         elif is_manager and hasattr(user, 'employee'):
             manager_emp = user.employee
-            team = Employee.objects.filter(
-                reporting_manager=manager_emp,
-                is_deleted=False,
+            team = Employee.objects.filter(reporting_manager=manager_emp, is_deleted=False)
+            
+            team_monthly_plans = MonthlyPerformancePlan.objects.filter(
+                annual_plan__employee__reporting_manager=manager_emp,
+                annual_plan__financial_year=current_fy,
+                month=current_month_num,
+                year=current_year_num,
             )
             
-            team_size = team.count()
-            
-            # Team scorecards
-            active_cycle = PerformanceCycle.objects.filter(status='ACTIVE').first()
-            team_perf = {}
-            if active_cycle:
-                team_scorecards = EmployeeScorecard.objects.filter(
-                    employee__reporting_manager=manager_emp,
-                    cycle=active_cycle,
-                )
-                team_perf = {
-                    'cycle_name': active_cycle.name,
-                    'total': team_scorecards.count(),
-                    'pending_review': team_scorecards.filter(
-                        status__in=['SUBMITTED', 'SELF_REVIEWED']
-                    ).count(),
-                    'approved': team_scorecards.filter(
-                        status__in=['APPROVED', 'SIGNED_OFF', 'FINALIZED']
-                    ).count(),
-                    'avg_score': round(
-                        team_scorecards.filter(final_score__isnull=False)
-                        .aggregate(avg=Avg('final_score'))['avg'] or 0, 2
-                    ),
-                }
-            
-            # Pending approvals (lifecycle)
-            pending_approvals = LifecycleChangeRequest.objects.filter(
-                status='IN_PROGRESS',
-                approval_actions__assigned_to=manager_emp,
-                approval_actions__status='PENDING',
-            ).distinct().count()
+            team_perf = {
+                'cycle_name': f'FY {current_fy} — {today.strftime("%B")}',
+                'total': team_monthly_plans.count(),
+                'pending_review': team_monthly_plans.filter(status__in=['EMPLOYEE_SUBMITTED', 'UNDER_REVIEW']).count(),
+                'approved': team_monthly_plans.filter(status__in=['APPROVED', 'CLOSED']).count(),
+                'avg_score': round(team_monthly_plans.filter(monthly_score__isnull=False).aggregate(avg=Avg('monthly_score'))['avg'] or 0, 2),
+            }
             
             stats.update({
-                'team_size': team_size,
+                'team_size': team.count(),
                 'team_active': team.filter(status='ACTIVE').count(),
                 'team_probation': team.filter(status='PROBATION').count(),
                 'team_performance': team_perf,
-                'pending_approvals': pending_approvals,
-                
-                # Team roster
-                'team_roster': list(
-                    team.values(
-                        'id', 'employee_id', 'first_name', 'last_name',
-                        'position__title', 'status'
-                    )[:10]
-                ),
+                'pending_approvals': LifecycleChangeRequest.objects.filter(status='IN_PROGRESS', approval_actions__assigned_to=manager_emp, approval_actions__status='PENDING').distinct().count(),
+                'team_roster': list(team.values('id', 'employee_id', 'first_name', 'last_name', 'position__title', 'status')[:10]),
             })
         
         # ==========================================================================
-        # EMPLOYEE DASHBOARD
+        # EMPLOYEE PERSONAL DASHBOARD STATS
         # ==========================================================================
         if hasattr(user, 'employee'):
             emp = user.employee
             
-            # My current scorecard
-            active_cycle = PerformanceCycle.objects.filter(status='ACTIVE').first()
+            # Fetch active plan for current month
+            current_m_plan = MonthlyPerformancePlan.objects.filter(
+                annual_plan__employee=emp,
+                annual_plan__financial_year=current_fy,
+                month=current_month_num,
+                year=current_year_num,
+            ).select_related('annual_plan').prefetch_related('kras').first()
+            
+            # Fallback to any active monthly plan if current month hasn't started yet
+            if not current_m_plan:
+                current_m_plan = MonthlyPerformancePlan.objects.filter(
+                    annual_plan__employee=emp,
+                    annual_plan__financial_year=current_fy,
+                ).select_related('annual_plan').prefetch_related('kras').first()
+
             my_scorecard = None
-            if active_cycle:
-                sc = EmployeeScorecard.objects.filter(
-                    employee=emp, cycle=active_cycle
-                ).first()
-                if sc:
-                    my_scorecard = {
-                        'id': str(sc.id),
-                        'cycle_name': sc.cycle.name,
-                        'status': sc.status,
-                        'status_display': sc.get_status_display(),
-                        'total_weight': float(sc.total_weight),
-                        'kra_count': sc.kras.count(),
-                        'final_score': float(sc.final_score) if sc.final_score else None,
-                        'final_rating': sc.final_rating,
-                    }
+            if current_m_plan:
+                kras_count = current_m_plan.kras.count()
+                total_weight = float(sum(k.weight for k in current_m_plan.kras.all()))
+
+                my_scorecard = {
+                    'id': str(current_m_plan.annual_plan.id),
+                    'cycle_name': f'FY {current_fy} — {today.strftime("%B")}',
+                    'status': current_m_plan.status,
+                    'status_display': current_m_plan.get_status_display(),
+                    'total_weight': round(total_weight, 1),
+                    'kra_count': kras_count, # 👈 REAL DYNAMIC KRA COUNT (No longer 0!)
+                    'final_score': float(current_m_plan.monthly_score) if current_m_plan.monthly_score is not None else None,
+                    'final_rating': None,
+                }
             
-            # My unread notifications
-            unread_notifs = Notification.objects.filter(
-                recipient=emp, is_read=False
-            ).count()
-            
-            # Past scorecards count
-            past_scorecards = EmployeeScorecard.objects.filter(
-                employee=emp, status='FINALIZED'
-            ).count()
-            
-            # Documents I own
-            my_documents = EmployeeDocument.objects.filter(employee=emp).count()
+            recent_notifs = Notification.objects.filter(recipient=emp).order_by('-created_at')[:5]
             
             stats.update({
                 'my_scorecard': my_scorecard,
-                'my_unread_notifications': unread_notifs,
-                'my_past_scorecards': past_scorecards,
-                'my_documents': my_documents,
+                'my_unread_notifications': Notification.objects.filter(recipient=emp, is_read=False).count(),
+                'my_past_scorecards': MonthlyPerformancePlan.objects.filter(annual_plan__employee=emp, status='CLOSED').count(),
+                'my_documents': EmployeeDocument.objects.filter(employee=emp).count(),
                 'my_employee_id': emp.employee_id,
                 'my_position': emp.position.title if emp.position else None,
                 'my_department': emp.structure_location.name if emp.structure_location else None,
                 'my_manager': emp.reporting_manager.full_name if emp.reporting_manager else None,
+                'recent_notifications': [
+                    {
+                        'id': str(n.id),
+                        'title': n.title,
+                        'message': n.message[:100],
+                        'type': n.notification_type,
+                        'is_read': n.is_read,
+                        'link': n.link,
+                        'created_at': n.created_at.isoformat()
+                    }
+                    for n in recent_notifs
+                ]
             })
         
-        # ==========================================================================
-        # RECENT NOTIFICATIONS (for everyone)
-        # ==========================================================================
-        if hasattr(user, 'employee'):
-            recent_notifs = Notification.objects.filter(
-                recipient=user.employee
-            ).order_by('-created_at')[:5]
-            
-            stats['recent_notifications'] = [
-                {
-                    'id': str(n.id),
-                    'title': n.title,
-                    'message': n.message[:100],
-                    'type': n.notification_type,
-                    'is_read': n.is_read,
-                    'link': n.link,
-                    'created_at': n.created_at.isoformat(),
-                }
-                for n in recent_notifs
-            ]
-        
         return Response(stats)
-
 
 from .services.reports_service import PerformanceReportsService
 
@@ -3225,3 +3757,228 @@ class GetLMSTokenView(APIView):
             {'error': 'LMS authentication failed'},
             status=502
         )
+
+
+
+from django.utils import timezone
+from .models import MonthlyPeerNomination, MonthlyPeerRating, MonthlyKRA, Employee
+from .serializers import MonthlyPeerNominationSerializer, MonthlyPeerRatingSerializer
+
+class MonthlyPeerNominationViewSet(ModelViewSet):
+    queryset = MonthlyPeerNomination.objects.select_related(
+        'monthly_kra', 'nominated_peer', 'nominated_by', 'rating'
+    ).all()
+    serializer_class = MonthlyPeerNominationSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['monthly_kra', 'nominated_peer']
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        nominator = getattr(user, 'employee', None)
+        nomination = serializer.save(nominated_by=nominator)
+
+        # Auto-create pending rating row for peer inbox
+        MonthlyPeerRating.objects.get_or_create(nomination=nomination)
+
+    @action(detail=False, methods=['post'], url_path='nominate-peers')
+    def nominate_peers(self, request):
+        """
+        POST body:
+        {
+          "monthly_kra_id": "...",
+          "peer_ids": ["uuid1", "uuid2"]
+        }
+        """
+        kra_id = request.data.get('monthly_kra_id')
+        peer_ids = request.data.get('peer_ids', [])
+
+        if not kra_id or not isinstance(peer_ids, list) or len(peer_ids) < 1:
+            return Response({'detail': 'monthly_kra_id and peer_ids are required'}, status=400)
+
+        try:
+            kra = MonthlyKRA.objects.select_related('monthly_plan__annual_plan__employee').get(id=kra_id)
+        except MonthlyKRA.DoesNotExist:
+            return Response({'detail': 'Monthly KRA not found'}, status=404)
+
+        if not kra.peer_rating_required:
+            return Response({'detail': 'This KRA does not require peer rating'}, status=400)
+
+        # Prevent self-nomination
+        owner_id = str(kra.monthly_plan.annual_plan.employee_id)
+        peer_ids = [str(p) for p in peer_ids if str(p) != owner_id]
+
+        created = 0
+        for peer_id in peer_ids:
+            nom, was_created = MonthlyPeerNomination.objects.get_or_create(
+                monthly_kra=kra,
+                nominated_peer_id=peer_id,
+                defaults={'nominated_by': getattr(request.user, 'employee', None)},
+            )
+            if was_created:
+                MonthlyPeerRating.objects.get_or_create(nomination=nom)
+                created += 1
+
+        return Response({'status': 'success', 'created': created})
+
+
+class MonthlyPeerRatingViewSet(ModelViewSet):
+    queryset = MonthlyPeerRating.objects.select_related(
+        'nomination__nominated_peer',
+        'nomination__monthly_kra',
+        'nomination__monthly_kra__monthly_plan__annual_plan__employee',
+    ).all()
+    serializer_class = MonthlyPeerRatingSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['status', 'nomination']
+    http_method_names = ['get', 'post', 'patch']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
+            return qs
+        if hasattr(user, 'employee'):
+            # Peers see only their own assigned ratings; managers can see team later if needed
+            return qs.filter(nomination__nominated_peer=user.employee)
+        return qs.none()
+
+    @action(detail=False, methods=['get'], url_path='my-pending-reviews')
+    def my_pending_reviews(self, request):
+        if not hasattr(request.user, 'employee'):
+            return Response([])
+        qs = self.get_queryset().filter(
+            nomination__nominated_peer=request.user.employee,
+            status='PENDING',
+        )
+        return Response(self.get_serializer(qs, many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='submit')
+    def submit(self, request, pk=None):
+        rating_obj = self.get_object()
+        if not hasattr(request.user, 'employee') or \
+           rating_obj.nomination.nominated_peer_id != request.user.employee.id:
+            return Response({'detail': 'Not your review'}, status=403)
+        if rating_obj.status != 'PENDING':
+            return Response({'detail': 'Already processed'}, status=400)
+
+        score = request.data.get('rating')
+        if score is None:
+            return Response({'detail': 'rating is required'}, status=400)
+
+        rating_obj.rating = int(score)
+        rating_obj.strengths_comment = request.data.get('strengths_comment', '')
+        rating_obj.improvements_comment = request.data.get('improvements_comment', '')
+        rating_obj.additional_comments = request.data.get('additional_comments', '')
+        rating_obj.status = 'SUBMITTED'
+        rating_obj.submitted_at = timezone.now()
+        rating_obj.save()
+        AnnualPlanService.recalculate_monthly_score(rating_obj.nomination.monthly_kra.monthly_plan)
+        return Response({'status': 'success', 'message': 'Peer rating submitted'})
+
+    @action(detail=True, methods=['post'], url_path='decline')
+    def decline(self, request, pk=None):
+        rating_obj = self.get_object()
+        if not hasattr(request.user, 'employee') or \
+           rating_obj.nomination.nominated_peer_id != request.user.employee.id:
+            return Response({'detail': 'Not your review'}, status=403)
+        if rating_obj.status != 'PENDING':
+            return Response({'detail': 'Already processed'}, status=400)
+
+        reason = request.data.get('decline_reason', '').strip()
+        if len(reason) < 5:
+            return Response({'detail': 'decline_reason min 5 chars'}, status=400)
+
+        rating_obj.status = 'DECLINED'
+        rating_obj.decline_reason = reason
+        rating_obj.save()
+        return Response({'status': 'success', 'message': 'Declined'})
+
+
+from .models import CarryForwardRecord
+from .serializers import CarryForwardRecordSerializer
+
+class CarryForwardRecordViewSet(ModelViewSet):
+    queryset = CarryForwardRecord.objects.select_related(
+        'source_kpi', 'requested_by', 'approved_by'
+    ).all()
+    serializer_class = CarryForwardRecordSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['annual_plan', 'status']
+
+    @action(detail=True, methods=['post'], url_path='approve')
+    @transaction.atomic
+    def approve_carry_forward(self, request, pk=None):
+        cf = self.get_object()
+        if cf.status != 'PENDING':
+            return Response({'detail': 'This carry forward request is already processed.'}, status=400)
+
+        # 1. Determine destination month (April=4 -> May=5, ..., March=3 -> April=4 next year)
+        source_month = cf.source_kpi.monthly_kra.monthly_plan.month
+        source_year = cf.source_kpi.monthly_kra.monthly_plan.year
+
+        if source_month == 12:
+            dest_month, dest_year = 1, source_year + 1
+        elif source_month == 3:  # March -> April next FY
+            dest_month, dest_year = 4, source_year
+        else:
+            dest_month, dest_year = source_month + 1, source_year
+
+        dest_plan = MonthlyPerformancePlan.objects.filter(
+            annual_plan=cf.annual_plan, month=dest_month
+        ).first()
+
+        if not dest_plan:
+            return Response(
+                {'detail': f'Destination month plan (Month {dest_month}) not found.'},
+                status=404
+            )
+
+        # 2. Get or create a "Carried Forward Goals" KRA in destination month
+        dest_kra, _ = MonthlyKRA.objects.get_or_create(
+            monthly_plan=dest_plan,
+            name="Carried Forward Goals",
+            defaults={
+                'kra_type': 'INDIVIDUAL',
+                'description': 'Target shortfalls carried forward from previous month.',
+                'weight': Decimal('0.00'),  # Manager will balance weights before opening
+                'kra_start_date': dest_plan.month_start_date,
+                'kra_end_date': dest_plan.month_end_date,
+            }
+        )
+
+        # 3. Create new KPI in destination month using `shortfall_amount`
+        new_kpi = MonthlyKPI.objects.create(
+            monthly_kra=dest_kra,
+            name=f"{cf.source_kpi.name} (Carried from {cf.source_month_name})",
+            metric_type=cf.source_kpi.metric_type,
+            target_value=cf.shortfall_amount,  # 👈 FIXED: uses shortfall_amount
+            weight_in_kra=Decimal('100.00'),
+        )
+
+        # 4. Mark CarryForwardRecord as APPROVED
+        cf.status = 'APPROVED'
+        cf.destination_kpi = new_kpi
+        cf.approved_by = getattr(request.user, 'employee', None)
+        cf.save()
+
+        # 5. Recalculate destination month scores
+        AnnualPlanService.recalculate_monthly_score(dest_plan)
+
+        return Response({
+            'status': 'SUCCESS',
+            'message': f'Carry forward approved! Added to {cf.destination_month_name} plan.'
+        })
+
+    @action(detail=True, methods=['post'], url_path='reject')
+    def reject_carry_forward(self, request, pk=None):
+        cf = self.get_object()
+        if cf.status != 'PENDING':
+            return Response({'detail': 'This carry forward request is already processed.'}, status=400)
+
+        cf.status = 'REJECTED'
+        cf.approved_by = getattr(request.user, 'employee', None)
+        cf.save()
+
+        return Response({'status': 'SUCCESS', 'message': 'Carry forward request rejected.'})

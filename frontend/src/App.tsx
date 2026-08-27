@@ -280,18 +280,16 @@ import LifecycleRequestDetailPage from './pages/lifecycle/LifecycleRequestDetail
 import RatingScalePage from './pages/settings/RatingScalePage';
 import OrgPrioritiesPage from './pages/settings/OrgPrioritiesPage';
 import DepartmentalKRAsPage from './pages/settings/DepartmentalKRAsPage';
-import KRALibraryPage from './pages/settings/KRALibraryPage';
-import KRADetailPage from './pages/settings/KRADetailPage';
-import PerformanceCyclesPage from './pages/settings/PerformanceCyclesPage';
-import MyPerformancePage from './pages/performance/MyPerformancePage';
-import ScorecardBuilderPage from './pages/performance/ScorecardBuilderPage';
-import TeamPerformancePage from './pages/performance/TeamPerformancePage';
-import ScorecardReviewPage from './pages/performance/ScorecardReviewPage';
+// import PerformanceCyclesPage from './pages/settings/PerformanceCyclesPage';
+// import MyPerformancePage from './pages/performance/MyPerformancePage';
+// import ScorecardBuilderPage from './pages/performance/ScorecardBuilderPage';
+// import TeamPerformancePage from './pages/performance/TeamPerformancePage';
+// import ScorecardReviewPage from './pages/performance/ScorecardReviewPage';
 import MyPeerReviewsPage from './pages/performance/MyPeerReviewsPage';
-import SelfReviewPage from './pages/performance/SelfReviewPage';
-import FinalReviewPage from './pages/performance/FinalReviewPage';
-import PerformanceCalibrationPage from './pages/performance/PerformanceCalibrationPage';
-import PerformanceReportsPage from './pages/performance/PerformanceReportsPage';
+// import SelfReviewPage from './pages/performance/SelfReviewPage';
+// import FinalReviewPage from './pages/performance/FinalReviewPage';
+// import PerformanceCalibrationPage from './pages/performance/PerformanceCalibrationPage';
+// import PerformanceReportsPage from './pages/performance/PerformanceReportsPage';
 // Reimbursement pages
 import ReimbursementSmartUploadPage from './pages/reimbursement/SmartUploadPage';
 import ReimbursementUploadStatusPage from './pages/reimbursement/UploadStatusPage';
@@ -344,6 +342,10 @@ import AssetListPage from './pages/assets/AssetListPage';
 import AssetDetailPage from './pages/assets/AssetDetailPage';
 import AssetFormPage from './pages/assets/AssetFormPage';
 import AssetCategoriesPage from './pages/assets/AssetCategoriesPage';
+import AnnualPerformancePlanPage from './pages/performance/AnnualPerformancePlanPage';
+import AnnualPlansDirectoryPage from './pages/performance/AnnualPlansDirectoryPage';
+import CommonKRAMasterPage from './pages/settings/CommonKRAMasterPage';
+
 
 export default function App() {
   return (
@@ -480,6 +482,15 @@ export default function App() {
             }
           />
           <Route
+            path="/settings/common-kras"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+                <CommonKRAMasterPage />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
             path="/settings/letter-templates/new"
             element={
               <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
@@ -560,51 +571,36 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/settings/kra-library"
-            element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
-                <KRALibraryPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings/kra-library/:id"
-            element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
-                <KRADetailPage />
-              </ProtectedRoute>
-            }
-          />
-                  <Route
+         
+                  {/* <Route
           path="/settings/performance-cycles"
           element={
             <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
               <PerformanceCyclesPage />
             </ProtectedRoute>
           }
-        />
+        /> */}
 
         {/* My Performance (everyone) */}
-        <Route
+        {/* <Route
           path="/my-performance"
           element={
             <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
               <MyPerformancePage />
             </ProtectedRoute>
           }
-        />
-        <Route
+        /> */}
+        {/* <Route
           path="/my-performance/build/:scorecardId"
           element={
             <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
               <ScorecardBuilderPage />
             </ProtectedRoute>
           }
-        />
+        /> */}
 
         {/* Team Performance (managers + HR) */}
-        <Route
+        {/* <Route
           path="/team-performance"
           element={
             <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
@@ -619,7 +615,28 @@ export default function App() {
               <ScorecardReviewPage />
             </ProtectedRoute>
           }
-        />
+        /> */}
+        {/* ==================== PERFORMANCE MANAGEMENT (REDESIGNED) ==================== */}
+
+{/* Employee's own annual plan */}
+<Route
+  path="/my-performance"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+      <AnnualPerformancePlanPage />
+    </ProtectedRoute>
+  }
+/>
+
+{/* View specific annual plan by ID (Manager/HR View) */}
+<Route
+  path="/performance/annual-plans/:planId"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+      <AnnualPerformancePlanPage />
+    </ProtectedRoute>
+  }
+/>
         <Route
   path="/peer-reviews"
   element={
@@ -629,37 +646,45 @@ export default function App() {
   }
 />
 <Route
+  path="/performance/annual-plans"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+      <AnnualPlansDirectoryPage />
+    </ProtectedRoute>
+  }
+/>
+{/* <Route
   path="/my-performance/self-review/:scorecardId"
   element={
     <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
       <SelfReviewPage />
     </ProtectedRoute>
   }
-/>
-<Route
+/> */}
+{/* <Route
   path="/team-performance/:scorecardId/final-review"
   element={
     <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
       <FinalReviewPage />
     </ProtectedRoute>
   }
-/>
-<Route
+/> */}
+{/* <Route
   path="/hr/calibration"
   element={
     <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
       <PerformanceCalibrationPage />
     </ProtectedRoute>
   }
-/>
-<Route
+/> */}
+{/* <Route
   path="/performance-reports"
   element={
     <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
       <PerformanceReportsPage />
     </ProtectedRoute>
   }
-/>
+/> */}
 
 
 {/* ==================== REIMBURSEMENTS ==================== */}

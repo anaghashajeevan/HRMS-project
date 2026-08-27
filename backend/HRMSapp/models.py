@@ -1243,437 +1243,819 @@ class KPILibraryItem(models.Model):
         return f"{self.kra.name} → {self.name}"
 
 
+#  NEW KRA KPI code restructuring 
 
-class PerformanceCycle(models.Model):
-    """
-    A performance review cycle with phase-based timeline.
-    Supports monthly, quarterly, or yearly cycles.
-    """
-    CYCLE_TYPE_CHOICES = [
-        ('MONTHLY', 'Monthly'),
-        ('QUARTERLY', 'Quarterly'),
-        ('HALF_YEARLY', 'Half-Yearly'),
-        ('YEARLY', 'Yearly'),
-    ]
+# ==============================================================================
+# 1. ANNUAL PERFORMANCE PLAN (Parent Container)
+# ==============================================================================
+
+class AnnualPerformancePlan(models.Model):
+    """One plan per employee per financial year (e.g. 2026-27)."""
     STATUS_CHOICES = [
         ('DRAFT', 'Draft'),
-        ('ACTIVE', 'Active'),
-        ('CLOSED', 'Closed'),
-        ('ARCHIVED', 'Archived'),
-    ]
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name = models.CharField(max_length=150, help_text="e.g. 'FY 2026 Q1 Review'")
-    cycle_type = models.CharField(max_length=20, choices=CYCLE_TYPE_CHOICES)
-    financial_year = models.CharField(max_length=20, help_text="e.g. 'FY 2026-27'")
-    
-    period_start = models.DateField()
-    period_end = models.DateField()
-    
-    # Phase timeline (all configurable)
-    goal_setting_start = models.DateField(help_text="Employee builds scorecard")
-    goal_setting_end = models.DateField()
-    
-    manager_review_start = models.DateField(
-        help_text="Manager reviews & customizes scorecard"
-    )
-    manager_review_end = models.DateField()
-    
-    working_start = models.DateField(help_text="Working period begins")
-    working_end = models.DateField()
-    
-    peer_rating_start = models.DateField(help_text="Peer rating window")
-    peer_rating_end = models.DateField()
-    
-    self_review_start = models.DateField(help_text="Employee self-review")
-    self_review_end = models.DateField()
-    
-    final_review_start = models.DateField(help_text="Manager final review & scoring")
-    final_review_end = models.DateField()
-    
-    finalization_start = models.DateField(help_text="HR closes cycle")
-    finalization_end = models.DateField()
-    
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
-    
-    applicable_departments = models.ManyToManyField(
-        'CompanyStructure',
-        blank=True,
-        related_name='performance_cycles',
-        limit_choices_to={'type': 'DEPARTMENT'},
-        help_text="Departments this cycle applies to (empty = all)"
-    )
-    
-    description = models.TextField(blank=True)
-    created_by = models.ForeignKey(
-        'Employee', on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='created_perf_cycles'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = 'performance_cycles'
-        ordering = ['-period_start']
-
-    def __str__(self):
-        return f"{self.name} ({self.get_cycle_type_display()})"
-
-    @property
-    def current_phase(self):
-        """Determine which phase we're currently in based on today's date."""
-        from django.utils import timezone
-        today = timezone.now().date()
-        
-        if today < self.goal_setting_start:
-            return 'NOT_STARTED'
-        if self.goal_setting_start <= today <= self.goal_setting_end:
-            return 'GOAL_SETTING'
-        if self.manager_review_start <= today <= self.manager_review_end:
-            return 'MANAGER_REVIEW'
-        if self.working_start <= today <= self.working_end:
-            return 'WORKING'
-        if self.peer_rating_start <= today <= self.peer_rating_end:
-            return 'PEER_RATING'
-        if self.self_review_start <= today <= self.self_review_end:
-            return 'SELF_REVIEW'
-        if self.final_review_start <= today <= self.final_review_end:
-            return 'FINAL_REVIEW'
-        if self.finalization_start <= today <= self.finalization_end:
-            return 'FINALIZATION'
-        if today > self.finalization_end:
-            return 'COMPLETED'
-        return 'UNKNOWN'
-
-
-# ------------------------------------------------------------------------------
-# EMPLOYEE SCORECARD (per employee, per cycle)
-# ------------------------------------------------------------------------------
-
-class EmployeeScorecard(models.Model):
-    """
-    An employee's scorecard for a specific performance cycle.
-    Auto-created when cycle activates for applicable employees.
-    """
-    STATUS_CHOICES = [
-        ('DRAFT', 'Draft - Employee Building'),
-        ('SUBMITTED', 'Submitted for Manager Review'),
-        ('MANAGER_REVIEWING', 'Manager Reviewing'),
-        ('SENT_BACK', 'Sent Back for Revision'),
-        ('APPROVED', 'Approved by Manager'),
-        ('SIGNED_OFF', 'Signed Off - Active'),
-        ('SELF_REVIEW_PENDING', 'Self Review Pending'),
-        ('SELF_REVIEWED', 'Self Review Complete'),
-        ('MANAGER_REVIEW_PENDING', 'Final Review Pending'),
-        ('MANAGER_REVIEWED', 'Final Review Complete'),
-        ('FINALIZED', 'Finalized'),
+        ('ACTIVE', 'Active / In Progress'),
+        ('CLOSED', 'Closed (Year End)'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     employee = models.ForeignKey(
-        'Employee', on_delete=models.CASCADE, related_name='scorecards'
+        'Employee', on_delete=models.CASCADE, related_name='annual_plans'
     )
-    cycle = models.ForeignKey(
-        PerformanceCycle, on_delete=models.CASCADE, related_name='scorecards'
-    )
+    financial_year = models.CharField(max_length=20, help_text="e.g. '2026-27'")
     
-    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='DRAFT')
+    plan_start_date = models.DateField()
+    plan_end_date = models.DateField()
     
-    # Sign-off tracking
-    employee_signed_off_at = models.DateTimeField(null=True, blank=True)
-    manager_signed_off_at = models.DateTimeField(null=True, blank=True)
-    manager_signed_off_by = models.ForeignKey(
-        'Employee', on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='manager_signoffs'
-    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
     
-    # Return-for-revision tracking
-    sent_back_reason = models.TextField(blank=True, null=True)
-    sent_back_at = models.DateTimeField(null=True, blank=True)
+    annual_score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    annual_rating = models.IntegerField(null=True, blank=True, help_text="1-5 rating")
     
-    # Final scores (calculated at cycle end)
-    self_score = models.DecimalField(
-        max_digits=6, decimal_places=2, null=True, blank=True,
-        help_text="Employee's self-assessment score"
+    created_by = models.ForeignKey(
+        'Employee', on_delete=models.SET_NULL, null=True, blank=True, related_name='+'
     )
-    peer_score = models.DecimalField(
-        max_digits=6, decimal_places=2, null=True, blank=True,
-        help_text="Aggregated peer score"
-    )
-    manager_score = models.DecimalField(
-        max_digits=6, decimal_places=2, null=True, blank=True,
-        help_text="Manager's assessment score"
-    )
-    final_score = models.DecimalField(
-        max_digits=6, decimal_places=2, null=True, blank=True,
-        help_text="Auto-calculated final weighted score"
-    )
-    final_rating = models.IntegerField(
-        null=True, blank=True,
-        help_text="Rating band (1-5) based on final_score"
-    )
-    
-    # Metadata
-    total_weight = models.DecimalField(
-        max_digits=5, decimal_places=2, default=0,
-        help_text="Sum of all KRA weights (should be 100)"
-    )
-    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'employee_scorecards'
-        ordering = ['-created_at']
-        unique_together = [('employee', 'cycle')]
-        indexes = [
-            models.Index(fields=['employee', 'cycle']),
-            models.Index(fields=['status', '-created_at']),
-        ]
+        db_table = 'perf_annual_plans'
+        ordering = ['-financial_year', 'employee']
+        unique_together = [('employee', 'financial_year')]
 
-    def __str__(self):
-        return f"{self.employee.full_name} - {self.cycle.name}"
+# ==============================================================================
+# 2. QUARTERLY REVIEW
+# ==============================================================================
 
-
-# ------------------------------------------------------------------------------
-# EMPLOYEE KRA (per scorecard)
-# ------------------------------------------------------------------------------
-
-class EmployeeKRA(models.Model):
-    """
-    A KRA assigned to an employee for a specific cycle.
-    Can be from library or custom-added.
-    """
-    KRA_SOURCE_CHOICES = [
-        ('LIBRARY', 'From KRA Library'),
-        ('CUSTOM', 'Custom (Manager/Employee Added)'),
-        ('MANDATORY', 'Mandatory (Auto-added)'),
-        ('INHERITED', 'Inherited (from dept/common)'),
+class QuarterlyReview(models.Model):
+    """Rolls up 3 monthly plans for a formal quarterly check-in."""
+    QUARTER_CHOICES = [
+        ('Q1', 'Q1 (Apr-Jun)'),
+        ('Q2', 'Q2 (Jul-Sep)'),
+        ('Q3', 'Q3 (Oct-Dec)'),
+        ('Q4', 'Q4 (Jan-Mar)'),
+    ]
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('UNDER_REVIEW', 'Under Review'),
+        ('COMPLETED', 'Completed'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    scorecard = models.ForeignKey(
-        EmployeeScorecard, on_delete=models.CASCADE, related_name='kras'
+    annual_plan = models.ForeignKey(
+        AnnualPerformancePlan, on_delete=models.CASCADE, related_name='quarterly_reviews'
     )
-    library_kra = models.ForeignKey(
-        'KRALibrary', on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='employee_kras',
-        help_text="Source library KRA (nullable if custom)"
-    )
+    quarter = models.CharField(max_length=2, choices=QUARTER_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+
+    quarterly_score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    quarterly_rating = models.IntegerField(null=True, blank=True)
     
-    # Snapshot fields (in case library KRA changes later)
-    name = models.CharField(max_length=200)
-    description = models.TextField()
-    weight = models.DecimalField(
-        max_digits=5, decimal_places=2,
-        help_text="Weight % within scorecard"
-    )
-    peer_rating_required = models.BooleanField(default=False)
-    kra_source = models.CharField(
-        max_length=20, choices=KRA_SOURCE_CHOICES, default='LIBRARY'
-    )
-    
-    # Optional linkage to org priority
-    linked_priority = models.ForeignKey(
-        'OrganizationalPriority', on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='+',
-        help_text="Which org priority this KRA supports"
-    )
-    
-    # Employee's rationale for including this KRA
-    rationale = models.TextField(
-        blank=True,
-        help_text="Why the employee/manager included this KRA"
-    )
-    
-    # Auto-calculated KRA score (after review)
-    kra_score = models.DecimalField(
-        max_digits=6, decimal_places=2, null=True, blank=True
-    )
-    
-    display_order = models.IntegerField(default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    manager_comments = models.TextField(blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        db_table = 'employee_kras'
-        ordering = ['scorecard', 'display_order', 'name']
+        db_table = 'perf_quarterly_reviews'
+        ordering = ['annual_plan', 'quarter']
+        unique_together = [('annual_plan', 'quarter')]
 
-    def __str__(self):
-        return f"{self.scorecard.employee.full_name} - {self.name}"
+# ==============================================================================
+# 3. MONTHLY PERFORMANCE PLAN
+# ==============================================================================
 
+class MonthlyPerformancePlan(models.Model):
+    """The core operational plan. 12 of these exist per Annual Plan."""
+    STATUS_CHOICES = [
+        ('DRAFT', 'Draft'),
+        ('OPEN', 'Open (Working phase)'),
+        ('REVIEW_DUE', 'Review Due'),
+        ('EMPLOYEE_SUBMITTED', 'Employee Submitted'),
+        ('UNDER_REVIEW', 'Manager Reviewing'),
+        ('RETURNED', 'Returned to Employee'),
+        ('APPROVED', 'Manager Approved'),
+        ('CLOSED', 'Closed (Immutable)'),
+    ]
 
-# ------------------------------------------------------------------------------
-# EMPLOYEE KPI (per KRA)
-# ------------------------------------------------------------------------------
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    annual_plan = models.ForeignKey(
+        AnnualPerformancePlan, on_delete=models.CASCADE, related_name='monthly_plans'
+    )
+    quarterly_review = models.ForeignKey(
+        QuarterlyReview, on_delete=models.CASCADE, related_name='monthly_plans'
+    )
+    
+    month = models.IntegerField(help_text="1=Jan, 4=Apr, etc.")
+    year = models.IntegerField(help_text="e.g. 2026")
+    
+    month_start_date = models.DateField()
+    month_end_date = models.DateField()
+    
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='DRAFT')
+    
+    monthly_score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    
+    employee_comments = models.TextField(blank=True)
+    manager_comments = models.TextField(blank=True)
+    
+    employee_submitted_at = models.DateTimeField(null=True, blank=True)
+    manager_reviewed_at = models.DateTimeField(null=True, blank=True)
+    
+    is_locked = models.BooleanField(default=False)
 
-class EmployeeKPI(models.Model):
-    """
-    A KPI under an EmployeeKRA.
-    Contains target, self actual, manager actual, and calculated score.
-    """
-    KPI_TYPE_CHOICES = [
+    class Meta:
+        db_table = 'perf_monthly_plans'
+        ordering = ['year', 'month']
+        unique_together = [('annual_plan', 'month', 'year')]
+
+# ==============================================================================
+# 4. MONTHLY KRA (Dynamic per month)
+# ==============================================================================
+
+class MonthlyKRA(models.Model):
+    """KRAs active for a specific month. Can be injected or custom added."""
+    KRA_TYPE_CHOICES = [
+        ('COMMON', 'Common KRA'),
+        ('DEPARTMENTAL', 'Departmental KRA'),
+        ('INDIVIDUAL', 'Individual KRA'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    monthly_plan = models.ForeignKey(
+        MonthlyPerformancePlan, on_delete=models.CASCADE, related_name='kras'
+    )
+    kra_type = models.CharField(max_length=20, choices=KRA_TYPE_CHOICES)
+    
+    # source_library_kra = models.ForeignKey(
+    #     'KRALibrary', on_delete=models.SET_NULL, null=True, blank=True, related_name='+'
+    # )
+    # source_dept_kra = models.ForeignKey(
+    #     'DepartmentalKRA', on_delete=models.SET_NULL, null=True, blank=True, related_name='+'
+    # )
+    source_common_kra = models.ForeignKey(
+        'CommonKRAMaster', on_delete=models.SET_NULL, null=True, blank=True, related_name='+'
+    )
+    source_dept_kra = models.ForeignKey(
+        'DepartmentalKRAMaster', on_delete=models.SET_NULL, null=True, blank=True, related_name='+'
+    )
+    
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    weight = models.DecimalField(max_digits=5, decimal_places=2, default=0.0)
+    
+    kra_start_date = models.DateField()
+    kra_end_date = models.DateField()
+    
+    kra_score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    display_order = models.IntegerField(default=0)
+    peer_rating_required = models.BooleanField(default=False)
+    class Meta:
+        db_table = 'perf_monthly_kras'
+        ordering = ['monthly_plan', 'display_order', 'name']
+
+# ==============================================================================
+# 5. MONTHLY KPI
+# ==============================================================================
+
+class MonthlyKPI(models.Model):
+    """The measurable target for a specific month."""
+    METRIC_TYPE_CHOICES = [
         ('NUMERIC_UP', 'Numeric (Higher is Better)'),
         ('NUMERIC_DOWN', 'Numeric (Lower is Better)'),
         ('PERCENTAGE', 'Percentage'),
         ('RATING', 'Rating (1-5)'),
         ('BOOLEAN', 'Yes/No'),
-        ('CURRENCY', 'Currency'),
-    ]
-    INDICATOR_TYPE_CHOICES = [
-        ('OUTPUT', 'Output'),
-        ('QUALITY', 'Quality'),
-        ('EFFICIENCY', 'Efficiency'),
-        ('TIMELINESS', 'Timeliness'),
-        ('COMPLIANCE', 'Compliance'),
-        ('CAPABILITY', 'Capability'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    employee_kra = models.ForeignKey(
-        EmployeeKRA, on_delete=models.CASCADE, related_name='kpis'
-    )
-    library_kpi = models.ForeignKey(
-        'KPILibraryItem', on_delete=models.SET_NULL, null=True, blank=True,
-        related_name='employee_kpis'
+    monthly_kra = models.ForeignKey(
+        MonthlyKRA, on_delete=models.CASCADE, related_name='kpis'
     )
     
-    # Definition
+    name = models.CharField(max_length=200)
+    metric_type = models.CharField(max_length=20, choices=METRIC_TYPE_CHOICES, default='NUMERIC_UP')
+    weight_in_kra = models.DecimalField(max_digits=5, decimal_places=2, default=100.0)
+    
+    target_value = models.CharField(max_length=100)
+    actual_value = models.CharField(max_length=100, blank=True)
+    manager_actual = models.CharField(max_length=100, blank=True) # 👈 ADD THIS FIELD (Manager's verified input)
+    achievement_percentage = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    
+    employee_comment = models.TextField(blank=True)
+    manager_comment = models.TextField(blank=True)
+    manager_rating = models.IntegerField(null=True, blank=True, help_text="1-5 rating")
+    
+    weighted_score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    display_order = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'perf_monthly_kpis'
+        ordering = ['monthly_kra', 'display_order', 'name']
+
+
+# class PerformanceCycle(models.Model):
+#     """
+#     A performance review cycle with phase-based timeline.
+#     Supports monthly, quarterly, or yearly cycles.
+#     """
+#     CYCLE_TYPE_CHOICES = [
+#         ('MONTHLY', 'Monthly'),
+#         ('QUARTERLY', 'Quarterly'),
+#         ('HALF_YEARLY', 'Half-Yearly'),
+#         ('YEARLY', 'Yearly'),
+#     ]
+#     STATUS_CHOICES = [
+#         ('DRAFT', 'Draft'),
+#         ('ACTIVE', 'Active'),
+#         ('CLOSED', 'Closed'),
+#         ('ARCHIVED', 'Archived'),
+#     ]
+
+#     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+#     name = models.CharField(max_length=150, help_text="e.g. 'FY 2026 Q1 Review'")
+#     cycle_type = models.CharField(max_length=20, choices=CYCLE_TYPE_CHOICES)
+#     financial_year = models.CharField(max_length=20, help_text="e.g. 'FY 2026-27'")
+    
+#     period_start = models.DateField()
+#     period_end = models.DateField()
+    
+#     # Phase timeline (all configurable)
+#     goal_setting_start = models.DateField(help_text="Employee builds scorecard")
+#     goal_setting_end = models.DateField()
+    
+#     manager_review_start = models.DateField(
+#         help_text="Manager reviews & customizes scorecard"
+#     )
+#     manager_review_end = models.DateField()
+    
+#     working_start = models.DateField(help_text="Working period begins")
+#     working_end = models.DateField()
+    
+#     peer_rating_start = models.DateField(help_text="Peer rating window")
+#     peer_rating_end = models.DateField()
+    
+#     self_review_start = models.DateField(help_text="Employee self-review")
+#     self_review_end = models.DateField()
+    
+#     final_review_start = models.DateField(help_text="Manager final review & scoring")
+#     final_review_end = models.DateField()
+    
+#     finalization_start = models.DateField(help_text="HR closes cycle")
+#     finalization_end = models.DateField()
+    
+#     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
+    
+#     applicable_departments = models.ManyToManyField(
+#         'CompanyStructure',
+#         blank=True,
+#         related_name='performance_cycles',
+#         limit_choices_to={'type': 'DEPARTMENT'},
+#         help_text="Departments this cycle applies to (empty = all)"
+#     )
+    
+#     description = models.TextField(blank=True)
+#     created_by = models.ForeignKey(
+#         'Employee', on_delete=models.SET_NULL, null=True, blank=True,
+#         related_name='created_perf_cycles'
+#     )
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     updated_at = models.DateTimeField(auto_now=True)
+
+#     class Meta:
+#         db_table = 'performance_cycles'
+#         ordering = ['-period_start']
+
+#     def __str__(self):
+#         return f"{self.name} ({self.get_cycle_type_display()})"
+
+#     @property
+#     def current_phase(self):
+#         """Determine which phase we're currently in based on today's date."""
+#         from django.utils import timezone
+#         today = timezone.now().date()
+        
+#         if today < self.goal_setting_start:
+#             return 'NOT_STARTED'
+#         if self.goal_setting_start <= today <= self.goal_setting_end:
+#             return 'GOAL_SETTING'
+#         if self.manager_review_start <= today <= self.manager_review_end:
+#             return 'MANAGER_REVIEW'
+#         if self.working_start <= today <= self.working_end:
+#             return 'WORKING'
+#         if self.peer_rating_start <= today <= self.peer_rating_end:
+#             return 'PEER_RATING'
+#         if self.self_review_start <= today <= self.self_review_end:
+#             return 'SELF_REVIEW'
+#         if self.final_review_start <= today <= self.final_review_end:
+#             return 'FINAL_REVIEW'
+#         if self.finalization_start <= today <= self.finalization_end:
+#             return 'FINALIZATION'
+#         if today > self.finalization_end:
+#             return 'COMPLETED'
+#         return 'UNKNOWN'
+
+
+# # ------------------------------------------------------------------------------
+# # EMPLOYEE SCORECARD (per employee, per cycle)
+# # ------------------------------------------------------------------------------
+
+# class EmployeeScorecard(models.Model):
+#     """
+#     An employee's scorecard for a specific performance cycle.
+#     Auto-created when cycle activates for applicable employees.
+#     """
+#     STATUS_CHOICES = [
+#         ('DRAFT', 'Draft - Employee Building'),
+#         ('SUBMITTED', 'Submitted for Manager Review'),
+#         ('MANAGER_REVIEWING', 'Manager Reviewing'),
+#         ('SENT_BACK', 'Sent Back for Revision'),
+#         ('APPROVED', 'Approved by Manager'),
+#         ('SIGNED_OFF', 'Signed Off - Active'),
+#         ('SELF_REVIEW_PENDING', 'Self Review Pending'),
+#         ('SELF_REVIEWED', 'Self Review Complete'),
+#         ('MANAGER_REVIEW_PENDING', 'Final Review Pending'),
+#         ('MANAGER_REVIEWED', 'Final Review Complete'),
+#         ('FINALIZED', 'Finalized'),
+#     ]
+
+#     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+#     employee = models.ForeignKey(
+#         'Employee', on_delete=models.CASCADE, related_name='scorecards'
+#     )
+#     cycle = models.ForeignKey(
+#         PerformanceCycle, on_delete=models.CASCADE, related_name='scorecards'
+#     )
+    
+#     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='DRAFT')
+    
+#     # Sign-off tracking
+#     employee_signed_off_at = models.DateTimeField(null=True, blank=True)
+#     manager_signed_off_at = models.DateTimeField(null=True, blank=True)
+#     manager_signed_off_by = models.ForeignKey(
+#         'Employee', on_delete=models.SET_NULL, null=True, blank=True,
+#         related_name='manager_signoffs'
+#     )
+    
+#     # Return-for-revision tracking
+#     sent_back_reason = models.TextField(blank=True, null=True)
+#     sent_back_at = models.DateTimeField(null=True, blank=True)
+    
+#     # Final scores (calculated at cycle end)
+#     self_score = models.DecimalField(
+#         max_digits=6, decimal_places=2, null=True, blank=True,
+#         help_text="Employee's self-assessment score"
+#     )
+#     peer_score = models.DecimalField(
+#         max_digits=6, decimal_places=2, null=True, blank=True,
+#         help_text="Aggregated peer score"
+#     )
+#     manager_score = models.DecimalField(
+#         max_digits=6, decimal_places=2, null=True, blank=True,
+#         help_text="Manager's assessment score"
+#     )
+#     final_score = models.DecimalField(
+#         max_digits=6, decimal_places=2, null=True, blank=True,
+#         help_text="Auto-calculated final weighted score"
+#     )
+#     final_rating = models.IntegerField(
+#         null=True, blank=True,
+#         help_text="Rating band (1-5) based on final_score"
+#     )
+    
+#     # Metadata
+#     total_weight = models.DecimalField(
+#         max_digits=5, decimal_places=2, default=0,
+#         help_text="Sum of all KRA weights (should be 100)"
+#     )
+    
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     updated_at = models.DateTimeField(auto_now=True)
+
+#     class Meta:
+#         db_table = 'employee_scorecards'
+#         ordering = ['-created_at']
+#         unique_together = [('employee', 'cycle')]
+#         indexes = [
+#             models.Index(fields=['employee', 'cycle']),
+#             models.Index(fields=['status', '-created_at']),
+#         ]
+
+#     def __str__(self):
+#         return f"{self.employee.full_name} - {self.cycle.name}"
+
+
+# # ------------------------------------------------------------------------------
+# # EMPLOYEE KRA (per scorecard)
+# # ------------------------------------------------------------------------------
+
+# class EmployeeKRA(models.Model):
+#     """
+#     A KRA assigned to an employee for a specific cycle.
+#     Can be from library or custom-added.
+#     """
+#     KRA_SOURCE_CHOICES = [
+#         ('LIBRARY', 'From KRA Library'),
+#         ('CUSTOM', 'Custom (Manager/Employee Added)'),
+#         ('MANDATORY', 'Mandatory (Auto-added)'),
+#         ('INHERITED', 'Inherited (from dept/common)'),
+#     ]
+
+#     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+#     scorecard = models.ForeignKey(
+#         EmployeeScorecard, on_delete=models.CASCADE, related_name='kras'
+#     )
+#     library_kra = models.ForeignKey(
+#         'KRALibrary', on_delete=models.SET_NULL, null=True, blank=True,
+#         related_name='employee_kras',
+#         help_text="Source library KRA (nullable if custom)"
+#     )
+    
+#     # Snapshot fields (in case library KRA changes later)
+#     name = models.CharField(max_length=200)
+#     description = models.TextField()
+#     weight = models.DecimalField(
+#         max_digits=5, decimal_places=2,
+#         help_text="Weight % within scorecard"
+#     )
+#     peer_rating_required = models.BooleanField(default=False)
+#     kra_source = models.CharField(
+#         max_length=20, choices=KRA_SOURCE_CHOICES, default='LIBRARY'
+#     )
+    
+#     # Optional linkage to org priority
+#     linked_priority = models.ForeignKey(
+#         'OrganizationalPriority', on_delete=models.SET_NULL,
+#         null=True, blank=True, related_name='+',
+#         help_text="Which org priority this KRA supports"
+#     )
+    
+#     # Employee's rationale for including this KRA
+#     rationale = models.TextField(
+#         blank=True,
+#         help_text="Why the employee/manager included this KRA"
+#     )
+    
+#     # Auto-calculated KRA score (after review)
+#     kra_score = models.DecimalField(
+#         max_digits=6, decimal_places=2, null=True, blank=True
+#     )
+    
+#     display_order = models.IntegerField(default=0)
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     updated_at = models.DateTimeField(auto_now=True)
+
+#     class Meta:
+#         db_table = 'employee_kras'
+#         ordering = ['scorecard', 'display_order', 'name']
+
+#     def __str__(self):
+#         return f"{self.scorecard.employee.full_name} - {self.name}"
+
+
+# # ------------------------------------------------------------------------------
+# # EMPLOYEE KPI (per KRA)
+# # ------------------------------------------------------------------------------
+
+# class EmployeeKPI(models.Model):
+#     """
+#     A KPI under an EmployeeKRA.
+#     Contains target, self actual, manager actual, and calculated score.
+#     """
+#     KPI_TYPE_CHOICES = [
+#         ('NUMERIC_UP', 'Numeric (Higher is Better)'),
+#         ('NUMERIC_DOWN', 'Numeric (Lower is Better)'),
+#         ('PERCENTAGE', 'Percentage'),
+#         ('RATING', 'Rating (1-5)'),
+#         ('BOOLEAN', 'Yes/No'),
+#         ('CURRENCY', 'Currency'),
+#     ]
+#     INDICATOR_TYPE_CHOICES = [
+#         ('OUTPUT', 'Output'),
+#         ('QUALITY', 'Quality'),
+#         ('EFFICIENCY', 'Efficiency'),
+#         ('TIMELINESS', 'Timeliness'),
+#         ('COMPLIANCE', 'Compliance'),
+#         ('CAPABILITY', 'Capability'),
+#     ]
+
+#     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+#     employee_kra = models.ForeignKey(
+#         EmployeeKRA, on_delete=models.CASCADE, related_name='kpis'
+#     )
+#     library_kpi = models.ForeignKey(
+#         'KPILibraryItem', on_delete=models.SET_NULL, null=True, blank=True,
+#         related_name='employee_kpis'
+#     )
+    
+#     # Definition
+#     name = models.CharField(max_length=200)
+#     description = models.TextField(blank=True)
+#     indicator_type = models.CharField(
+#         max_length=20, choices=INDICATOR_TYPE_CHOICES, default='OUTPUT'
+#     )
+#     kpi_type = models.CharField(max_length=20, choices=KPI_TYPE_CHOICES)
+    
+#     formula = models.TextField(blank=True)
+#     baseline = models.CharField(max_length=100, blank=True)
+    
+#     # Three-tier targets
+#     target_minimum = models.CharField(max_length=100, blank=True)
+#     target_expected = models.CharField(max_length=100)
+#     target_exceptional = models.CharField(max_length=100, blank=True)
+    
+#     data_source = models.CharField(max_length=200, blank=True)
+#     weight_in_kra = models.DecimalField(
+#         max_digits=5, decimal_places=2, default=100.0,
+#         help_text="Weight % within its KRA"
+#     )
+    
+#     # Action plan (employee's plan to achieve)
+#     action_plan = models.TextField(
+#         blank=True,
+#         help_text="Employee's plan for how they'll achieve target"
+#     )
+    
+#     # Self review data
+#     self_actual = models.CharField(max_length=200, blank=True)
+#     self_rating = models.IntegerField(null=True, blank=True, help_text="1-5")
+#     self_comment = models.TextField(blank=True)
+#     self_reviewed_at = models.DateTimeField(null=True, blank=True)
+    
+#     # Manager review data
+#     manager_actual = models.CharField(max_length=200, blank=True)
+#     manager_rating = models.IntegerField(null=True, blank=True, help_text="1-5")
+#     manager_comment = models.TextField(blank=True)
+#     manager_override_reason = models.TextField(
+#         blank=True,
+#         help_text="Reason if manager_actual differs from self_actual"
+#     )
+#     manager_reviewed_at = models.DateTimeField(null=True, blank=True)
+    
+#     # Auto-calculated score
+#     weighted_score = models.DecimalField(
+#         max_digits=6, decimal_places=2, null=True, blank=True
+#     )
+    
+#     display_order = models.IntegerField(default=0)
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     updated_at = models.DateTimeField(auto_now=True)
+
+#     class Meta:
+#         db_table = 'employee_kpis'
+#         ordering = ['employee_kra', 'display_order', 'name']
+
+#     def __str__(self):
+#         return f"{self.employee_kra.name} → {self.name}"
+
+
+# # ------------------------------------------------------------------------------
+# # EMPLOYEE KPI EVIDENCE (file uploads for KPIs)
+# # ------------------------------------------------------------------------------
+
+# class EmployeeKPIEvidence(models.Model):
+#     """Evidence files uploaded by employee to support KPI achievement."""
+#     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+#     kpi = models.ForeignKey(
+#         EmployeeKPI, on_delete=models.CASCADE, related_name='evidences'
+#     )
+#     file = models.FileField(upload_to='kpi_evidences/%Y/%m/')
+#     file_name = models.CharField(max_length=200)
+#     file_size_kb = models.IntegerField(default=0)
+#     mime_type = models.CharField(max_length=100, blank=True)
+#     description = models.CharField(max_length=500, blank=True)
+#     uploaded_by = models.ForeignKey(
+#         'Employee', on_delete=models.SET_NULL, null=True,
+#         related_name='uploaded_kpi_evidences'
+#     )
+#     uploaded_at = models.DateTimeField(auto_now_add=True)
+
+#     class Meta:
+#         db_table = 'employee_kpi_evidences'
+#         ordering = ['-uploaded_at']
+
+#     def __str__(self):
+#         return f"{self.kpi.name} - {self.file_name}"
+
+
+
+# class KRAPeerNomination(models.Model):
+#     """
+#     Records which peers are nominated to rate a specific KRA of an employee.
+#     Only created for KRAs where peer_rating_required = True.
+#     """
+#     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+#     employee_kra = models.ForeignKey(
+#         'EmployeeKRA',
+#         on_delete=models.CASCADE,
+#         related_name='peer_nominations',
+#     )
+#     nominated_peer = models.ForeignKey(
+#         'Employee',
+#         on_delete=models.CASCADE,
+#         related_name='peer_nominations_received',
+#     )
+#     nominated_by = models.ForeignKey(
+#         'Employee',
+#         on_delete=models.SET_NULL,
+#         null=True, blank=True,
+#         related_name='peer_nominations_made',
+#         help_text="Manager who selected this peer",
+#     )
+#     nominated_at = models.DateTimeField(auto_now_add=True)
+
+#     class Meta:
+#         db_table = 'kra_peer_nominations'
+#         ordering = ['-nominated_at']
+#         unique_together = [('employee_kra', 'nominated_peer')]
+#         indexes = [
+#             models.Index(fields=['nominated_peer', '-nominated_at']),
+#         ]
+
+#     def __str__(self):
+#         return f"{self.nominated_peer.full_name} → {self.employee_kra.name}"
+
+
+# # ------------------------------------------------------------------------------
+# # PEER RATING (Peer's actual submission)
+# # ------------------------------------------------------------------------------
+
+# class PeerRating(models.Model):
+#     """
+#     A peer's rating submission for a specific KRA.
+#     Comments visible only to HR & Manager (not to the employee being rated).
+#     """
+#     STATUS_CHOICES = [
+#         ('PENDING', 'Pending'),
+#         ('SUBMITTED', 'Submitted'),
+#         ('DECLINED', 'Declined'),
+#     ]
+
+#     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+#     nomination = models.OneToOneField(
+#         KRAPeerNomination,
+#         on_delete=models.CASCADE,
+#         related_name='rating',
+#     )
+
+#     # Rating
+#     rating = models.IntegerField(
+#         null=True, blank=True,
+#         help_text="1-5 rating scale",
+#     )
+
+#     # Comments (visible only to HR & Manager)
+#     strengths_comment = models.TextField(
+#         blank=True,
+#         help_text="What the person does well (HR/Manager only)",
+#     )
+#     improvements_comment = models.TextField(
+#         blank=True,
+#         help_text="Areas for improvement (HR/Manager only)",
+#     )
+#     additional_comments = models.TextField(
+#         blank=True,
+#         help_text="Any other feedback (HR/Manager only)",
+#     )
+
+#     # Anonymity — peer's identity not shown to the rated employee
+#     is_anonymous_to_employee = models.BooleanField(
+#         default=True,
+#         help_text="If TRUE, employee never sees which peer gave which rating",
+#     )
+
+#     status = models.CharField(
+#         max_length=20, choices=STATUS_CHOICES, default='PENDING'
+#     )
+#     decline_reason = models.TextField(blank=True)
+
+#     submitted_at = models.DateTimeField(null=True, blank=True)
+#     due_at = models.DateTimeField(
+#         null=True, blank=True,
+#         help_text="Deadline based on cycle's peer_rating_end date",
+#     )
+#     created_at = models.DateTimeField(auto_now_add=True)
+
+#     class Meta:
+#         db_table = 'peer_ratings'
+#         ordering = ['-created_at']
+#         indexes = [
+#             models.Index(fields=['status', 'due_at']),
+#         ]
+
+#     def __str__(self):
+#         return f"Rating by {self.nomination.nominated_peer.full_name} - {self.get_status_display()}"
+
+
+# ==============================================================================
+# COMMON KRA MASTER
+# ==============================================================================
+class CommonKRAMaster(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    financial_year = models.CharField(max_length=20)
+    name = models.CharField(max_length=200)
+    description = models.TextField()
+    default_weight = models.DecimalField(max_digits=5, decimal_places=2, default=5.0)
+    applies_to_all = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'perf_common_kra_master'
+        unique_together = [('financial_year', 'name')]
+
+class CommonKPIMaster(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    common_kra = models.ForeignKey(CommonKRAMaster, related_name='kpis', on_delete=models.CASCADE)
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    indicator_type = models.CharField(
-        max_length=20, choices=INDICATOR_TYPE_CHOICES, default='OUTPUT'
-    )
-    kpi_type = models.CharField(max_length=20, choices=KPI_TYPE_CHOICES)
+    metric_type = models.CharField(max_length=20, default='NUMERIC_UP')
+    default_target = models.CharField(max_length=200)
+    weight_in_kra = models.DecimalField(max_digits=5, decimal_places=2, default=100.0)
     
-    formula = models.TextField(blank=True)
-    baseline = models.CharField(max_length=100, blank=True)
-    
-    # Three-tier targets
-    target_minimum = models.CharField(max_length=100, blank=True)
-    target_expected = models.CharField(max_length=100)
-    target_exceptional = models.CharField(max_length=100, blank=True)
-    
-    data_source = models.CharField(max_length=200, blank=True)
-    weight_in_kra = models.DecimalField(
-        max_digits=5, decimal_places=2, default=100.0,
-        help_text="Weight % within its KRA"
-    )
-    
-    # Action plan (employee's plan to achieve)
-    action_plan = models.TextField(
-        blank=True,
-        help_text="Employee's plan for how they'll achieve target"
-    )
-    
-    # Self review data
-    self_actual = models.CharField(max_length=200, blank=True)
-    self_rating = models.IntegerField(null=True, blank=True, help_text="1-5")
-    self_comment = models.TextField(blank=True)
-    self_reviewed_at = models.DateTimeField(null=True, blank=True)
-    
-    # Manager review data
-    manager_actual = models.CharField(max_length=200, blank=True)
-    manager_rating = models.IntegerField(null=True, blank=True, help_text="1-5")
-    manager_comment = models.TextField(blank=True)
-    manager_override_reason = models.TextField(
-        blank=True,
-        help_text="Reason if manager_actual differs from self_actual"
-    )
-    manager_reviewed_at = models.DateTimeField(null=True, blank=True)
-    
-    # Auto-calculated score
-    weighted_score = models.DecimalField(
-        max_digits=6, decimal_places=2, null=True, blank=True
-    )
-    
-    display_order = models.IntegerField(default=0)
+    class Meta:
+        db_table = 'perf_common_kpi_master'
+
+# ==============================================================================
+# DEPARTMENTAL KRA MASTER
+# ==============================================================================
+class DepartmentalKRAMaster(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    financial_year = models.CharField(max_length=20)
+    department = models.ForeignKey('CompanyStructure', on_delete=models.CASCADE)
+    name = models.CharField(max_length=200)
+    description = models.TextField()
+    default_weight = models.DecimalField(max_digits=5, decimal_places=2, default=10.0)
+    is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'employee_kpis'
-        ordering = ['employee_kra', 'display_order', 'name']
+        db_table = 'perf_dept_kra_master'
+        unique_together = [('financial_year', 'department', 'name')]
 
-    def __str__(self):
-        return f"{self.employee_kra.name} → {self.name}"
-
-
-# ------------------------------------------------------------------------------
-# EMPLOYEE KPI EVIDENCE (file uploads for KPIs)
-# ------------------------------------------------------------------------------
-
-class EmployeeKPIEvidence(models.Model):
-    """Evidence files uploaded by employee to support KPI achievement."""
+class DepartmentalKPIMaster(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    kpi = models.ForeignKey(
-        EmployeeKPI, on_delete=models.CASCADE, related_name='evidences'
-    )
-    file = models.FileField(upload_to='kpi_evidences/%Y/%m/')
+    dept_kra = models.ForeignKey(DepartmentalKRAMaster, related_name='kpis', on_delete=models.CASCADE)
+    name = models.CharField(max_length=200)
+    metric_type = models.CharField(max_length=20, default='NUMERIC_UP')
+    default_target = models.CharField(max_length=200)
+    weight_in_kra = models.DecimalField(max_digits=5, decimal_places=2, default=100.0)
+    
+    class Meta:
+        db_table = 'perf_dept_kpi_master'
+
+# ==============================================================================
+# MONTHLY KPI EVIDENCE & PEER REVIEWS
+# ==============================================================================
+class MonthlyKPIEvidence(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    kpi = models.ForeignKey('MonthlyKPI', on_delete=models.CASCADE, related_name='evidences')
+    file = models.FileField(upload_to='monthly_kpi_evidences/%Y/%m/')
     file_name = models.CharField(max_length=200)
     file_size_kb = models.IntegerField(default=0)
-    mime_type = models.CharField(max_length=100, blank=True)
-    description = models.CharField(max_length=500, blank=True)
-    uploaded_by = models.ForeignKey(
-        'Employee', on_delete=models.SET_NULL, null=True,
-        related_name='uploaded_kpi_evidences'
-    )
+    uploaded_by = models.ForeignKey('Employee', on_delete=models.SET_NULL, null=True, related_name='+')
     uploaded_at = models.DateTimeField(auto_now_add=True)
-
     class Meta:
-        db_table = 'employee_kpi_evidences'
-        ordering = ['-uploaded_at']
-
-    def __str__(self):
-        return f"{self.kpi.name} - {self.file_name}"
+        db_table = 'perf_monthly_kpi_evidences'
 
 
+# ==============================================================================
+# MONTHLY PEER NOMINATION + RATING
+# ==============================================================================
 
-class KRAPeerNomination(models.Model):
+class MonthlyPeerNomination(models.Model):
     """
-    Records which peers are nominated to rate a specific KRA of an employee.
-    Only created for KRAs where peer_rating_required = True.
+    Manager nominates peers for a MonthlyKRA when peer_rating_required=True.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    employee_kra = models.ForeignKey(
-        'EmployeeKRA',
+    monthly_kra = models.ForeignKey(
+        MonthlyKRA,
         on_delete=models.CASCADE,
         related_name='peer_nominations',
     )
     nominated_peer = models.ForeignKey(
         'Employee',
         on_delete=models.CASCADE,
-        related_name='peer_nominations_received',
+        related_name='monthly_peer_nominations_received',
     )
     nominated_by = models.ForeignKey(
         'Employee',
         on_delete=models.SET_NULL,
-        null=True, blank=True,
-        related_name='peer_nominations_made',
-        help_text="Manager who selected this peer",
+        null=True,
+        blank=True,
+        related_name='monthly_peer_nominations_made',
     )
-    nominated_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'kra_peer_nominations'
-        ordering = ['-nominated_at']
-        unique_together = [('employee_kra', 'nominated_peer')]
-        indexes = [
-            models.Index(fields=['nominated_peer', '-nominated_at']),
-        ]
+        db_table = 'perf_monthly_peer_nominations'
+        unique_together = [('monthly_kra', 'nominated_peer')]
+        ordering = ['-created_at']
 
     def __str__(self):
-        return f"{self.nominated_peer.full_name} → {self.employee_kra.name}"
+        return f"{self.nominated_peer} → {self.monthly_kra.name}"
 
 
-# ------------------------------------------------------------------------------
-# PEER RATING (Peer's actual submission)
-# ------------------------------------------------------------------------------
-
-class PeerRating(models.Model):
+class MonthlyPeerRating(models.Model):
     """
-    A peer's rating submission for a specific KRA.
-    Comments visible only to HR & Manager (not to the employee being rated).
+    Peer's rating submission for a monthly nomination.
     """
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
@@ -1683,55 +2065,49 @@ class PeerRating(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     nomination = models.OneToOneField(
-        KRAPeerNomination,
+        MonthlyPeerNomination,
         on_delete=models.CASCADE,
         related_name='rating',
     )
-
-    # Rating
-    rating = models.IntegerField(
-        null=True, blank=True,
-        help_text="1-5 rating scale",
-    )
-
-    # Comments (visible only to HR & Manager)
-    strengths_comment = models.TextField(
-        blank=True,
-        help_text="What the person does well (HR/Manager only)",
-    )
-    improvements_comment = models.TextField(
-        blank=True,
-        help_text="Areas for improvement (HR/Manager only)",
-    )
-    additional_comments = models.TextField(
-        blank=True,
-        help_text="Any other feedback (HR/Manager only)",
-    )
-
-    # Anonymity — peer's identity not shown to the rated employee
-    is_anonymous_to_employee = models.BooleanField(
-        default=True,
-        help_text="If TRUE, employee never sees which peer gave which rating",
-    )
-
-    status = models.CharField(
-        max_length=20, choices=STATUS_CHOICES, default='PENDING'
-    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    rating = models.IntegerField(null=True, blank=True, help_text='1-5')
+    strengths_comment = models.TextField(blank=True)
+    improvements_comment = models.TextField(blank=True)
+    additional_comments = models.TextField(blank=True)
     decline_reason = models.TextField(blank=True)
-
     submitted_at = models.DateTimeField(null=True, blank=True)
-    due_at = models.DateTimeField(
-        null=True, blank=True,
-        help_text="Deadline based on cycle's peer_rating_end date",
-    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'peer_ratings'
+        db_table = 'perf_monthly_peer_ratings'
         ordering = ['-created_at']
-        indexes = [
-            models.Index(fields=['status', 'due_at']),
-        ]
 
     def __str__(self):
-        return f"Rating by {self.nomination.nominated_peer.full_name} - {self.get_status_display()}"
+        return f"{self.nomination_id} ({self.status})"
+# ==============================================================================
+# CARRY FORWARD RECORD (Audit Trail)
+# ==============================================================================
+class CarryForwardRecord(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending Approval'),
+        ('APPROVED', 'Approved & Applied'),
+        ('REJECTED', 'Rejected'),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    annual_plan = models.ForeignKey('AnnualPerformancePlan', on_delete=models.CASCADE, related_name='carry_forwards')
+    
+    source_kpi = models.ForeignKey('MonthlyKPI', on_delete=models.PROTECT, related_name='carried_forward_from')
+    source_month_name = models.CharField(max_length=20)
+    shortfall_amount = models.CharField(max_length=100)
+    
+    destination_kpi = models.ForeignKey('MonthlyKPI', on_delete=models.SET_NULL, null=True, blank=True, related_name='carried_forward_to')
+    destination_month_name = models.CharField(max_length=20)
+    
+    reason = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    
+    requested_by = models.ForeignKey('Employee', on_delete=models.SET_NULL, null=True, related_name='+')
+    approved_by = models.ForeignKey('Employee', on_delete=models.SET_NULL, null=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        db_table = 'perf_carry_forward_records'

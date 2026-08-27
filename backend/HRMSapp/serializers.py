@@ -957,6 +957,15 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
+        # ----------------------------------------------------------------------
+        # 🚀 FIX: Sync linked UserAccount email if official_email was updated
+        # ----------------------------------------------------------------------
+        if hasattr(instance, 'user_account') and instance.user_account:
+            user_account = instance.user_account
+            if user_account.email != instance.official_email:
+                user_account.email = instance.official_email
+                user_account.save(update_fields=['email'])
+
         # Create user account if requested (and doesn't exist)
         if create_account and password and not hasattr(instance, 'user_account'):
             self._create_user_account(instance, password, role_ids)
@@ -1548,416 +1557,667 @@ class KRALibraryMiniSerializer(serializers.ModelSerializer):
         model = KRALibrary
         fields = ['id', 'name', 'kra_source', 'peer_rating_required']
 
+# ==============================================================================
+# PERFORMANCE MANAGEMENT — NEW SERIALIZERS for KRA KPI restructuring
+# ==============================================================================
 from .models import (
-    PerformanceCycle, EmployeeScorecard,
-    EmployeeKRA, EmployeeKPI, EmployeeKPIEvidence,KRAPeerNomination, PeerRating
+    AnnualPerformancePlan, QuarterlyReview, MonthlyPerformancePlan,
+    MonthlyKRA, MonthlyKPI, MonthlyKPIEvidence,CarryForwardRecord
 )
+
+class MonthlyKPIEvidenceSerializer(serializers.ModelSerializer):
+    uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True, default=None)
+    class Meta:
+        model = MonthlyKPIEvidence
+        fields = '__all__'
+
+class MonthlyKPISerializer(serializers.ModelSerializer):
+    evidences = MonthlyKPIEvidenceSerializer(many=True, read_only=True)
+    class Meta:
+        model = MonthlyKPI
+        fields = '__all__'
+
+
+
+class AnnualPerformancePlanListSerializer(serializers.ModelSerializer):
+    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+    employee_id_display = serializers.CharField(source='employee.employee_id', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    
+    class Meta:
+        model = AnnualPerformancePlan
+        fields = [
+            'id', 'employee', 'employee_name', 'employee_id_display',
+            'financial_year', 'plan_start_date', 'plan_end_date',
+            'status', 'status_display', 'annual_score', 'annual_rating'
+        ]
+
+class CarryForwardRecordSerializer(serializers.ModelSerializer):
+    source_kpi_name = serializers.CharField(source='source_kpi.name', read_only=True)
+    source_kra_name = serializers.CharField(source='source_kpi.monthly_kra.name', read_only=True, default='')
+    requested_by_name = serializers.CharField(source='requested_by.full_name', read_only=True, default=None)
+    approved_by_name = serializers.CharField(source='approved_by.full_name', read_only=True, default=None)
+
+    class Meta:
+        model = CarryForwardRecord
+        fields = '__all__'
+
+from .models import MonthlyPeerNomination, MonthlyPeerRating
+
+# class MonthlyPeerRatingSerializer(serializers.ModelSerializer):
+#     peer_name = serializers.CharField(
+#         source='nomination.nominated_peer.full_name', read_only=True, default=None
+#     )
+#     peer_employee_id = serializers.CharField(
+#         source='nomination.nominated_peer.employee_id', read_only=True, default=None
+#     )
+#     status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+#     class Meta:
+#         model = MonthlyPeerRating
+#         fields = [
+#             'id', 'nomination', 'peer_name', 'peer_employee_id',
+#             'status', 'status_display', 'rating',
+#             'strengths_comment', 'improvements_comment', 'additional_comments',
+#             'decline_reason', 'submitted_at', 'created_at',
+#         ]
+#         read_only_fields = ['id', 'submitted_at', 'created_at']
+
+class MonthlyPeerRatingSerializer(serializers.ModelSerializer):
+    peer_name = serializers.CharField(
+        source='nomination.nominated_peer.full_name', read_only=True, default=None
+    )
+    peer_employee_id = serializers.CharField(
+        source='nomination.nominated_peer.employee_id', read_only=True, default=None
+    )
+    target_employee_name = serializers.CharField(
+        source='nomination.monthly_kra.monthly_plan.annual_plan.employee.full_name',
+        read_only=True, default=None
+    )
+    target_employee_id = serializers.CharField(
+        source='nomination.monthly_kra.monthly_plan.annual_plan.employee.employee_id',
+        read_only=True, default=None
+    )
+    kra_name = serializers.CharField(
+        source='nomination.monthly_kra.name', read_only=True, default=None
+    )
+    kra_description = serializers.CharField(
+        source='nomination.monthly_kra.description', read_only=True, default=None
+    )
+    financial_year = serializers.CharField(
+        source='nomination.monthly_kra.monthly_plan.annual_plan.financial_year',
+        read_only=True, default=None
+    )
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = MonthlyPeerRating
+        fields = [
+            'id', 'nomination', 'peer_name', 'peer_employee_id',
+            'target_employee_name', 'target_employee_id',
+            'kra_name', 'kra_description', 'financial_year',
+            'status', 'status_display', 'rating',
+            'strengths_comment', 'improvements_comment', 'additional_comments',
+            'decline_reason', 'submitted_at', 'created_at',
+        ]
+        read_only_fields = ['id', 'submitted_at', 'created_at']
+class MonthlyPeerNominationSerializer(serializers.ModelSerializer):
+    peer_name = serializers.CharField(source='nominated_peer.full_name', read_only=True)
+    peer_employee_id = serializers.CharField(source='nominated_peer.employee_id', read_only=True)
+    rating = MonthlyPeerRatingSerializer(read_only=True)
+    nominated_by_name = serializers.CharField(
+        source='nominated_by.full_name', read_only=True, default=None
+    )
+
+    class Meta:
+        model = MonthlyPeerNomination
+        fields = [
+            'id', 'monthly_kra', 'nominated_peer', 'peer_name', 'peer_employee_id',
+            'nominated_by', 'nominated_by_name', 'rating', 'created_at',
+        ]
+        read_only_fields = ['id', 'nominated_by', 'created_at']
+
+class MonthlyKRASerializer(serializers.ModelSerializer):
+    kpis = MonthlyKPISerializer(many=True, read_only=True)
+    peer_nominations = MonthlyPeerNominationSerializer(many=True, read_only=True)
+    kra_type_display = serializers.CharField(source='get_kra_type_display', read_only=True)
+    class Meta:
+        model = MonthlyKRA
+        fields = '__all__'
+
+class MonthlyPerformancePlanSerializer(serializers.ModelSerializer):
+    kras = MonthlyKRASerializer(many=True, read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    class Meta:
+        model = MonthlyPerformancePlan
+        fields = '__all__'        
+
+
+class QuarterlyReviewSerializer(serializers.ModelSerializer):
+    monthly_plans = MonthlyPerformancePlanSerializer(many=True, read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    class Meta:
+        model = QuarterlyReview
+        fields = '__all__'
+
+class AnnualPerformancePlanDetailSerializer(serializers.ModelSerializer):
+    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+    employee_id_display = serializers.CharField(source='employee.employee_id', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    quarterly_reviews = QuarterlyReviewSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = AnnualPerformancePlan
+        fields = '__all__'
+
+
+# ==============================================================================
+# COMMON + DEPARTMENTAL KRA MASTER SERIALIZERS
+# ==============================================================================
+from .models import (
+    CommonKRAMaster, CommonKPIMaster,
+    DepartmentalKRAMaster, DepartmentalKPIMaster,
+)
+
+class CommonKPIMasterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CommonKPIMaster
+        fields = [
+            'id', 'common_kra', 'name', 'description',
+            'metric_type', 'default_target', 'weight_in_kra',
+        ]
+        read_only_fields = ['id']
+
+
+class CommonKRAMasterSerializer(serializers.ModelSerializer):
+    kpis = CommonKPIMasterSerializer(many=True, required=False)
+
+    class Meta:
+        model = CommonKRAMaster
+        fields = [
+            'id', 'financial_year', 'name', 'description',
+            'default_weight', 'applies_to_all', 'is_active',
+            'kpis', 'created_at',
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def create(self, validated_data):
+        kpis_data = validated_data.pop('kpis', [])
+        kra = CommonKRAMaster.objects.create(**validated_data)
+        for kpi in kpis_data:
+            CommonKPIMaster.objects.create(common_kra=kra, **kpi)
+        return kra
+
+    def update(self, instance, validated_data):
+        kpis_data = validated_data.pop('kpis', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Optional full replace of nested KPIs if provided
+        if kpis_data is not None:
+            instance.kpis.all().delete()
+            for kpi in kpis_data:
+                CommonKPIMaster.objects.create(common_kra=instance, **kpi)
+
+        return instance
+
+
+class DepartmentalKPIMasterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DepartmentalKPIMaster
+        fields = [
+            'id', 'dept_kra', 'name',
+            'metric_type', 'default_target', 'weight_in_kra',
+        ]
+        read_only_fields = ['id']
+
+
+class DepartmentalKRAMasterSerializer(serializers.ModelSerializer):
+    kpis = DepartmentalKPIMasterSerializer(many=True, required=False)
+    department_name = serializers.CharField(source='department.name', read_only=True)
+
+    class Meta:
+        model = DepartmentalKRAMaster
+        fields = [
+            'id', 'financial_year', 'department', 'department_name',
+            'name', 'description', 'default_weight', 'is_active',
+            'kpis', 'created_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'department_name']
+
+    def create(self, validated_data):
+        kpis_data = validated_data.pop('kpis', [])
+        kra = DepartmentalKRAMaster.objects.create(**validated_data)
+        for kpi in kpis_data:
+            DepartmentalKPIMaster.objects.create(dept_kra=kra, **kpi)
+        return kra
+
+    def update(self, instance, validated_data):
+        kpis_data = validated_data.pop('kpis', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if kpis_data is not None:
+            instance.kpis.all().delete()
+            for kpi in kpis_data:
+                DepartmentalKPIMaster.objects.create(dept_kra=instance, **kpi)
+
+        return instance
+
+# from .models import (
+#     PerformanceCycle, EmployeeScorecard,
+#     EmployeeKRA, EmployeeKPI, EmployeeKPIEvidence,KRAPeerNomination, PeerRating
+# )
 
 
 # ------------------------------------------------------------------------------
 # PERFORMANCE CYCLE
 # ------------------------------------------------------------------------------
 
-class PerformanceCycleSerializer(serializers.ModelSerializer):
-    cycle_type_display = serializers.CharField(source='get_cycle_type_display', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    current_phase = serializers.CharField(read_only=True)
-    applicable_department_names = serializers.SerializerMethodField()
-    scorecard_count = serializers.SerializerMethodField()
-    created_by_name = serializers.CharField(source='created_by.full_name', read_only=True, default=None)
+# class PerformanceCycleSerializer(serializers.ModelSerializer):
+#     cycle_type_display = serializers.CharField(source='get_cycle_type_display', read_only=True)
+#     status_display = serializers.CharField(source='get_status_display', read_only=True)
+#     current_phase = serializers.CharField(read_only=True)
+#     applicable_department_names = serializers.SerializerMethodField()
+#     scorecard_count = serializers.SerializerMethodField()
+#     created_by_name = serializers.CharField(source='created_by.full_name', read_only=True, default=None)
 
-    class Meta:
-        model = PerformanceCycle
-        fields = [
-            'id', 'name', 'cycle_type', 'cycle_type_display',
-            'financial_year', 'period_start', 'period_end',
-            'goal_setting_start', 'goal_setting_end',
-            'manager_review_start', 'manager_review_end',
-            'working_start', 'working_end',
-            'peer_rating_start', 'peer_rating_end',
-            'self_review_start', 'self_review_end',
-            'final_review_start', 'final_review_end',
-            'finalization_start', 'finalization_end',
-            'status', 'status_display', 'current_phase',
-            'applicable_departments', 'applicable_department_names',
-            'description', 'scorecard_count',
-            'created_by', 'created_by_name',
-            'created_at', 'updated_at',
-        ]
-        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+#     class Meta:
+#         model = PerformanceCycle
+#         fields = [
+#             'id', 'name', 'cycle_type', 'cycle_type_display',
+#             'financial_year', 'period_start', 'period_end',
+#             'goal_setting_start', 'goal_setting_end',
+#             'manager_review_start', 'manager_review_end',
+#             'working_start', 'working_end',
+#             'peer_rating_start', 'peer_rating_end',
+#             'self_review_start', 'self_review_end',
+#             'final_review_start', 'final_review_end',
+#             'finalization_start', 'finalization_end',
+#             'status', 'status_display', 'current_phase',
+#             'applicable_departments', 'applicable_department_names',
+#             'description', 'scorecard_count',
+#             'created_by', 'created_by_name',
+#             'created_at', 'updated_at',
+#         ]
+#         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
 
-    def get_applicable_department_names(self, obj):
-        return [{'id': str(d.id), 'name': d.name} for d in obj.applicable_departments.all()]
+#     def get_applicable_department_names(self, obj):
+#         return [{'id': str(d.id), 'name': d.name} for d in obj.applicable_departments.all()]
 
-    def get_scorecard_count(self, obj):
-        return obj.scorecards.count()
+#     def get_scorecard_count(self, obj):
+#         return obj.scorecards.count()
 
-    def validate(self, attrs):
-        # Ensure dates are in logical order
-        checks = [
-            ('goal_setting_start', 'goal_setting_end'),
-            ('manager_review_start', 'manager_review_end'),
-            ('working_start', 'working_end'),
-            ('peer_rating_start', 'peer_rating_end'),
-            ('self_review_start', 'self_review_end'),
-            ('final_review_start', 'final_review_end'),
-            ('finalization_start', 'finalization_end'),
-        ]
-        for start, end in checks:
-            s = attrs.get(start, self.instance and getattr(self.instance, start))
-            e = attrs.get(end, self.instance and getattr(self.instance, end))
-            if s and e and s > e:
-                raise serializers.ValidationError({
-                    end: f'{end} must be after {start}'
-                })
-        return attrs
-
-
-# ------------------------------------------------------------------------------
-# EMPLOYEE KPI + EVIDENCE
-# ------------------------------------------------------------------------------
-
-class EmployeeKPIEvidenceSerializer(serializers.ModelSerializer):
-    file_url = serializers.SerializerMethodField()
-    uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True, default=None)
-
-    class Meta:
-        model = EmployeeKPIEvidence
-        fields = [
-            'id', 'kpi', 'file', 'file_url', 'file_name',
-            'file_size_kb', 'mime_type', 'description',
-            'uploaded_by', 'uploaded_by_name', 'uploaded_at',
-        ]
-        read_only_fields = ['id', 'file_url', 'file_size_kb', 'mime_type', 'uploaded_by', 'uploaded_at']
-
-    def get_file_url(self, obj):
-        if obj.file:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.file.url)
-            return obj.file.url
-        return None
-
-    def create(self, validated_data):
-        file_obj = validated_data.get('file')
-        if file_obj:
-            validated_data['file_size_kb'] = round(file_obj.size / 1024)
-            validated_data['mime_type'] = getattr(file_obj, 'content_type', '')
-            if not validated_data.get('file_name'):
-                validated_data['file_name'] = file_obj.name
-        return super().create(validated_data)
+#     def validate(self, attrs):
+#         # Ensure dates are in logical order
+#         checks = [
+#             ('goal_setting_start', 'goal_setting_end'),
+#             ('manager_review_start', 'manager_review_end'),
+#             ('working_start', 'working_end'),
+#             ('peer_rating_start', 'peer_rating_end'),
+#             ('self_review_start', 'self_review_end'),
+#             ('final_review_start', 'final_review_end'),
+#             ('finalization_start', 'finalization_end'),
+#         ]
+#         for start, end in checks:
+#             s = attrs.get(start, self.instance and getattr(self.instance, start))
+#             e = attrs.get(end, self.instance and getattr(self.instance, end))
+#             if s and e and s > e:
+#                 raise serializers.ValidationError({
+#                     end: f'{end} must be after {start}'
+#                 })
+#         return attrs
 
 
-class EmployeeKPISerializer(serializers.ModelSerializer):
-    kpi_type_display = serializers.CharField(source='get_kpi_type_display', read_only=True)
-    indicator_type_display = serializers.CharField(source='get_indicator_type_display', read_only=True)
-    evidences = EmployeeKPIEvidenceSerializer(many=True, read_only=True)
+# # ------------------------------------------------------------------------------
+# # EMPLOYEE KPI + EVIDENCE
+# # ------------------------------------------------------------------------------
 
-    class Meta:
-        model = EmployeeKPI
-        fields = [
-            'id', 'employee_kra', 'library_kpi',
-            'name', 'description',
-            'indicator_type', 'indicator_type_display',
-            'kpi_type', 'kpi_type_display',
-            'formula', 'baseline',
-            'target_minimum', 'target_expected', 'target_exceptional',
-            'data_source', 'weight_in_kra', 'action_plan',
-            'self_actual', 'self_rating', 'self_comment', 'self_reviewed_at',
-            'manager_actual', 'manager_rating', 'manager_comment',
-            'manager_override_reason', 'manager_reviewed_at',
-            'weighted_score', 'display_order',
-            'evidences',
-            'created_at', 'updated_at',
-        ]
-        read_only_fields = [
-            'id', 'weighted_score',
-            'self_reviewed_at', 'manager_reviewed_at',
-            'created_at', 'updated_at',
-        ]
+# class EmployeeKPIEvidenceSerializer(serializers.ModelSerializer):
+#     file_url = serializers.SerializerMethodField()
+#     uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True, default=None)
 
+#     class Meta:
+#         model = EmployeeKPIEvidence
+#         fields = [
+#             'id', 'kpi', 'file', 'file_url', 'file_name',
+#             'file_size_kb', 'mime_type', 'description',
+#             'uploaded_by', 'uploaded_by_name', 'uploaded_at',
+#         ]
+#         read_only_fields = ['id', 'file_url', 'file_size_kb', 'mime_type', 'uploaded_by', 'uploaded_at']
 
-# ------------------------------------------------------------------------------
-# EMPLOYEE KRA
-# ------------------------------------------------------------------------------
+#     def get_file_url(self, obj):
+#         if obj.file:
+#             request = self.context.get('request')
+#             if request:
+#                 return request.build_absolute_uri(obj.file.url)
+#             return obj.file.url
+#         return None
 
-class EmployeeKRASerializer(serializers.ModelSerializer):
-    kra_source_display = serializers.CharField(source='get_kra_source_display', read_only=True)
-    kpis = EmployeeKPISerializer(many=True, read_only=True)
-    linked_priority_title = serializers.CharField(
-        source='linked_priority.title', read_only=True, default=None
-    )
-
-    class Meta:
-        model = EmployeeKRA
-        fields = [
-            'id', 'scorecard', 'library_kra',
-            'name', 'description', 'weight',
-            'peer_rating_required',
-            'kra_source', 'kra_source_display',
-            'linked_priority', 'linked_priority_title',
-            'rationale', 'kra_score', 'display_order',
-            'kpis',
-            'created_at', 'updated_at',
-        ]
-        read_only_fields = ['id', 'kra_score', 'created_at', 'updated_at']
+#     def create(self, validated_data):
+#         file_obj = validated_data.get('file')
+#         if file_obj:
+#             validated_data['file_size_kb'] = round(file_obj.size / 1024)
+#             validated_data['mime_type'] = getattr(file_obj, 'content_type', '')
+#             if not validated_data.get('file_name'):
+#                 validated_data['file_name'] = file_obj.name
+#         return super().create(validated_data)
 
 
-# ------------------------------------------------------------------------------
-# EMPLOYEE SCORECARD
-# ------------------------------------------------------------------------------
+# class EmployeeKPISerializer(serializers.ModelSerializer):
+#     kpi_type_display = serializers.CharField(source='get_kpi_type_display', read_only=True)
+#     indicator_type_display = serializers.CharField(source='get_indicator_type_display', read_only=True)
+#     evidences = EmployeeKPIEvidenceSerializer(many=True, read_only=True)
 
-class EmployeeScorecardListSerializer(serializers.ModelSerializer):
-    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
-    employee_id_display = serializers.CharField(source='employee.employee_id', read_only=True)
-    cycle_name = serializers.CharField(source='cycle.name', read_only=True)
-    cycle_type = serializers.CharField(source='cycle.cycle_type', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    kra_count = serializers.SerializerMethodField()
-
-    class Meta:
-        model = EmployeeScorecard
-        fields = [
-            'id', 'employee', 'employee_name', 'employee_id_display',
-            'cycle', 'cycle_name', 'cycle_type',
-            'status', 'status_display',
-            'total_weight', 'kra_count',
-            'final_score', 'final_rating',
-            'created_at',
-        ]
-        read_only_fields = fields
-
-    def get_kra_count(self, obj):
-        return obj.kras.count()
-
-
-class EmployeeScorecardDetailSerializer(serializers.ModelSerializer):
-    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
-    employee_id_display = serializers.CharField(source='employee.employee_id', read_only=True)
-    employee_position = serializers.CharField(source='employee.position.title', read_only=True, default=None)
-    employee_department = serializers.CharField(
-        source='employee.structure_location.name', read_only=True, default=None
-    )
-    reporting_manager_name = serializers.CharField(
-        source='employee.reporting_manager.full_name', read_only=True, default=None
-    )
-    cycle = PerformanceCycleSerializer(read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    kras = EmployeeKRASerializer(many=True, read_only=True)
-    manager_signed_off_by_name = serializers.CharField(
-        source='manager_signed_off_by.full_name', read_only=True, default=None
-    )
-
-    class Meta:
-        model = EmployeeScorecard
-        fields = [
-            'id',
-            'employee', 'employee_name', 'employee_id_display',
-            'employee_position', 'employee_department', 'reporting_manager_name',
-            'cycle',
-            'status', 'status_display',
-            'total_weight',
-            'self_score', 'peer_score', 'manager_score',
-            'final_score', 'final_rating',
-            'employee_signed_off_at', 'manager_signed_off_at',
-            'manager_signed_off_by', 'manager_signed_off_by_name',
-            'sent_back_reason', 'sent_back_at',
-            'kras',
-            'created_at', 'updated_at',
-        ]
-        read_only_fields = [
-            'id', 'employee', 'cycle', 'total_weight',
-            'self_score', 'peer_score', 'manager_score',
-            'final_score', 'final_rating',
-            'employee_signed_off_at', 'manager_signed_off_at',
-            'manager_signed_off_by',
-            'sent_back_at',
-            'created_at', 'updated_at',
-        ]
+#     class Meta:
+#         model = EmployeeKPI
+#         fields = [
+#             'id', 'employee_kra', 'library_kpi',
+#             'name', 'description',
+#             'indicator_type', 'indicator_type_display',
+#             'kpi_type', 'kpi_type_display',
+#             'formula', 'baseline',
+#             'target_minimum', 'target_expected', 'target_exceptional',
+#             'data_source', 'weight_in_kra', 'action_plan',
+#             'self_actual', 'self_rating', 'self_comment', 'self_reviewed_at',
+#             'manager_actual', 'manager_rating', 'manager_comment',
+#             'manager_override_reason', 'manager_reviewed_at',
+#             'weighted_score', 'display_order',
+#             'evidences',
+#             'created_at', 'updated_at',
+#         ]
+#         read_only_fields = [
+#             'id', 'weighted_score',
+#             'self_reviewed_at', 'manager_reviewed_at',
+#             'created_at', 'updated_at',
+#         ]
 
 
-# Add KRA from library payload
-class AddLibraryKRASerializer(serializers.Serializer):
-    library_kra_id = serializers.UUIDField()
-    weight = serializers.DecimalField(max_digits=5, decimal_places=2, required=False)
-    include_all_kpis = serializers.BooleanField(default=True)
+# # ------------------------------------------------------------------------------
+# # EMPLOYEE KRA
+# # ------------------------------------------------------------------------------
+
+# class EmployeeKRASerializer(serializers.ModelSerializer):
+#     kra_source_display = serializers.CharField(source='get_kra_source_display', read_only=True)
+#     kpis = EmployeeKPISerializer(many=True, read_only=True)
+#     linked_priority_title = serializers.CharField(
+#         source='linked_priority.title', read_only=True, default=None
+#     )
+
+#     class Meta:
+#         model = EmployeeKRA
+#         fields = [
+#             'id', 'scorecard', 'library_kra',
+#             'name', 'description', 'weight',
+#             'peer_rating_required',
+#             'kra_source', 'kra_source_display',
+#             'linked_priority', 'linked_priority_title',
+#             'rationale', 'kra_score', 'display_order',
+#             'kpis',
+#             'created_at', 'updated_at',
+#         ]
+#         read_only_fields = ['id', 'kra_score', 'created_at', 'updated_at']
 
 
-# Send back for revision
-class SendBackSerializer(serializers.Serializer):
-    reason = serializers.CharField(min_length=5)
+# # ------------------------------------------------------------------------------
+# # EMPLOYEE SCORECARD
+# # ------------------------------------------------------------------------------
+
+# class EmployeeScorecardListSerializer(serializers.ModelSerializer):
+#     employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+#     employee_id_display = serializers.CharField(source='employee.employee_id', read_only=True)
+#     cycle_name = serializers.CharField(source='cycle.name', read_only=True)
+#     cycle_type = serializers.CharField(source='cycle.cycle_type', read_only=True)
+#     status_display = serializers.CharField(source='get_status_display', read_only=True)
+#     kra_count = serializers.SerializerMethodField()
+
+#     class Meta:
+#         model = EmployeeScorecard
+#         fields = [
+#             'id', 'employee', 'employee_name', 'employee_id_display',
+#             'cycle', 'cycle_name', 'cycle_type',
+#             'status', 'status_display',
+#             'total_weight', 'kra_count',
+#             'final_score', 'final_rating',
+#             'created_at',
+#         ]
+#         read_only_fields = fields
+
+#     def get_kra_count(self, obj):
+#         return obj.kras.count()
 
 
-# ------------------------------------------------------------------------------
-# EMPLOYEE MINI (for peer selection dropdowns)
-# ------------------------------------------------------------------------------
+# class EmployeeScorecardDetailSerializer(serializers.ModelSerializer):
+#     employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+#     employee_id_display = serializers.CharField(source='employee.employee_id', read_only=True)
+#     employee_position = serializers.CharField(source='employee.position.title', read_only=True, default=None)
+#     employee_department = serializers.CharField(
+#         source='employee.structure_location.name', read_only=True, default=None
+#     )
+#     reporting_manager_name = serializers.CharField(
+#         source='employee.reporting_manager.full_name', read_only=True, default=None
+#     )
+#     cycle = PerformanceCycleSerializer(read_only=True)
+#     status_display = serializers.CharField(source='get_status_display', read_only=True)
+#     kras = EmployeeKRASerializer(many=True, read_only=True)
+#     manager_signed_off_by_name = serializers.CharField(
+#         source='manager_signed_off_by.full_name', read_only=True, default=None
+#     )
 
-class EmployeeForPeerSerializer(serializers.ModelSerializer):
-    """Lightweight employee data for peer selection dropdown."""
-    full_name = serializers.CharField(read_only=True)
-    position_title = serializers.CharField(source='position.title', read_only=True, default=None)
-    department_name = serializers.CharField(
-        source='structure_location.name', read_only=True, default=None
-    )
-
-    class Meta:
-        model = Employee
-        fields = [
-            'id', 'employee_id', 'full_name',
-            'position_title', 'department_name',
-        ]
-
-
-# ------------------------------------------------------------------------------
-# PEER RATING
-# ------------------------------------------------------------------------------
-
-class PeerRatingSerializer(serializers.ModelSerializer):
-    """
-    Full peer rating (includes comments — for HR/Manager view).
-    """
-    peer_name = serializers.CharField(source='nomination.nominated_peer.full_name', read_only=True)
-    peer_employee_id = serializers.CharField(source='nomination.nominated_peer.employee_id', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-
-    class Meta:
-        model = PeerRating
-        fields = [
-            'id', 'nomination',
-            'peer_name', 'peer_employee_id',
-            'rating',
-            'strengths_comment',
-            'improvements_comment',
-            'additional_comments',
-            'is_anonymous_to_employee',
-            'status', 'status_display',
-            'decline_reason',
-            'submitted_at', 'due_at',
-            'created_at',
-        ]
-        read_only_fields = [
-            'id', 'nomination', 'peer_name', 'peer_employee_id',
-            'submitted_at', 'created_at',
-        ]
+#     class Meta:
+#         model = EmployeeScorecard
+#         fields = [
+#             'id',
+#             'employee', 'employee_name', 'employee_id_display',
+#             'employee_position', 'employee_department', 'reporting_manager_name',
+#             'cycle',
+#             'status', 'status_display',
+#             'total_weight',
+#             'self_score', 'peer_score', 'manager_score',
+#             'final_score', 'final_rating',
+#             'employee_signed_off_at', 'manager_signed_off_at',
+#             'manager_signed_off_by', 'manager_signed_off_by_name',
+#             'sent_back_reason', 'sent_back_at',
+#             'kras',
+#             'created_at', 'updated_at',
+#         ]
+#         read_only_fields = [
+#             'id', 'employee', 'cycle', 'total_weight',
+#             'self_score', 'peer_score', 'manager_score',
+#             'final_score', 'final_rating',
+#             'employee_signed_off_at', 'manager_signed_off_at',
+#             'manager_signed_off_by',
+#             'sent_back_at',
+#             'created_at', 'updated_at',
+#         ]
 
 
-class PeerRatingForEmployeeSerializer(serializers.ModelSerializer):
-    """
-    Sanitized peer rating for the RATED EMPLOYEE.
-    Hides peer identity and comments (only shows aggregated score).
-    """
-    class Meta:
-        model = PeerRating
-        fields = [
-            'id',
-            'rating',
-            'status',
-            'submitted_at',
-        ]
-        # NO peer_name, NO comments, NO nomination link
+# # Add KRA from library payload
+# class AddLibraryKRASerializer(serializers.Serializer):
+#     library_kra_id = serializers.UUIDField()
+#     weight = serializers.DecimalField(max_digits=5, decimal_places=2, required=False)
+#     include_all_kpis = serializers.BooleanField(default=True)
 
 
-class PeerRatingSubmitSerializer(serializers.Serializer):
-    """Payload when peer submits their rating."""
-    rating = serializers.IntegerField(min_value=1, max_value=5)
-    strengths_comment = serializers.CharField(required=False, allow_blank=True)
-    improvements_comment = serializers.CharField(required=False, allow_blank=True)
-    additional_comments = serializers.CharField(required=False, allow_blank=True)
+# # Send back for revision
+# class SendBackSerializer(serializers.Serializer):
+#     reason = serializers.CharField(min_length=5)
 
 
-class PeerRatingDeclineSerializer(serializers.Serializer):
-    """Payload when peer declines to rate."""
-    decline_reason = serializers.CharField(min_length=5)
+# # ------------------------------------------------------------------------------
+# # EMPLOYEE MINI (for peer selection dropdowns)
+# # ------------------------------------------------------------------------------
+
+# class EmployeeForPeerSerializer(serializers.ModelSerializer):
+#     """Lightweight employee data for peer selection dropdown."""
+#     full_name = serializers.CharField(read_only=True)
+#     position_title = serializers.CharField(source='position.title', read_only=True, default=None)
+#     department_name = serializers.CharField(
+#         source='structure_location.name', read_only=True, default=None
+#     )
+
+#     class Meta:
+#         model = Employee
+#         fields = [
+#             'id', 'employee_id', 'full_name',
+#             'position_title', 'department_name',
+#         ]
 
 
-# ------------------------------------------------------------------------------
-# PEER NOMINATION
-# ------------------------------------------------------------------------------
+# # ------------------------------------------------------------------------------
+# # PEER RATING
+# # ------------------------------------------------------------------------------
 
-class KRAPeerNominationSerializer(serializers.ModelSerializer):
-    peer = EmployeeForPeerSerializer(source='nominated_peer', read_only=True)
-    nominated_by_name = serializers.CharField(
-        source='nominated_by.full_name', read_only=True, default=None
-    )
-    rating = PeerRatingSerializer(read_only=True)
+# class PeerRatingSerializer(serializers.ModelSerializer):
+#     """
+#     Full peer rating (includes comments — for HR/Manager view).
+#     """
+#     peer_name = serializers.CharField(source='nomination.nominated_peer.full_name', read_only=True)
+#     peer_employee_id = serializers.CharField(source='nomination.nominated_peer.employee_id', read_only=True)
+#     status_display = serializers.CharField(source='get_status_display', read_only=True)
 
-    class Meta:
-        model = KRAPeerNomination
-        fields = [
-            'id', 'employee_kra',
-            'nominated_peer', 'peer',
-            'nominated_by', 'nominated_by_name',
-            'nominated_at',
-            'rating',
-        ]
-        read_only_fields = ['id', 'nominated_at']
-
-
-# ------------------------------------------------------------------------------
-# NOMINATE PEERS PAYLOAD
-# ------------------------------------------------------------------------------
-
-class NominatePeersSerializer(serializers.Serializer):
-    """
-    Payload when manager nominates peers for a KRA.
-    { "employee_kra_id": "...", "peer_ids": ["uuid1", "uuid2", ...] }
-    """
-    employee_kra_id = serializers.UUIDField()
-    peer_ids = serializers.ListField(
-        child=serializers.UUIDField(),
-        min_length=2,
-        max_length=5,
-    )
+#     class Meta:
+#         model = PeerRating
+#         fields = [
+#             'id', 'nomination',
+#             'peer_name', 'peer_employee_id',
+#             'rating',
+#             'strengths_comment',
+#             'improvements_comment',
+#             'additional_comments',
+#             'is_anonymous_to_employee',
+#             'status', 'status_display',
+#             'decline_reason',
+#             'submitted_at', 'due_at',
+#             'created_at',
+#         ]
+#         read_only_fields = [
+#             'id', 'nomination', 'peer_name', 'peer_employee_id',
+#             'submitted_at', 'created_at',
+#         ]
 
 
-# ------------------------------------------------------------------------------
-# PENDING PEER REVIEWS (for /my-peer-reviews page)
-# ------------------------------------------------------------------------------
+# class PeerRatingForEmployeeSerializer(serializers.ModelSerializer):
+#     """
+#     Sanitized peer rating for the RATED EMPLOYEE.
+#     Hides peer identity and comments (only shows aggregated score).
+#     """
+#     class Meta:
+#         model = PeerRating
+#         fields = [
+#             'id',
+#             'rating',
+#             'status',
+#             'submitted_at',
+#         ]
+#         # NO peer_name, NO comments, NO nomination link
 
-class PendingPeerReviewSerializer(serializers.ModelSerializer):
-    """
-    What a peer sees in their "pending peer reviews" list.
-    Shows WHO to review + WHICH KRA + when it's due.
-    """
-    employee_name = serializers.CharField(
-        source='nomination.employee_kra.scorecard.employee.full_name',
-        read_only=True,
-    )
-    employee_id_display = serializers.CharField(
-        source='nomination.employee_kra.scorecard.employee.employee_id',
-        read_only=True,
-    )
-    employee_position = serializers.CharField(
-        source='nomination.employee_kra.scorecard.employee.position.title',
-        read_only=True,
-        default=None,
-    )
-    kra_name = serializers.CharField(
-        source='nomination.employee_kra.name',
-        read_only=True,
-    )
-    kra_description = serializers.CharField(
-        source='nomination.employee_kra.description',
-        read_only=True,
-    )
-    cycle_name = serializers.CharField(
-        source='nomination.employee_kra.scorecard.cycle.name',
-        read_only=True,
-    )
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
 
-    class Meta:
-        model = PeerRating
-        fields = [
-            'id',
-            'employee_name', 'employee_id_display', 'employee_position',
-            'kra_name', 'kra_description',
-            'cycle_name',
-            'status', 'status_display',
-            'due_at', 'submitted_at',
-            'rating',
-        ]
-        read_only_fields = fields
+# class PeerRatingSubmitSerializer(serializers.Serializer):
+#     """Payload when peer submits their rating."""
+#     rating = serializers.IntegerField(min_value=1, max_value=5)
+#     strengths_comment = serializers.CharField(required=False, allow_blank=True)
+#     improvements_comment = serializers.CharField(required=False, allow_blank=True)
+#     additional_comments = serializers.CharField(required=False, allow_blank=True)
+
+
+# class PeerRatingDeclineSerializer(serializers.Serializer):
+#     """Payload when peer declines to rate."""
+#     decline_reason = serializers.CharField(min_length=5)
+
+
+# # ------------------------------------------------------------------------------
+# # PEER NOMINATION
+# # ------------------------------------------------------------------------------
+
+# class KRAPeerNominationSerializer(serializers.ModelSerializer):
+#     peer = EmployeeForPeerSerializer(source='nominated_peer', read_only=True)
+#     nominated_by_name = serializers.CharField(
+#         source='nominated_by.full_name', read_only=True, default=None
+#     )
+#     rating = PeerRatingSerializer(read_only=True)
+
+#     class Meta:
+#         model = KRAPeerNomination
+#         fields = [
+#             'id', 'employee_kra',
+#             'nominated_peer', 'peer',
+#             'nominated_by', 'nominated_by_name',
+#             'nominated_at',
+#             'rating',
+#         ]
+#         read_only_fields = ['id', 'nominated_at']
+
+
+# # ------------------------------------------------------------------------------
+# # NOMINATE PEERS PAYLOAD
+# # ------------------------------------------------------------------------------
+
+# class NominatePeersSerializer(serializers.Serializer):
+#     """
+#     Payload when manager nominates peers for a KRA.
+#     { "employee_kra_id": "...", "peer_ids": ["uuid1", "uuid2", ...] }
+#     """
+#     employee_kra_id = serializers.UUIDField()
+#     peer_ids = serializers.ListField(
+#         child=serializers.UUIDField(),
+#         min_length=2,
+#         max_length=5,
+#     )
+
+
+# # ------------------------------------------------------------------------------
+# # PENDING PEER REVIEWS (for /my-peer-reviews page)
+# # ------------------------------------------------------------------------------
+
+# class PendingPeerReviewSerializer(serializers.ModelSerializer):
+#     """
+#     What a peer sees in their "pending peer reviews" list.
+#     Shows WHO to review + WHICH KRA + when it's due.
+#     """
+#     employee_name = serializers.CharField(
+#         source='nomination.employee_kra.scorecard.employee.full_name',
+#         read_only=True,
+#     )
+#     employee_id_display = serializers.CharField(
+#         source='nomination.employee_kra.scorecard.employee.employee_id',
+#         read_only=True,
+#     )
+#     employee_position = serializers.CharField(
+#         source='nomination.employee_kra.scorecard.employee.position.title',
+#         read_only=True,
+#         default=None,
+#     )
+#     kra_name = serializers.CharField(
+#         source='nomination.employee_kra.name',
+#         read_only=True,
+#     )
+#     kra_description = serializers.CharField(
+#         source='nomination.employee_kra.description',
+#         read_only=True,
+#     )
+#     cycle_name = serializers.CharField(
+#         source='nomination.employee_kra.scorecard.cycle.name',
+#         read_only=True,
+#     )
+#     status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+#     class Meta:
+#         model = PeerRating
+#         fields = [
+#             'id',
+#             'employee_name', 'employee_id_display', 'employee_position',
+#             'kra_name', 'kra_description',
+#             'cycle_name',
+#             'status', 'status_display',
+#             'due_at', 'submitted_at',
+#             'rating',
+#         ]
+#         read_only_fields = fields
 
 
 # ==============================================================================

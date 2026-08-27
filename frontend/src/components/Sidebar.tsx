@@ -986,44 +986,68 @@ const mainNav: NavEntry[] = [
   },
 
   // ==================== KRA & KPIs (Dropdown) ====================
-  {
-    label: 'KRA & KPIs',
-    icon: Target,
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
-    children: [
-      {
-        label: 'My Performance',
-        icon: ClipboardCheck,
-        to: '/my-performance',
-        allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
-      },
-      {
-        label: 'Team Performance',
-        icon: UserCheck,
-        to: '/team-performance',
-        allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
-      },
-      {
-        label: 'Performance Calibration',
-        icon: BarChart3,
-        to: '/hr/calibration',
-        allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
-      },
-      {
-        label: 'Peer Reviews',
-        icon: Users2,
-        to: '/peer-reviews',
-        allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
-      },
-      {
-        label: 'Performance Reports',
-        icon: PieChart,
-        to: '/performance-reports',
-        allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
-      },
-    ],
-  },
-
+  // {
+  //   label: 'KRA & KPIs',
+  //   icon: Target,
+  //   allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  //   children: [
+  //     {
+  //       label: 'My Performance',
+  //       icon: ClipboardCheck,
+  //       to: '/my-performance',
+  //       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  //     },
+  //     {
+  //       label: 'Team Performance',
+  //       icon: UserCheck,
+  //       to: '/team-performance',
+  //       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+  //     },
+  //     {
+  //       label: 'Performance Calibration',
+  //       icon: BarChart3,
+  //       to: '/hr/calibration',
+  //       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  //     },
+  //     {
+  //       label: 'Peer Reviews',
+  //       icon: Users2,
+  //       to: '/peer-reviews',
+  //       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  //     },
+  //     {
+  //       label: 'Performance Reports',
+  //       icon: PieChart,
+  //       to: '/performance-reports',
+  //       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+  //     },
+  //   ],
+  // },
+{
+  label: 'Performance',
+  icon: Target,
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  children: [
+    {
+      label: 'My Annual Plan',                     // ← Employee's own plan
+      icon: ClipboardCheck,
+      to: '/my-performance',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    },
+    {
+      label: 'All Annual Plans',                   // ← HR/Manager Directory
+      icon: FileText,
+      to: '/performance/annual-plans',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+    },
+    {
+      label: 'Peer Reviews',
+      icon: Users2,
+      to: '/peer-reviews',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    },
+  ],
+},
   // ==================== Reimbursements (Dropdown) ====================
   {
     label: 'Reimbursements',
@@ -1321,6 +1345,18 @@ const settingsNav: NavItem[] = [
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
   },
   {
+  label: 'Common KRAs (Master)',
+  icon: Target,
+  to: '/settings/common-kras',
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+},
+{
+  label: 'Departmental KRAs',
+  icon: Building2,
+  to: '/settings/departmental-kras',
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+},
+  {
     label: 'Rating Scale',
     icon: Award,
     to: '/settings/rating-scale',
@@ -1332,24 +1368,19 @@ const settingsNav: NavItem[] = [
     to: '/settings/organizational-priorities',
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
   },
-  {
-    label: 'Departmental KRAs',
-    icon: Building2,
-    to: '/settings/departmental-kras',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
-  },
+ 
   {
     label: 'KRA Library',
     icon: TrendingUp,
     to: '/settings/kra-library',
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
   },
-  {
-    label: 'Performance Cycles',
-    icon: Calendar,
-    to: '/settings/performance-cycles',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
-  },
+  // {
+  //   label: 'Performance Cycles',
+  //   icon: Calendar,
+  //   to: '/settings/performance-cycles',
+  //   allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  // },
 ];
 
 // ==============================================================================
