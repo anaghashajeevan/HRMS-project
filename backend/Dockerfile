@@ -2,7 +2,8 @@
 # HRMS Backend — Django + Gunicorn
 # ==============================================================================
 
-FROM python:3.11-slim
+# FROM python:3.11-slim
+FROM python:3.12-slim
 
 # ---- Environment ----
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -15,6 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    libmagic1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
