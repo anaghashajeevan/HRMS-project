@@ -18,16 +18,16 @@ from django_cryptography.fields import encrypt
 
 class Role(models.Model):
     """Dynamic role master — HR admin can add/edit roles at runtime."""
-    ROLE_CHOICES = [
-        ('SYSTEM_ADMIN', 'System Administrator'),
-        ('HR_ADMIN', 'HR Administrator'),
-        ('MANAGER', 'Manager'),
-        ('EMPLOYEE', 'Employee'),
-        ('KIOSK', 'Kiosk Terminal'),
-    ]
+    # ROLE_CHOICES = [
+    #     ('SYSTEM_ADMIN', 'System Administrator'),
+    #     ('HR_ADMIN', 'HR Administrator'),
+    #     ('MANAGER', 'Manager'),
+    #     ('EMPLOYEE', 'Employee'),
+    #     ('KIOSK', 'Kiosk Terminal'),
+    # ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    role_name = models.CharField(max_length=50, unique=True, choices=ROLE_CHOICES)
+    role_name = models.CharField(max_length=50, unique=True)
     code = models.CharField(max_length=30, unique=True, help_text="Internal code (e.g. 'hr_admin')")
     description = models.TextField(blank=True, null=True)
     level = models.IntegerField(default=10, help_text="Higher = more privileges")
@@ -83,7 +83,11 @@ class CompanyStructure(models.Model):
     )
     cost_center_code = models.CharField(max_length=20, unique=True, null=True, blank=True)
     is_active = models.BooleanField(default=True)
-
+    department_head = models.ForeignKey(
+        'Employee', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='headed_departments',
+        help_text="The HOD for this department"
+    )
     # Display customization (all optional)
     display_name = models.CharField(
         max_length=100, blank=True,

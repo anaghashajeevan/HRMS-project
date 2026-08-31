@@ -249,7 +249,9 @@ import { AxiosError } from 'axios';
 const ROLE_OPTIONS = [
   { value: 'SYSTEM_ADMIN', label: 'System Administrator', defaultCode: 'system_admin' },
   { value: 'HR_ADMIN', label: 'HR Administrator', defaultCode: 'hr_admin' },
-  { value: 'MANAGER', label: 'Manager', defaultCode: 'manager' },
+  { value: 'REPORTING_MANAGER', label: 'Reporting Manager', defaultCode: 'reporting_manager' }, // 👈 ADDED
+  { value: 'HOD', label: 'Department Head (HOD)', defaultCode: 'hod' },                         // 👈 ADDED
+  { value: 'MANAGER', label: 'Manager (General)', defaultCode: 'manager' },
   { value: 'EMPLOYEE', label: 'Employee', defaultCode: 'employee' },
   { value: 'KIOSK', label: 'Kiosk Terminal', defaultCode: 'kiosk' },
 ];
@@ -437,20 +439,48 @@ export default function RolesPage() {
             </div>
 
             <div className="space-y-4">
-              <div>
+                <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">Role Name *</label>
-                {/* 👇 THIS IS THE DROPDOWN FIX 👇 */}
-                <select
-                  value={form.role_name}
-                  onChange={(e) => handleRoleChange(e.target.value)}
-                  disabled={!!editingRole} // Usually you can't change the base role name once created
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100"
+                                <select
+                  value={ROLE_OPTIONS.some((o) => o.value === form.role_name) ? form.role_name : 'CUSTOM'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'CUSTOM') {
+                      setForm((prev) => ({ ...prev, role_name: '', code: '' }));
+                    } else {
+                      const config = ROLE_OPTIONS.find((r) => r.value === val);
+                      setForm((prev) => ({
+                        ...prev,
+                        role_name: val,
+                        code: config ? config.defaultCode : prev.code,
+                      }));
+                    }
+                  }}
+                  disabled={!!editingRole}
+                  className="w-full mb-2 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
                 >
                   {ROLE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
                   ))}
+                  <option value="CUSTOM">➕ Create Custom Role...</option>
                 </select>
-                {!!editingRole && <p className="text-[10px] text-gray-400 mt-1">Role name cannot be changed after creation.</p>}
+
+                {(!ROLE_OPTIONS.some(o => o.value === form.role_name) || form.role_name === '') && (
+                  <input
+                    type="text"
+                    value={form.role_name}
+                    onChange={(e) => setForm({ 
+                      ...form, 
+                      role_name: e.target.value.toUpperCase(), 
+                      code: e.target.value.toLowerCase().replace(/\s+/g, '_') 
+                    })}
+                    disabled={!!editingRole}
+                    placeholder="Type custom role name"
+                    className="w-full rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+                  />
+                )}
               </div>
 
               <div>

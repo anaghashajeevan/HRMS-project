@@ -387,7 +387,7 @@ export default function App() {
             path="/employees"
             element={
               <ProtectedRoute
-                requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}
+                requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER']}
               >
                 <EmployeeList />
               </ProtectedRoute>
@@ -446,7 +446,7 @@ export default function App() {
           <Route
             path="/settings/departments"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN','HOD']}>
                 <DepartmentsPage />
               </ProtectedRoute>
             }
@@ -511,7 +511,7 @@ export default function App() {
             path="/lifecycle-requests"
             element={
               <ProtectedRoute
-                requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}
+                requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','HOD']}
               >
                 <LifecycleRequestsPage />
               </ProtectedRoute>
@@ -541,7 +541,7 @@ export default function App() {
             path="/approvals"
             element={
               <ProtectedRoute
-                requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}
+                requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}
               >
                 <MyApprovalsPage />
               </ProtectedRoute>
@@ -550,7 +550,7 @@ export default function App() {
                     <Route
             path="/settings/rating-scale"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN','HR_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN','HR_ADMIN','HOD']}>
                 <RatingScalePage />
               </ProtectedRoute>
             }
@@ -566,7 +566,7 @@ export default function App() {
           <Route
             path="/settings/departmental-kras"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN','HOD']}>
                 <DepartmentalKRAsPage />
               </ProtectedRoute>
             }
@@ -622,7 +622,7 @@ export default function App() {
 <Route
   path="/my-performance"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}>
       <AnnualPerformancePlanPage />
     </ProtectedRoute>
   }
@@ -632,7 +632,7 @@ export default function App() {
 <Route
   path="/performance/annual-plans/:planId"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER']}>
       <AnnualPerformancePlanPage />
     </ProtectedRoute>
   }
@@ -640,7 +640,7 @@ export default function App() {
         <Route
   path="/peer-reviews"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}>
       <MyPeerReviewsPage />
     </ProtectedRoute>
   }
@@ -648,7 +648,7 @@ export default function App() {
 <Route
   path="/performance/annual-plans"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER']}>
       <AnnualPlansDirectoryPage />
     </ProtectedRoute>
   }
@@ -693,7 +693,7 @@ export default function App() {
 <Route
   path="/reimbursements/smart-upload"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}>
       <ReimbursementSmartUploadPage />
     </ProtectedRoute>
   }
@@ -701,7 +701,7 @@ export default function App() {
 <Route
   path="/reimbursements/smart-upload/:uploadId"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}>
       <ReimbursementUploadStatusPage />
     </ProtectedRoute>
   }
@@ -709,7 +709,7 @@ export default function App() {
 <Route
   path="/reimbursements/profile"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER']}>
       <ReimbursementProfilePage />
     </ProtectedRoute>
   }
@@ -717,7 +717,7 @@ export default function App() {
 <Route
   path="/reimbursements/my-claims"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}>
       <ReimbursementMyClaimsPage />
     </ProtectedRoute>
   }
@@ -777,7 +777,7 @@ export default function App() {
   path="/attendance"
   element={
     <ProtectedRoute
-      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER']}
     >
       <AttendanceLayout />
     </ProtectedRoute>
@@ -797,7 +797,7 @@ export default function App() {
 <Route
   path="/leave/balances"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN','REPORTING_MANAGER']}>
       <LeaveBalancesPage />
     </ProtectedRoute>
   }
@@ -813,7 +813,7 @@ export default function App() {
 <Route
   path="/leave"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}>
       <MyLeavePage />
     </ProtectedRoute>
   }
@@ -821,7 +821,7 @@ export default function App() {
 <Route
   path="/leave/apply"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}>
       <ApplyLeavePage />
     </ProtectedRoute>
   }
@@ -829,7 +829,7 @@ export default function App() {
 <Route
   path="/leave/approvals"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER','HOD']}>
       <PendingApprovalsPage />
     </ProtectedRoute>
   }
@@ -837,7 +837,7 @@ export default function App() {
 <Route
   path="/leave/team-calendar"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER']}>
       <TeamCalendarPage />
     </ProtectedRoute>
   }
@@ -845,7 +845,7 @@ export default function App() {
 <Route
   path="/leave/my-calendar"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}>
       <MyLeaveCalendarPage />
     </ProtectedRoute>
   }
@@ -866,7 +866,7 @@ export default function App() {
 <Route
   path="/policies/library"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}>
       <PolicyLibraryPage />
     </ProtectedRoute>
   }
@@ -874,7 +874,7 @@ export default function App() {
 <Route
   path="/policies/my-acknowledgments"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}>
       <MyAcknowledgmentsPage />
     </ProtectedRoute>
   }
@@ -892,7 +892,7 @@ export default function App() {
 <Route
   path="/policies/pending-approvals"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER','HOD']}>
       <PolicyPendingApprovalsPage />
     </ProtectedRoute>
   }
@@ -913,7 +913,7 @@ export default function App() {
   path="/calendar"
   element={
     <ProtectedRoute
-      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}
     >
       <CalendarViewPage />
     </ProtectedRoute>
@@ -933,7 +933,7 @@ export default function App() {
   path="/calendar/pending-approvals"
   element={
     <ProtectedRoute
-      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER','HOD']}
     >
       <CalendarPendingApprovalsPage />
     </ProtectedRoute>
@@ -956,7 +956,7 @@ export default function App() {
   path="/my-attendance"
   element={
     <ProtectedRoute
-      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}
     >
       <MyAttendancePage />
     </ProtectedRoute>
@@ -966,7 +966,7 @@ export default function App() {
   path="/team-attendance"
   element={
     <ProtectedRoute
-      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER']}
     >
       <TeamAttendancePage />
     </ProtectedRoute>
@@ -975,7 +975,7 @@ export default function App() {
 <Route
   path="/team-attendance/:employeeId"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER']}>
       <EmployeeAttendanceDetailPage />
     </ProtectedRoute>
   }
@@ -1010,7 +1010,7 @@ export default function App() {
 <Route
   path="/leave/compoff-logs"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}>
       <CompOffLogsPage />
     </ProtectedRoute>
   }
@@ -1022,7 +1022,7 @@ export default function App() {
   path="/assets/my-assets"
   element={
     <ProtectedRoute
-      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE']}
+      requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}
     >
       <MyAssetsPage />
     </ProtectedRoute>
@@ -1033,7 +1033,7 @@ export default function App() {
 <Route
   path="/assets/dashboard"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN','REPORTING_MANAGER']}>
       <AssetDashboardPage />
     </ProtectedRoute>
   }
@@ -1073,7 +1073,7 @@ export default function App() {
 <Route
   path="/assets"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN','REPORTING_MANAGER']}>
       <AssetListPage />
     </ProtectedRoute>
   }
@@ -1083,7 +1083,7 @@ export default function App() {
 <Route
   path="/assets/:id"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER']}>
       <AssetDetailPage />
     </ProtectedRoute>
   }

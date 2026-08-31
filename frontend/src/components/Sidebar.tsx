@@ -964,25 +964,25 @@ const mainNav: NavEntry[] = [
     label: 'Dashboard',
     icon: LayoutDashboard,
     to: '/dashboard',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
   },
   {
     label: 'Employees',
     icon: Users,
     to: '/employees',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER','HOD'],
   },
   {
     label: 'My Approvals',
     icon: CheckSquare,
     to: '/approvals',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER','HOD'],
   },
   {
     label: 'Lifecycle Requests',
     icon: Workflow,
     to: '/lifecycle-requests',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','HOD'],
   },
 
   // ==================== KRA & KPIs (Dropdown) ====================
@@ -1026,13 +1026,13 @@ const mainNav: NavEntry[] = [
 {
   label: 'Performance',
   icon: Target,
-  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
   children: [
     {
       label: 'My Annual Plan',                     // ← Employee's own plan
       icon: ClipboardCheck,
       to: '/my-performance',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
     },
     {
       label: 'All Annual Plans',                   // ← HR/Manager Directory
@@ -1044,7 +1044,7 @@ const mainNav: NavEntry[] = [
       label: 'Peer Reviews',
       icon: Users2,
       to: '/peer-reviews',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
     },
   ],
 },
@@ -1052,19 +1052,19 @@ const mainNav: NavEntry[] = [
   {
     label: 'Reimbursements',
     icon: Receipt,
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER'],
     children: [
       {
         label: 'Smart Upload',
         icon: Upload,
         to: '/reimbursements/smart-upload',
-        allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+        allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
       },
       {
         label: 'My Claims',
         icon: FileSpreadsheet,
         to: '/reimbursements/my-claims',
-        allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+        allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
       },
       {
         label: 'Dashboard',
@@ -1109,13 +1109,13 @@ const mainNav: NavEntry[] = [
 {
   label: 'Asset Management',
   icon: Package,
-  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
   children: [
     {
       label: 'My Assets',
       icon: Package,
       to: '/assets/my-assets',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
     },
     {
       label: 'Dashboard',
@@ -1141,19 +1141,19 @@ const mainNav: NavEntry[] = [
   {
   label: 'Attendance',
   icon: Calendar,
-  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','HOD'],
   children: [
     {
       label: 'My Attendance',
       icon: ClipboardCheck,
       to: '/my-attendance',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
     },
     {
       label: 'Team Attendance',
       icon: Users,
       to: '/team-attendance',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER'],
     },
      {
       label: 'All Employees',
@@ -1165,50 +1165,50 @@ const mainNav: NavEntry[] = [
       label: 'Live Dashboard',
       icon: Activity,
       to: '/attendance/live',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','EMPLOYEE'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','EMPLOYEE','REPORTING_MANAGER','HOD'],
     },
     {
       label: 'HR Dashboard',
       icon: LayoutDashboard,
       to: '/attendance',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER','EMPLOYEE'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER','EMPLOYEE','REPORTING_MANAGER'],
     },
   ],
 },
   {
   label: 'Leave',
   icon: ClipboardList,
-  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
   children: [
     {
       label: 'My Leave',
       icon: Calendar,
       to: '/leave',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
     },
     {
       label: 'My Calendar',
       icon: Calendar,
       to: '/leave/my-calendar',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
     },
     {
       label: 'Apply Leave',
       icon: Plus,
       to: '/leave/apply',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
     },
     {
       label: 'Pending Approvals',
       icon: CheckSquare,
       to: '/leave/approvals',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER','HOD'],
     },
     {
       label: 'Team Calendar',
       icon: Users,
       to: '/leave/team-calendar',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER'],
     },
     {
       label: 'Leave Types',
@@ -1220,44 +1220,44 @@ const mainNav: NavEntry[] = [
       label: 'Leave Balances',
       icon: TrendingUp,
       to: '/leave/balances',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','REPORTING_MANAGER'],
     },
     {
   label: 'Comp-Off Logs',
   icon: Gift,   
   to: '/leave/compoff-logs',
-  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
 },
   ],
 },
 {
   label: 'Policies',
   icon: Shield,
-  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
   children: [
     {
       label: 'Policy Library',
       icon: BookOpen,
       to: '/policies/library',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
     },
     {
       label: 'My Acknowledgments',
       icon: CheckSquare,
       to: '/policies/my-acknowledgments',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
     },
     {
       label: 'Pending Approvals',
       icon: Clock,
       to: '/policies/pending-approvals',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER','HOD'],
     },
     {
       label: 'Manage Policies',
       icon: Settings,
       to: '/policies',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN',],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
     },
   ],
 },
@@ -1265,13 +1265,13 @@ const mainNav: NavEntry[] = [
 {
   label: 'Holiday Calendar',
   icon: Calendar,
-  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
   children: [
     {
       label: 'View Calendar',
       icon: Calendar,
       to: '/calendar',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD'],
     },
     {
       label: 'Manage Calendars',
@@ -1283,7 +1283,7 @@ const mainNav: NavEntry[] = [
       label: 'Pending Approvals',
       icon: Clock,
       to: '/calendar/pending-approvals',
-      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER','HOD'],
     },
   ],
 },
@@ -1312,7 +1312,7 @@ const settingsNav: NavItem[] = [
     label: 'Company Structures',
     icon: Building2,
     to: '/settings/departments',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','HOD'],
   },
   {
     label: 'Job Positions',
@@ -1350,17 +1350,18 @@ const settingsNav: NavItem[] = [
   to: '/settings/common-kras',
   allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
 },
+
 {
   label: 'Departmental KRAs',
   icon: Building2,
   to: '/settings/departmental-kras',
-  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  allowedRoles: ['HOD'],
 },
   {
     label: 'Rating Scale',
     icon: Award,
     to: '/settings/rating-scale',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','HOD'],
   },
   {
     label: 'Org Priorities',

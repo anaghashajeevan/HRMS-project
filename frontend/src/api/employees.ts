@@ -79,10 +79,12 @@ export const employeesApi = {
     const { data } = await api.patch<EmployeeDetail>('/employees/me/', payload);
     return data;
   },
-  getManagers: async (search?: string): Promise<ManagerOption[]> => {
-    const { data } = await api.get<ManagerOption[]>('/employees/managers/', {
-      params: search ? { search } : {},
-    });
+  getManagers: async (search?: string, role?: string): Promise<ManagerOption[]> => {
+    const params: any = {};
+    if (search) params.search = search;
+    if (role) params.role = role; // 👈 Add role parameter
+
+    const { data } = await api.get<ManagerOption[]>('/employees/managers/', { params });
     return data;
   },
   getCareerHistory: async (employeeId: string): Promise<CareerHistoryResponse> => {

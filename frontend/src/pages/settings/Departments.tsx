@@ -222,6 +222,7 @@ import { structuresApi } from '../../api/masterData';
 import type { CompanyStructure } from '../../types/masterData';
 import toast from 'react-hot-toast';
 import { AxiosError } from 'axios';
+import { employeesApi, type ManagerOption } from '../../api/employees';
 
 const TYPE_OPTIONS = [
   { value: 'COMPANY', label: 'Company', level: 1, icon: Crown, color: '#1E40AF' },
@@ -261,11 +262,13 @@ export default function DepartmentsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<CompanyStructure | null>(null);
   const [viewMode, setViewMode] = useState<'tree' | 'table'>('tree');
+  const [hods, setHods] = useState<ManagerOption[]>([]);
   const [form, setForm] = useState({
     name: '',
     type: 'DEPARTMENT',
     parent: '',
     cost_center_code: '',
+    department_head: '', 
     is_active: true,
   });
 
@@ -283,6 +286,8 @@ export default function DepartmentsPage() {
 
   useEffect(() => {
     fetchItems();
+    // 👇 Fetch employees with HOD role for dropdown
+    employeesApi.getManagers('', 'HOD').then(setHods).catch(() => {});
   }, []);
 
   const openAdd = (parentId?: string, suggestedType?: string) => {
@@ -292,6 +297,7 @@ export default function DepartmentsPage() {
       type: suggestedType || 'DEPARTMENT',
       parent: parentId || '',
       cost_center_code: '',
+      department_head: '',  // 👈 ADD
       is_active: true,
     });
     setModalOpen(true);
@@ -304,6 +310,7 @@ export default function DepartmentsPage() {
       type: item.type,
       parent: item.parent || '',
       cost_center_code: item.cost_center_code || '',
+      department_head: (item as any).department_head || '',  // 👈 ADD
       is_active: item.is_active,
     });
     setModalOpen(true);
@@ -319,6 +326,7 @@ export default function DepartmentsPage() {
         ...form,
         parent: form.parent || null,
         cost_center_code: form.cost_center_code || null,
+        department_head: form.department_head || null,  
       };
       if (editing) {
         await structuresApi.update(editing.id, payload as never);
@@ -605,6 +613,31 @@ export default function DepartmentsPage() {
                     placeholder="e.g., CC-IT-001"
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-500"
                   />
+                </div>
+              )}
+                          
+              {form.type === 'DEPARTMENT' && (
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    Department Head (HOD)
+                  </label>
+                  <select
+                    value={form.department_head}
+                    onChange={(e) =>
+                      setForm({ ...form, department_head: e.target.value })
+                    }
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-500"
+                  >
+                    <option value="">— No HOD Assigned —</option>
+                    {hods.map((hod) => (
+                      <option key={hod.id} value={hod.id}>
+                        {hod.full_name} ({hod.employee_id})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Only employees with the <strong>HOD</strong> role appear here.
+                  </p>
                 </div>
               )}
               <label className="flex items-center gap-2 text-sm">

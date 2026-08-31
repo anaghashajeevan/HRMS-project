@@ -28,7 +28,7 @@ from .serializers import (
     RoleSerializer,
     CustomTokenRefreshSerializer,
 )
-from .permissions import IsHRAdmin, IsSystemAdmin, ReadHROnlyWriteSystemAdmin
+from .permissions import IsHRAdmin, IsHRAdminOrDepartmentHead, IsHRAdminOrReadOnly, IsSystemAdmin, ReadHROnlyWriteSystemAdmin
 
 
 # ==============================================================================
@@ -499,15 +499,15 @@ class EmployeeViewSet(ModelViewSet):
             'position', 'position__department', 'reporting_manager', 'structure_location','department', 'location', 'cost_center',
         )
 
+        # 1. System / HR admins see all employees
         if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
             return qs
 
-        if user.has_role('MANAGER') and hasattr(user, 'employee'):
-            return qs.filter(
-                models.Q(reporting_manager_id=user.employee.id)
-                | models.Q(id=user.employee.id)
-            )
+        # 2. Managers & Reporting Managers see only their direct reportees (✅ Added REPORTING_MANAGER check)
+        if (user.has_role('MANAGER') or user.has_role('REPORTING_MANAGER')) and hasattr(user, 'employee'):
+            return qs.filter(reporting_manager_id=user.employee.id)
 
+        # 3. Standard Employees see only themselves
         if hasattr(user, 'employee'):
             return qs.filter(id=user.employee.id)
 
@@ -574,11 +574,18 @@ class EmployeeViewSet(ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='managers')
     def managers(self, request):
-        """Get list of employees who can be managers (for dropdowns)."""
-        qs = Employee.objects.filter(
-            is_deleted=False,
-            status__in=['ACTIVE', 'PROBATION']
-        ).order_by('first_name')
+        """Get list of employees filtered by role (e.g., REPORTING_MANAGER or HOD)."""
+        qs = Employee.objects.filter(is_deleted=False, status__in=['ACTIVE', 'PROBATION'])
+
+        # 👇 Check if frontend is asking for a specific role (e.g., ?role=REPORTING_MANAGER)
+        role_filter = request.query_params.get('role', '').strip().upper()
+        
+        if role_filter == 'REPORTING_MANAGER':
+            qs = qs.filter(user_account__roles__role_name__icontains='REPORTING_MANAGER')
+        elif role_filter == 'HOD':
+            qs = qs.filter(user_account__roles__role_name__icontains='HOD')
+            
+        qs = qs.distinct().order_by('first_name')
 
         # Optional search
         search = request.query_params.get('search', '').strip()
@@ -938,7 +945,7 @@ class CompanyStructureViewSet(ModelViewSet):
     """Full CRUD for departments, locations, cost centers."""
     queryset = CompanyStructure.objects.all().order_by('type', 'name')
     serializer_class = CompanyStructureSerializer
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated,  IsHRAdminOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['type', 'is_active', 'parent']
     search_fields = ['name', 'cost_center_code']
@@ -1664,15 +1671,13 @@ class DepartmentalKRAViewSet(ModelViewSet):
         'department', 'linked_priority', 'owner'
     ).prefetch_related('kpis')
     serializer_class = DepartmentalKRASerializer
+    permission_classes = [IsAuthenticated, IsHRAdminOrDepartmentHead]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['department', 'financial_year', 'is_active', 'linked_priority']
     search_fields = ['name', 'description']
     ordering_fields = ['name', 'financial_year', 'weight_in_dept']
 
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            return [IsAuthenticated()]
-        return [IsAuthenticated(), IsHRAdmin()]
+    
 
 
 class DepartmentalKPIViewSet(ModelViewSet):
@@ -1967,7 +1972,7 @@ class DepartmentalKRAMasterViewSet(ModelViewSet):
         .order_by('department__name', 'name')
     )
     serializer_class = DepartmentalKRAMasterSerializer
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated, IsHRAdminOrDepartmentHead]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['financial_year', 'department', 'is_active']
     search_fields = ['name', 'description', 'department__name']
@@ -3221,6 +3226,188 @@ class DepartmentalKRAMasterViewSet(ModelViewSet):
 # DASHBOARD STATS (Updated for New Monthly KRA Architecture)
 # ==============================================================================
 
+# class DashboardStatsView(APIView):
+#     """
+#     Real-time dashboard statistics.
+#     Returns different data based on user role.
+#     """
+#     permission_classes = [IsAuthenticated]
+
+#     def get(self, request):
+#         from django.utils import timezone as dj_tz
+#         from django.db.models import Count, Avg, Q
+#         from datetime import timedelta
+#         from .models import (
+#             Employee, LifecycleChangeRequest, Notification,
+#             EmployeeDocument, KRALibrary, CommonKRAMaster, DepartmentalKRAMaster,
+#             AnnualPerformancePlan, MonthlyPerformancePlan, MonthlyKRA
+#         )
+        
+#         user = request.user
+#         today = dj_tz.now().date()
+#         month_start = today.replace(day=1)
+#         current_month_num = today.month
+#         current_year_num = today.year
+        
+#         # Calculate Financial Year string (e.g., 2026-27)
+#         if current_month_num >= 4:
+#             start_year = current_year_num
+#         else:
+#             start_year = current_year_num - 1
+#         current_fy = f"{start_year}-{str(start_year + 1)[-2:]}"
+        
+#         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+#         is_manager = user.has_role('MANAGER')
+        
+#         stats = {
+#             'user_role': 'HR' if is_hr else ('MANAGER' if is_manager else 'EMPLOYEE'),
+#         }
+        
+#         # ==========================================================================
+#         # HR / SYSTEM ADMIN DASHBOARD
+#         # ==========================================================================
+#         if is_hr:
+#             employees = Employee.objects.filter(is_deleted=False)
+#             total_emp = employees.count()
+            
+#             new_hires_this_month = employees.filter(date_of_joining__gte=month_start, date_of_joining__lte=today).count()
+#             last_month_start = (month_start - timedelta(days=1)).replace(day=1)
+#             new_hires_last_month = employees.filter(date_of_joining__gte=last_month_start, date_of_joining__lt=month_start).count()
+            
+#             # Current Month's Performance Stats
+#             monthly_plans = MonthlyPerformancePlan.objects.filter(
+#                 annual_plan__financial_year=current_fy,
+#                 month=current_month_num,
+#                 year=current_year_num,
+#             )
+            
+#             perf_stats = {
+#                 'cycle_name': f'FY {current_fy} — {today.strftime("%B")}',
+#                 'total_scorecards': monthly_plans.count(),
+#                 'in_progress': monthly_plans.filter(status__in=['OPEN', 'DRAFT']).count(),
+#                 'awaiting_finalization': monthly_plans.filter(status__in=['EMPLOYEE_SUBMITTED', 'UNDER_REVIEW']).count(),
+#                 'finalized': monthly_plans.filter(status__in=['APPROVED', 'CLOSED']).count(),
+#                 'avg_score': round(monthly_plans.filter(monthly_score__isnull=False).aggregate(avg=Avg('monthly_score'))['avg'] or 0, 2),
+#             }
+            
+#             # 💡 Count ALL Active Master KRAs (Common + Departmental + Library)
+#             total_master_kras = (
+#                 CommonKRAMaster.objects.filter(financial_year=current_fy, is_active=True).count() +
+#                 DepartmentalKRAMaster.objects.filter(financial_year=current_fy, is_active=True).count() +
+#                 KRALibrary.objects.filter(is_active=True).count()
+#             )
+            
+#             stats.update({
+#                 'total_employees': total_emp,
+#                 'active_employees': employees.filter(status='ACTIVE').count(),
+#                 'probation_employees': employees.filter(status='PROBATION').count(),
+#                 'new_hires_month': new_hires_this_month,
+#                 'new_hires_change': new_hires_this_month - new_hires_last_month,
+#                 'attrition_count': employees.filter(date_of_exit__gte=month_start, date_of_exit__lte=today).count(),
+#                 'attrition_rate': round((employees.filter(date_of_exit__isnull=False).count() / total_emp * 100), 2) if total_emp else 0,
+#                 'performance': perf_stats,
+#                 'pending_lifecycle_requests': LifecycleChangeRequest.objects.filter(status='IN_PROGRESS').count(),
+#                 'document_expiry_alerts': EmployeeDocument.objects.filter(expiry_date__gte=today, expiry_date__lte=today + timedelta(days=90)).count(),
+#                 'active_kra_count': total_master_kras, # 👈 REAL MASTER KRA COUNT
+#                 'recent_hires': list(employees.order_by('-date_of_joining').values('id', 'employee_id', 'first_name', 'last_name', 'date_of_joining')[:5]),
+#                 'department_distribution': list(employees.values('structure_location__name').annotate(count=Count('id')).order_by('-count')[:6]),
+#             })
+        
+#         # ==========================================================================
+#         # MANAGER DASHBOARD
+#         # ==========================================================================
+#         elif is_manager and hasattr(user, 'employee'):
+#             manager_emp = user.employee
+#             team = Employee.objects.filter(reporting_manager=manager_emp, is_deleted=False)
+            
+#             team_monthly_plans = MonthlyPerformancePlan.objects.filter(
+#                 annual_plan__employee__reporting_manager=manager_emp,
+#                 annual_plan__financial_year=current_fy,
+#                 month=current_month_num,
+#                 year=current_year_num,
+#             )
+            
+#             team_perf = {
+#                 'cycle_name': f'FY {current_fy} — {today.strftime("%B")}',
+#                 'total': team_monthly_plans.count(),
+#                 'pending_review': team_monthly_plans.filter(status__in=['EMPLOYEE_SUBMITTED', 'UNDER_REVIEW']).count(),
+#                 'approved': team_monthly_plans.filter(status__in=['APPROVED', 'CLOSED']).count(),
+#                 'avg_score': round(team_monthly_plans.filter(monthly_score__isnull=False).aggregate(avg=Avg('monthly_score'))['avg'] or 0, 2),
+#             }
+            
+#             stats.update({
+#                 'team_size': team.count(),
+#                 'team_active': team.filter(status='ACTIVE').count(),
+#                 'team_probation': team.filter(status='PROBATION').count(),
+#                 'team_performance': team_perf,
+#                 'pending_approvals': LifecycleChangeRequest.objects.filter(status='IN_PROGRESS', approval_actions__assigned_to=manager_emp, approval_actions__status='PENDING').distinct().count(),
+#                 'team_roster': list(team.values('id', 'employee_id', 'first_name', 'last_name', 'position__title', 'status')[:10]),
+#             })
+        
+#         # ==========================================================================
+#         # EMPLOYEE PERSONAL DASHBOARD STATS
+#         # ==========================================================================
+#         if hasattr(user, 'employee'):
+#             emp = user.employee
+            
+#             # Fetch active plan for current month
+#             current_m_plan = MonthlyPerformancePlan.objects.filter(
+#                 annual_plan__employee=emp,
+#                 annual_plan__financial_year=current_fy,
+#                 month=current_month_num,
+#                 year=current_year_num,
+#             ).select_related('annual_plan').prefetch_related('kras').first()
+            
+#             # Fallback to any active monthly plan if current month hasn't started yet
+#             if not current_m_plan:
+#                 current_m_plan = MonthlyPerformancePlan.objects.filter(
+#                     annual_plan__employee=emp,
+#                     annual_plan__financial_year=current_fy,
+#                 ).select_related('annual_plan').prefetch_related('kras').first()
+
+#             my_scorecard = None
+#             if current_m_plan:
+#                 kras_count = current_m_plan.kras.count()
+#                 total_weight = float(sum(k.weight for k in current_m_plan.kras.all()))
+
+#                 my_scorecard = {
+#                     'id': str(current_m_plan.annual_plan.id),
+#                     'cycle_name': f'FY {current_fy} — {today.strftime("%B")}',
+#                     'status': current_m_plan.status,
+#                     'status_display': current_m_plan.get_status_display(),
+#                     'total_weight': round(total_weight, 1),
+#                     'kra_count': kras_count, # 👈 REAL DYNAMIC KRA COUNT (No longer 0!)
+#                     'final_score': float(current_m_plan.monthly_score) if current_m_plan.monthly_score is not None else None,
+#                     'final_rating': None,
+#                 }
+            
+#             recent_notifs = Notification.objects.filter(recipient=emp).order_by('-created_at')[:5]
+            
+#             stats.update({
+#                 'my_scorecard': my_scorecard,
+#                 'my_unread_notifications': Notification.objects.filter(recipient=emp, is_read=False).count(),
+#                 'my_past_scorecards': MonthlyPerformancePlan.objects.filter(annual_plan__employee=emp, status='CLOSED').count(),
+#                 'my_documents': EmployeeDocument.objects.filter(employee=emp).count(),
+#                 'my_employee_id': emp.employee_id,
+#                 'my_position': emp.position.title if emp.position else None,
+#                 'my_department': emp.structure_location.name if emp.structure_location else None,
+#                 'my_manager': emp.reporting_manager.full_name if emp.reporting_manager else None,
+#                 'recent_notifications': [
+#                     {
+#                         'id': str(n.id),
+#                         'title': n.title,
+#                         'message': n.message[:100],
+#                         'type': n.notification_type,
+#                         'is_read': n.is_read,
+#                         'link': n.link,
+#                         'created_at': n.created_at.isoformat()
+#                     }
+#                     for n in recent_notifs
+#                 ]
+#             })
+        
+#         return Response(stats)
+
 class DashboardStatsView(APIView):
     """
     Real-time dashboard statistics.
@@ -3252,7 +3439,16 @@ class DashboardStatsView(APIView):
         current_fy = f"{start_year}-{str(start_year + 1)[-2:]}"
         
         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
-        is_manager = user.has_role('MANAGER')
+
+        # ✅ FIXED: Recognize REPORTING_MANAGER, HOD, and DEPARTMENT_HEAD
+        is_manager = (
+            user.has_role('MANAGER') or 
+            user.has_role('REPORTING_MANAGER') or 
+            user.has_role('HOD') or 
+            user.has_role('DEPARTMENT_HEAD') or
+            user.has_role('DEPT_HEAD') or
+            (hasattr(user, 'employee') and Employee.objects.filter(reporting_manager=user.employee, is_deleted=False).exists())
+        )
         
         stats = {
             'user_role': 'HR' if is_hr else ('MANAGER' if is_manager else 'EMPLOYEE'),
@@ -3285,7 +3481,6 @@ class DashboardStatsView(APIView):
                 'avg_score': round(monthly_plans.filter(monthly_score__isnull=False).aggregate(avg=Avg('monthly_score'))['avg'] or 0, 2),
             }
             
-            # 💡 Count ALL Active Master KRAs (Common + Departmental + Library)
             total_master_kras = (
                 CommonKRAMaster.objects.filter(financial_year=current_fy, is_active=True).count() +
                 DepartmentalKRAMaster.objects.filter(financial_year=current_fy, is_active=True).count() +
@@ -3303,20 +3498,29 @@ class DashboardStatsView(APIView):
                 'performance': perf_stats,
                 'pending_lifecycle_requests': LifecycleChangeRequest.objects.filter(status='IN_PROGRESS').count(),
                 'document_expiry_alerts': EmployeeDocument.objects.filter(expiry_date__gte=today, expiry_date__lte=today + timedelta(days=90)).count(),
-                'active_kra_count': total_master_kras, # 👈 REAL MASTER KRA COUNT
+                'active_kra_count': total_master_kras,
                 'recent_hires': list(employees.order_by('-date_of_joining').values('id', 'employee_id', 'first_name', 'last_name', 'date_of_joining')[:5]),
                 'department_distribution': list(employees.values('structure_location__name').annotate(count=Count('id')).order_by('-count')[:6]),
             })
         
         # ==========================================================================
-        # MANAGER DASHBOARD
+        # MANAGER / REPORTING MANAGER / HOD DASHBOARD
         # ==========================================================================
         elif is_manager and hasattr(user, 'employee'):
             manager_emp = user.employee
-            team = Employee.objects.filter(reporting_manager=manager_emp, is_deleted=False)
+            
+            # ✅ Supports direct reportees as well as HOD headed departments
+            headed_depts = manager_emp.headed_departments.all()
+            if headed_depts.exists():
+                team = Employee.objects.filter(
+                    Q(reporting_manager=manager_emp) | Q(department__in=headed_depts),
+                    is_deleted=False
+                ).exclude(id=manager_emp.id).distinct()
+            else:
+                team = Employee.objects.filter(reporting_manager=manager_emp, is_deleted=False)
             
             team_monthly_plans = MonthlyPerformancePlan.objects.filter(
-                annual_plan__employee__reporting_manager=manager_emp,
+                annual_plan__employee__in=team,
                 annual_plan__financial_year=current_fy,
                 month=current_month_num,
                 year=current_year_num,
@@ -3340,12 +3544,11 @@ class DashboardStatsView(APIView):
             })
         
         # ==========================================================================
-        # EMPLOYEE PERSONAL DASHBOARD STATS
+        # EMPLOYEE PERSONAL DASHBOARD STATS (shown for everyone)
         # ==========================================================================
         if hasattr(user, 'employee'):
             emp = user.employee
             
-            # Fetch active plan for current month
             current_m_plan = MonthlyPerformancePlan.objects.filter(
                 annual_plan__employee=emp,
                 annual_plan__financial_year=current_fy,
@@ -3353,7 +3556,6 @@ class DashboardStatsView(APIView):
                 year=current_year_num,
             ).select_related('annual_plan').prefetch_related('kras').first()
             
-            # Fallback to any active monthly plan if current month hasn't started yet
             if not current_m_plan:
                 current_m_plan = MonthlyPerformancePlan.objects.filter(
                     annual_plan__employee=emp,
@@ -3371,7 +3573,7 @@ class DashboardStatsView(APIView):
                     'status': current_m_plan.status,
                     'status_display': current_m_plan.get_status_display(),
                     'total_weight': round(total_weight, 1),
-                    'kra_count': kras_count, # 👈 REAL DYNAMIC KRA COUNT (No longer 0!)
+                    'kra_count': kras_count,
                     'final_score': float(current_m_plan.monthly_score) if current_m_plan.monthly_score is not None else None,
                     'final_rating': None,
                 }
@@ -3402,7 +3604,6 @@ class DashboardStatsView(APIView):
             })
         
         return Response(stats)
-
 from .services.reports_service import PerformanceReportsService
 
 class PerformanceReportsView(APIView):

@@ -104,4 +104,47 @@ class ReadHROnlyWriteSystemAdmin(BasePermission):
             )
 
         # WRITE methods — only System Admin
-        return user.has_role('SYSTEM_ADMIN')    
+        return user.has_role('SYSTEM_ADMIN')  
+
+
+from rest_framework.permissions import BasePermission, SAFE_METHODS
+
+class IsHRAdminOrReadOnly(BasePermission):
+    """
+    Allows ANY authenticated user to read (GET, HEAD, OPTIONS).
+    Only SYSTEM_ADMIN and HR_ADMIN can create, edit, or delete (POST, PUT, PATCH, DELETE).
+    """
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return False
+        if request.method in SAFE_METHODS:
+            return True
+        return request.user.has_role('SYSTEM_ADMIN') or request.user.has_role('HR_ADMIN')
+
+
+class IsHRAdminOrDepartmentHead(BasePermission):
+    """
+    Allows:
+    - SYSTEM_ADMIN & HR_ADMIN: Full access (create, edit, delete any department).
+    - DEPARTMENT_HEAD / HOD / MANAGER: Can read, create, and update departmental KRAs.
+    """
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+
+        # Admins have full access
+        if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
+            return True
+
+        # Department Heads & Managers are allowed
+        if (
+            user.has_role('DEPARTMENT_HEAD')
+            or user.has_role('HOD')
+            or user.has_role('MANAGER')
+            or user.has_role('REPORTING_MANAGER')
+        ):
+            return True
+
+        # Regular employees can only read (GET)
+        return request.method in SAFE_METHODS      

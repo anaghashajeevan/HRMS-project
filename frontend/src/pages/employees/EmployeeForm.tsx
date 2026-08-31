@@ -628,7 +628,7 @@ export default function EmployeeForm() {
         const [structData, posData, mgrData, roleData] = await Promise.all([
           structuresApi.list(),
           positionsApi.list(),
-          employeesApi.getManagers(),
+          employeesApi.getManagers('', 'REPORTING_MANAGER'),
           rolesApi.list(),
         ]);
 
