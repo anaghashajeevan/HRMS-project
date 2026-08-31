@@ -268,7 +268,7 @@ services:
       - hrms_network
 
  # ---------- WhatsApp Gateway ----------
- 
+
   whatsapp_gateway:
     build:
       context: ./whatsapp_gateway
@@ -316,3 +316,4 @@ volumes:
   backend_static:
   backend_media:
   backend_logs:
+  whatsapp_sessions:
