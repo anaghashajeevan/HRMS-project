@@ -267,26 +267,7 @@ services:
     networks:
       - hrms_network
 
- # ---------- WhatsApp Gateway ----------
 
-  whatsapp_gateway:
-    build:
-      context: ./whatsapp_gateway
-      dockerfile: Dockerfile
-    container_name: hrms_whatsapp_gateway
-    shm_size: '1gb'
-    restart: unless-stopped
-    ports:
-      - "3005:3005"
-    expose:
-      - "3005"
-    volumes:
-      - whatsapp_sessions:/app/sessions
-    environment:
-      - NODE_ENV=production
-      - PORT=3005
-    networks:
-      - hrms_network
 
   # ---------- React Frontend (Nginx) ----------
   frontend:
@@ -316,4 +297,3 @@ volumes:
   backend_static:
   backend_media:
   backend_logs:
-  whatsapp_sessions:
