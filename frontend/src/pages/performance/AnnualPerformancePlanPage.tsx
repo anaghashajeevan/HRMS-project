@@ -4695,7 +4695,10 @@ export default function AnnualPerformancePlanPage() {
 
   const isHR = user?.role_codes.includes('HR_ADMIN') || user?.role_codes.includes('SYSTEM_ADMIN');
   const isManager = user?.role_codes.includes('MANAGER') || isHR;
-
+  const isOwner = useMemo(() => {
+    if (!annualPlan || !user?.employee?.id) return false;
+    return annualPlan.employee === user.employee.id;
+  }, [annualPlan, user?.employee?.id]);
   // KRA Handlers
   const handleSaveKRA = async () => {
     if (!currentMonthlyPlan || !newKraName.trim()) return;
@@ -5005,7 +5008,7 @@ export default function AnnualPerformancePlanPage() {
                       </p>
                     </div>
 
-                    {isManager && !currentMonthlyPlan.is_locked && (
+                   {(isManager || isOwner) && !currentMonthlyPlan.is_locked && (
                       <button
                         onClick={() => {
                           setEditingKra(null);
@@ -5095,7 +5098,7 @@ export default function AnnualPerformancePlanPage() {
                                             </span>
 
                                             {/* Edit / Delete KRA Buttons */}
-                                            {isManager && !currentMonthlyPlan.is_locked && (
+                                           {(isManager || isOwner) && !currentMonthlyPlan.is_locked && (
                                               <div className="flex items-center gap-1 border-l border-gray-200 pl-2">
                                                 <button
                                                   onClick={() => {
@@ -5132,7 +5135,7 @@ export default function AnnualPerformancePlanPage() {
                                               </button>
                                             )}
 
-                                            {isManager && !currentMonthlyPlan.is_locked && (
+                                            {(isManager || isOwner) && !currentMonthlyPlan.is_locked && (
                                               <button
                                                 onClick={() => {
                                                   setAddingKpiKraId(kra.id);
@@ -5174,7 +5177,7 @@ export default function AnnualPerformancePlanPage() {
                                                 </span>
 
                                                 {/* Edit / Delete KPI Buttons */}
-                                                {isManager && !currentMonthlyPlan.is_locked && (
+                                               {(isManager || isOwner) && !currentMonthlyPlan.is_locked && (
                                                   <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 border-l pl-2 border-gray-200">
                                                     <button
                                                       onClick={() => {
@@ -5626,7 +5629,7 @@ export default function AnnualPerformancePlanPage() {
           )}
 
           {/* MODALS */}
-          {showAddKraModal && (
+          {/* {showAddKraModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
               <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-4">
                 <h3 className="text-lg font-bold text-gray-900">
@@ -5652,6 +5655,73 @@ export default function AnnualPerformancePlanPage() {
                   onChange={(e) => setNewKraWeight(e.target.value)}
                   className="w-full rounded-xl border border-gray-300 p-3 text-sm"
                 />
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={newKraPeerRequired}
+                    onChange={(e) => setNewKraPeerRequired(e.target.checked)}
+                    className="h-4 w-4 rounded text-pink-600"
+                  />
+                  Require Peer Rating for this KRA
+                </label>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={() => { setShowAddKraModal(false); setEditingKra(null); }} className="px-4 py-2 border rounded-xl text-sm">Cancel</button>
+                  <button onClick={handleSaveKRA} disabled={submittingKra} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold">
+                    {submittingKra ? 'Saving...' : editingKra ? 'Update KRA' : 'Add KRA'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )} */}
+
+          {showAddKraModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+              <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-4">
+                <h3 className="text-lg font-bold text-gray-900">
+                  {editingKra ? 'Edit Individual KRA' : 'Add Individual KRA'}
+                </h3>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="kra-name" className="block text-sm font-medium text-gray-700">
+                    KRA Name
+                  </label>
+                  <input
+                    id="kra-name"
+                    type="text"
+                    placeholder="KRA Name"
+                    value={newKraName}
+                    onChange={(e) => setNewKraName(e.target.value)}
+                    className="w-full rounded-xl border border-gray-300 p-3 text-sm"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="kra-desc" className="block text-sm font-medium text-gray-700">
+                    Description
+                  </label>
+                  <textarea
+                    id="kra-desc"
+                    placeholder="Description"
+                    value={newKraDesc}
+                    onChange={(e) => setNewKraDesc(e.target.value)}
+                    className="w-full rounded-xl border border-gray-300 p-3 text-sm"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="kra-weight" className="block text-sm font-medium text-gray-700">
+                    Weight %
+                  </label>
+                  <input
+                    id="kra-weight"
+                    type="number"
+                    placeholder="Weight %"
+                    value={newKraWeight}
+                    onChange={(e) => setNewKraWeight(e.target.value)}
+                    className="w-full rounded-xl border border-gray-300 p-3 text-sm"
+                  />
+                </div>
+
                 <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
                   <input
                     type="checkbox"

@@ -19,6 +19,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     # Authentication
+    CompanyLogoViewSet,
     EmployeeDocumentViewSet,
     GetLMSTokenView,
     LoginView,
@@ -108,6 +109,8 @@ router.register(r'dept-kras', DepartmentalKRAMasterViewSet, basename='dept-kras'
 router.register(r'common-kpis', CommonKPIMasterViewSet, basename='common-kpis')
 router.register(r'monthly-kpi-evidences', MonthlyKPIEvidenceViewSet, basename='monthly-kpi-evidences')
 router.register(r'carry-forwards', CarryForwardRecordViewSet, basename='carry-forwards')
+
+router.register(r'logos', CompanyLogoViewSet, basename='logos')
 # ==============================================================================
 # URL PATTERNS
 # ==============================================================================

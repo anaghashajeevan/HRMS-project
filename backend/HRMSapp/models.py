@@ -2115,3 +2115,28 @@ class CarryForwardRecord(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         db_table = 'perf_carry_forward_records'
+
+
+
+class CompanyLogo(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=150)
+    logo = models.ImageField(upload_to='company_logos/')
+    tagline = models.CharField(max_length=255, blank=True, default='')
+    company_url = models.URLField(blank=True, default='')
+    is_active = models.BooleanField(default=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'company_logos'
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        # If setting this as active, deactivate all others
+        if self.is_active:
+            CompanyLogo.objects.filter(is_active=True).exclude(pk=self.pk).update(is_active=False)
+        super().save(*args, **kwargs)

@@ -68,12 +68,49 @@ def mark_confirm_failure(upload_id: int, message: str) -> SmartReimbursementUplo
     return SmartReimbursementUpload.objects.get(pk=upload_id)
 
 
+# def detect_mime_type(file_obj) -> str:
+#     position = file_obj.tell() if hasattr(file_obj, "tell") else 0
+#     header = file_obj.read(8192)
+#     if hasattr(file_obj, "seek"):
+#         file_obj.seek(position)
+#     return magic.from_buffer(header, mime=True)
+
+
+# def _validated_bill(name: str, content: bytes) -> dict:
+#     max_size = settings.QUICK_CLAIM_MAX_FILE_SIZE
+#     if not content:
+#         raise ValidationError(f"{name}: empty files are not allowed.")
+#     if len(content) > max_size:
+#         raise ValidationError(f"{name}: file exceeds the {max_size // (1024 * 1024)} MB limit.")
+#     mime_type = magic.from_buffer(content[:8192], mime=True)
+#     if mime_type not in ALLOWED_BILL_MIME_TYPES:
+#         raise ValidationError(f"{name}: detected MIME type '{mime_type}' is not allowed.")
+#     return {
+#         "name": PurePosixPath(name.replace("\\", "/")).name,
+#         "content": ContentFile(content),
+#         "mime_type": mime_type,
+#         "size": len(content),
+#         "sha256": hashlib.sha256(content).hexdigest(),
+#         "status": SmartUploadedBillFile.Status.QUEUED,
+#         "error_message": "",
+#     }
+
+# FIND these functions in quick_claim_services.py and REPLACE them:
+
 def detect_mime_type(file_obj) -> str:
     position = file_obj.tell() if hasattr(file_obj, "tell") else 0
     header = file_obj.read(8192)
     if hasattr(file_obj, "seek"):
         file_obj.seek(position)
-    return magic.from_buffer(header, mime=True)
+    
+    # ✅ Safe Windows Fallback
+    try:
+        return magic.from_buffer(header, mime=True)
+    except Exception:
+        import mimetypes
+        name = getattr(file_obj, 'name', '')
+        mime_type, _ = mimetypes.guess_type(name)
+        return mime_type or "application/octet-stream"
 
 
 def _validated_bill(name: str, content: bytes) -> dict:
@@ -82,7 +119,23 @@ def _validated_bill(name: str, content: bytes) -> dict:
         raise ValidationError(f"{name}: empty files are not allowed.")
     if len(content) > max_size:
         raise ValidationError(f"{name}: file exceeds the {max_size // (1024 * 1024)} MB limit.")
-    mime_type = magic.from_buffer(content[:8192], mime=True)
+    
+    # ✅ Safe Windows Fallback
+    try:
+        mime_type = magic.from_buffer(content[:8192], mime=True)
+    except Exception:
+        import mimetypes
+        mime_type, _ = mimetypes.guess_type(name)
+        if not mime_type:
+            if name.lower().endswith(('.jpg', '.jpeg')):
+                mime_type = 'image/jpeg'
+            elif name.lower().endswith('.png'):
+                mime_type = 'image/png'
+            elif name.lower().endswith('.pdf'):
+                mime_type = 'application/pdf'
+            else:
+                mime_type = 'application/octet-stream'
+
     if mime_type not in ALLOWED_BILL_MIME_TYPES:
         raise ValidationError(f"{name}: detected MIME type '{mime_type}' is not allowed.")
     return {
@@ -94,7 +147,6 @@ def _validated_bill(name: str, content: bytes) -> dict:
         "status": SmartUploadedBillFile.Status.QUEUED,
         "error_message": "",
     }
-
 
 def _failed_bill(name: str, content: bytes, message: str) -> dict:
     mime_type = magic.from_buffer(content[:8192], mime=True) if content else "application/octet-stream"

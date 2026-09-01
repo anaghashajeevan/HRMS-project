@@ -172,9 +172,136 @@
 
 
 
+# # ==============================================================================
+# # HRMS Full Stack — Docker Compose
+# # Services: Redis, Django Backend, React Frontend, Celery Worker & Beat
+# # ==============================================================================
+
+# services:
+
+#   # ---------- Redis (Celery Broker + Cache) ----------
+#   redis:
+#     image: redis:7-alpine
+#     container_name: hrms_redis
+#     restart: unless-stopped
+#     command: redis-server --appendonly yes
+#     volumes:
+#       - redis_data:/data
+#     # ports:
+#     #   - "${REDIS_PORT:-6381}:6379"
+#     healthcheck:
+#       test: ["CMD", "redis-cli", "ping"]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 5
+#     networks:
+#       - hrms_network
+
+#   # ---------- Django Backend ----------
+#   backend:
+#     build:
+#       context: ./backend
+#       dockerfile: Dockerfile
+#     container_name: hrms_backend
+#     restart: unless-stopped
+#     env_file:
+#       - .env
+#     environment:
+#       - RUNNING_IN_DOCKER=True
+#     extra_hosts:
+#       - "host.docker.internal:host-gateway"
+#     depends_on:
+#       redis:
+#         condition: service_healthy
+#     volumes:
+#       - backend_static:/app/staticfiles
+#       - backend_media:/app/media
+#       - backend_logs:/app/logs
+#     networks:
+#       - hrms_network
+
+#   # ---------- Celery Worker (Background Tasks) ----------
+#   celery_worker:
+#     build:
+#       context: ./backend
+#       dockerfile: Dockerfile
+#     container_name: hrms_celery_worker
+#     restart: unless-stopped
+#     env_file:
+#       - .env
+#     environment:
+#       - RUNNING_IN_DOCKER=True
+#     extra_hosts:
+#       - "host.docker.internal:host-gateway"
+#     depends_on:
+#       redis:
+#         condition: service_healthy
+#       backend:
+#         condition: service_started
+#     command: celery -A HRMS worker --loglevel=info --concurrency=4
+#     volumes:
+#       - backend_logs:/app/logs
+#       - backend_media:/app/media
+#     networks:
+#       - hrms_network
+
+#   # ---------- Celery Beat (Periodic Task Scheduler) ----------
+#   celery_beat:
+#     build:
+#       context: ./backend
+#       dockerfile: Dockerfile
+#     container_name: hrms_celery_beat
+#     restart: unless-stopped
+#     env_file:
+#       - .env
+#     environment:
+#       - RUNNING_IN_DOCKER=True
+#     extra_hosts:
+#       - "host.docker.internal:host-gateway"
+#     depends_on:
+#       redis:
+#         condition: service_healthy
+#       backend:
+#         condition: service_started
+#     command: celery -A HRMS beat --loglevel=info
+#     networks:
+#       - hrms_network
+
+
+
+#   # ---------- React Frontend (Nginx) ----------
+#   frontend:
+#     build:
+#       context: ./frontend
+#       dockerfile: Dockerfile
+#     container_name: hrms_frontend
+#     restart: unless-stopped
+#     depends_on:
+#       - backend
+#     ports:
+#       - "9001:80"
+#     networks:
+#       - hrms_network
+
+
+# # ==============================================================================
+# # Networks & Volumes
+# # ==============================================================================
+
+# networks:
+#   hrms_network:
+#     driver: bridge
+
+# volumes:
+#   redis_data:
+#   backend_static:
+#   backend_media:
+#   backend_logs:
+
+
 # ==============================================================================
 # HRMS Full Stack — Docker Compose
-# Services: Redis, Django Backend, React Frontend, Celery Worker & Beat
+# Services: Redis, Django Backend, React Frontend, Celery Worker & Beat, WhatsApp Gateway
 # ==============================================================================
 
 services:
@@ -197,6 +324,29 @@ services:
     networks:
       - hrms_network
 
+  # ---------- WhatsApp Gateway (Baileys Session Server) ----------
+  whatsapp_gateway:
+    build:
+      context: ./whatsapp-gateway
+      dockerfile: Dockerfile
+    container_name: hrms_whatsapp_gateway
+    restart: unless-stopped
+    ports:
+      - "3005:3005"
+    environment:
+      - PORT=3005
+      - NODE_ENV=production
+    volumes:
+      # Persistent volume to keep WhatsApp authentication tokens and sessions
+      - whatsapp_auth:/app/auth_info
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3005/api/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - hrms_network
+
   # ---------- Django Backend ----------
   backend:
     build:
@@ -208,11 +358,14 @@ services:
       - .env
     environment:
       - RUNNING_IN_DOCKER=True
+      - WHATSAPP_GATEWAY_URL=http://whatsapp_gateway:3005
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
+      whatsapp_gateway:
+        condition: service_started
     volumes:
       - backend_static:/app/staticfiles
       - backend_media:/app/media
@@ -231,12 +384,15 @@ services:
       - .env
     environment:
       - RUNNING_IN_DOCKER=True
+      - WHATSAPP_GATEWAY_URL=http://whatsapp_gateway:3005
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
       backend:
+        condition: service_started
+      whatsapp_gateway:
         condition: service_started
     command: celery -A HRMS worker --loglevel=info --concurrency=4
     volumes:
@@ -256,6 +412,8 @@ services:
       - .env
     environment:
       - RUNNING_IN_DOCKER=True
+      - WHATSAPP_GATEWAY_URL=http://whatsapp_gateway:3005
+      - REDIS_URL=redis://redis:6379/0
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -267,8 +425,6 @@ services:
     networks:
       - hrms_network
 
-
-
   # ---------- React Frontend (Nginx) ----------
   frontend:
     build:
@@ -278,6 +434,7 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+      - whatsapp_gateway
     ports:
       - "9001:80"
     networks:
@@ -294,6 +451,7 @@ networks:
 
 volumes:
   redis_data:
+  whatsapp_auth:  
   backend_static:
   backend_media:
   backend_logs:

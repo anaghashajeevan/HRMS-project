@@ -506,6 +506,7 @@ import Topbar from '../components/Topbar';
 import { useAuth } from '../context/AuthContext';
 import { dashboardApi } from '../api/performance';
 import toast from 'react-hot-toast';
+import Footer from '../components/Footer';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -974,8 +975,10 @@ export default function Dashboard() {
             </>
           )}
         </main>
+        <Footer />
       </div>
     </div>
+    
   );
 }
 

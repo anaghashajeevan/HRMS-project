@@ -346,6 +346,8 @@ import AnnualPerformancePlanPage from './pages/performance/AnnualPerformancePlan
 import AnnualPlansDirectoryPage from './pages/performance/AnnualPlansDirectoryPage';
 import CommonKRAMasterPage from './pages/settings/CommonKRAMasterPage';
 
+import CompanyLogoPage from './pages/settings/CompanyLogoPage';
+
 
 export default function App() {
   return (
@@ -571,7 +573,14 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-         
+         <Route
+  path="/settings/company-logo"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+      <CompanyLogoPage />
+    </ProtectedRoute>
+  }
+/>
                   {/* <Route
           path="/settings/performance-cycles"
           element={

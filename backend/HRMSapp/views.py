@@ -13,10 +13,11 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework.decorators import action
 from decimal import Decimal
-from .models import  CommonKPIMaster, UserAccount, UserActiveSession, AuthAuditLog, Role,EmployeeAuditLog
+from .models import  CommonKPIMaster, CompanyLogo, UserAccount, UserActiveSession, AuthAuditLog, Role,EmployeeAuditLog
 # from .models import KRAPeerNomination, PeerRating
 from .serializers import (
     CommonKPIMasterSerializer,
+    CompanyLogoSerializer,
     EmployeeCreateUpdateSerializer,
     LoginSerializer,
     LogoutSerializer,
@@ -1900,6 +1901,64 @@ class MonthlyKPIEvidenceViewSet(ModelViewSet):
         serializer.save(uploaded_by=employee, file_size_kb=size_kb)
 
 
+# class MonthlyKRAViewSet(ModelViewSet):
+#     queryset = MonthlyKRA.objects.all()
+#     serializer_class = MonthlyKRASerializer
+#     permission_classes = [IsAuthenticated]
+#     filter_backends = [DjangoFilterBackend]
+#     filterset_fields = ['monthly_plan', 'kra_type']
+
+# class MonthlyKPIViewSet(ModelViewSet):
+#     queryset = MonthlyKPI.objects.all()
+#     serializer_class = MonthlyKPISerializer
+#     permission_classes = [IsAuthenticated]
+
+#     def perform_create(self, serializer):
+#         kpi = serializer.save()
+#         AnnualPlanService.recalculate_monthly_score(kpi.monthly_kra.monthly_plan)
+
+#     def perform_update(self, serializer):
+#         kpi = serializer.save()
+#         AnnualPlanService.recalculate_monthly_score(kpi.monthly_kra.monthly_plan)
+
+#     def perform_destroy(self, instance):
+#         monthly_plan = instance.monthly_kra.monthly_plan
+#         instance.delete()
+#         AnnualPlanService.recalculate_monthly_score(monthly_plan)
+
+from rest_framework.exceptions import PermissionDenied
+
+# --- NEW HELPER: Security check for KRA/KPI configuration ---
+def can_modify_monthly_plan(user, monthly_plan):
+    # 1. HR/System Admin can modify anything
+    if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
+        return True
+        
+    if not hasattr(user, 'employee'):
+        return False
+        
+    employee = monthly_plan.annual_plan.employee
+    
+    # 2. Owner (Employee) can configure their own plan
+    if employee.id == user.employee.id:
+        return True
+        
+    # 3. Manager/HOD can configure their team's plans
+    if (user.has_role('MANAGER') or user.has_role('REPORTING_MANAGER') or user.has_role('HOD') or user.has_role('DEPARTMENT_HEAD')):
+        # Check direct reports
+        if employee.reporting_manager_id == user.employee.id:
+            return True
+        # Check department head
+        headed_depts = user.employee.headed_departments.values_list('id', flat=True)
+        if employee.department_id in headed_depts or employee.structure_location_id in headed_depts:
+            return True
+            
+    return False
+
+
+# ==============================================================================
+# MONTHLY KRA VIEWSET
+# ==============================================================================
 class MonthlyKRAViewSet(ModelViewSet):
     queryset = MonthlyKRA.objects.all()
     serializer_class = MonthlyKRASerializer
@@ -1907,24 +1966,72 @@ class MonthlyKRAViewSet(ModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['monthly_plan', 'kra_type']
 
+    def perform_create(self, serializer):
+        monthly_plan = serializer.validated_data['monthly_plan']
+        
+        # Security Check
+        if not can_modify_monthly_plan(self.request.user, monthly_plan):
+            raise PermissionDenied("You do not have permission to add KRAs to this plan.")
+            
+        serializer.save()
+
+    def perform_update(self, serializer):
+        monthly_plan = serializer.instance.monthly_plan
+        
+        if not can_modify_monthly_plan(self.request.user, monthly_plan):
+            raise PermissionDenied("You do not have permission to edit this KRA.")
+            
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if not can_modify_monthly_plan(self.request.user, instance.monthly_plan):
+            raise PermissionDenied("You do not have permission to delete this KRA.")
+            
+        instance.delete()
+
+
+# ==============================================================================
+# MONTHLY KPI VIEWSET
+# ==============================================================================
 class MonthlyKPIViewSet(ModelViewSet):
     queryset = MonthlyKPI.objects.all()
     serializer_class = MonthlyKPISerializer
     permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
+        monthly_kra = serializer.validated_data['monthly_kra']
+        
+        # Security Check
+        if not can_modify_monthly_plan(self.request.user, monthly_kra.monthly_plan):
+            raise PermissionDenied("You do not have permission to add KPIs to this plan.")
+            
         kpi = serializer.save()
+        
+        # Safe recalculate
+        from .services.annual_plan_service import AnnualPlanService
         AnnualPlanService.recalculate_monthly_score(kpi.monthly_kra.monthly_plan)
 
     def perform_update(self, serializer):
+        monthly_kra = serializer.instance.monthly_kra
+        
+        if not can_modify_monthly_plan(self.request.user, monthly_kra.monthly_plan):
+            raise PermissionDenied("You do not have permission to edit this KPI.")
+            
         kpi = serializer.save()
+        
+        from .services.annual_plan_service import AnnualPlanService
         AnnualPlanService.recalculate_monthly_score(kpi.monthly_kra.monthly_plan)
 
     def perform_destroy(self, instance):
         monthly_plan = instance.monthly_kra.monthly_plan
+        
+        if not can_modify_monthly_plan(self.request.user, monthly_plan):
+            raise PermissionDenied("You do not have permission to delete this KPI.")
+            
         instance.delete()
+        
+        from .services.annual_plan_service import AnnualPlanService
         AnnualPlanService.recalculate_monthly_score(monthly_plan)
-
 
 # ==============================================================================
 # COMMON + DEPARTMENTAL KRA MASTER VIEWSETS
@@ -4183,3 +4290,37 @@ class CarryForwardRecordViewSet(ModelViewSet):
         cf.save()
 
         return Response({'status': 'SUCCESS', 'message': 'Carry forward request rejected.'})
+
+
+
+class CompanyLogoViewSet(ModelViewSet):
+    queryset = CompanyLogo.objects.all().order_by('-uploaded_at')
+    serializer_class = CompanyLogoSerializer
+    http_method_names = ['get', 'post', 'put', 'patch', 'delete']
+
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve', 'active']:
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
+    @action(detail=False, methods=['get'])
+    def active(self, request):
+        logo = CompanyLogo.objects.filter(is_active=True).first()
+        if not logo:
+            return Response({
+                'logo_url': None,
+                'name': 'HRMS',
+                'tagline': 'Enterprise Human Resource Management System',
+                'company_url': '#',
+            })
+        serializer = self.get_serializer(logo, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='set-active')
+    def set_active(self, request, pk=None):
+        """POST /api/v1/logos/{id}/set-active/ — Switches active logo"""
+        logo = self.get_object()
+        logo.is_active = True
+        logo.save()
+        serializer = self.get_serializer(logo, context={'request': request})
+        return Response(serializer.data)

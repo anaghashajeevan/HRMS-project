@@ -9,7 +9,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from django.conf import settings
 
-from .models import UserAccount, Employee, Role, UserActiveSession, AuthAuditLog
+from .models import CompanyLogo, UserAccount, Employee, Role, UserActiveSession, AuthAuditLog
 
 
 # ------------------------------------------------------------------------------
@@ -2251,3 +2251,21 @@ class ForgotPasswordResetSerializer(serializers.Serializer):
                 'confirm_password': 'Passwords do not match.'
             })
         return attrs
+
+
+
+
+class CompanyLogoSerializer(serializers.ModelSerializer):
+    logo_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CompanyLogo
+        fields = ['id', 'name', 'logo', 'logo_url', 'tagline', 
+                  'company_url', 'is_active', 'uploaded_at']
+        read_only_fields = ['id', 'uploaded_at']
+
+    def get_logo_url(self, obj):
+        request = self.context.get('request')
+        if obj.logo:
+            return request.build_absolute_uri(obj.logo.url) if request else obj.logo.url
+        return None
