@@ -1731,7 +1731,7 @@ import {
   Package,Image
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useCompanyLogo } from '../api/useCompanyLogo';
+import { useCompanyLogo } from '../hooks/useCompanyLogo';
 // ==============================================================================
 // TYPES
 // ==============================================================================

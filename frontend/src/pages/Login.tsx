@@ -1087,7 +1087,7 @@ import { Eye, EyeOff, Lock, Mail, AlertCircle, Loader2, ShieldCheck, Users, Buil
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import { AxiosError } from 'axios';
-import { useCompanyLogo } from '../api/useCompanyLogo';
+import { useCompanyLogo } from '../hooks/useCompanyLogo';
 
 export default function Login() {
   const [email, setEmail] = useState('');

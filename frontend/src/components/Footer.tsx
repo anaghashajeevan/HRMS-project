@@ -1,4 +1,4 @@
-import { useCompanyLogo } from '../api/useCompanyLogo';
+import { useCompanyLogo } from '../hooks/useCompanyLogo';
 
 export default function Footer() {
   const { logo } = useCompanyLogo();
