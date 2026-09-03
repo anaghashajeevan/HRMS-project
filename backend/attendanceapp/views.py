@@ -784,6 +784,18 @@ from .services.personal_attendance_service import (
 )
 from HRMSapp.models import Employee  # Ensure this import is available here
 
+# ==============================================================================
+# EMPLOYEE MY-ATTENDANCE VIEWS
+# ==============================================================================
+
+from datetime import date, datetime
+from HRMSapp.models import Employee
+from .services.personal_attendance_service import (
+    get_monthly_attendance_for_employee,
+    get_day_detail_for_employee,
+    get_team_monthly_summary,
+)
+
 
 class MyAttendanceMonthView(APIView):
     """Employee views their own attendance for a specific month."""
@@ -792,9 +804,9 @@ class MyAttendanceMonthView(APIView):
     def get(self, request):
         user = request.user
         
-        # Explicitly fetch a fresh, concrete Employee object from the database
+        # Fixed lookup: using user_account instead of user_id
         try:
-            employee = Employee.objects.get(user_id=user.id, is_deleted=False)
+            employee = Employee.objects.get(user_account=user, is_deleted=False)
         except Employee.DoesNotExist:
             return Response({'detail': 'No employee record linked'}, status=400)
 
@@ -816,9 +828,9 @@ class MyAttendanceDayView(APIView):
     def get(self, request):
         user = request.user
         
-        # Explicitly fetch a fresh, concrete Employee object from the database
+        # Fixed lookup: using user_account instead of user_id
         try:
-            employee = Employee.objects.get(user_id=user.id, is_deleted=False)
+            employee = Employee.objects.get(user_account=user, is_deleted=False)
         except Employee.DoesNotExist:
             return Response({'detail': 'No employee record linked'}, status=400)
 
@@ -846,9 +858,9 @@ class TeamAttendanceMonthView(APIView):
     def get(self, request):
         user = request.user
         
-        # Explicitly fetch a fresh, concrete Employee object from the database
+        # Fixed lookup: using user_account instead of user_id
         try:
-            employee = Employee.objects.get(user_id=user.id, is_deleted=False)
+            employee = Employee.objects.get(user_account=user, is_deleted=False)
         except Employee.DoesNotExist:
             return Response({'detail': 'No employee record linked'}, status=400)
 
@@ -889,9 +901,9 @@ class EmployeeAttendanceMonthView(APIView):
     def get(self, request, employee_id):
         user = request.user
         
-        # Explicitly fetch a fresh, concrete Employee object from the database
+        # Fixed lookup: using user_account instead of user_id
         try:
-            employee = Employee.objects.get(user_id=user.id, is_deleted=False)
+            employee = Employee.objects.get(user_account=user, is_deleted=False)
         except Employee.DoesNotExist:
             return Response({'detail': 'No employee record linked'}, status=400)
 
