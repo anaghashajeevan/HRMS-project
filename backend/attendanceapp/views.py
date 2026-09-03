@@ -635,8 +635,145 @@ class DownloadMonthlyReportView(APIView):
         )
 
 
+# # ==============================================================================
+# # EMPLOYEE MY-ATTENDANCE VIEWS
+# # ==============================================================================
+
+# from datetime import date, datetime
+# from .services.personal_attendance_service import (
+#     get_monthly_attendance_for_employee,
+#     get_day_detail_for_employee,
+#     get_team_monthly_summary,
+# )
+
+
+# class MyAttendanceMonthView(APIView):
+#     """Employee views their own attendance for a specific month."""
+#     permission_classes = [IsAuthenticated]
+
+#     def get(self, request):
+#         user = request.user
+#         if not hasattr(user, 'employee'):
+#             return Response({'detail': 'No employee record linked'}, status=400)
+
+#         year = int(request.query_params.get('year', timezone.now().year))
+#         month = int(request.query_params.get('month', timezone.now().month))
+
+#         try:
+#             data = get_monthly_attendance_for_employee(user.employee, year, month)
+#             return Response(data)
+#         except Exception as exc:
+#             logger.exception("Failed to load monthly attendance")
+#             return Response({'detail': str(exc)}, status=500)
+
+
+# class MyAttendanceDayView(APIView):
+#     """Employee views detailed punch info for a single day."""
+#     permission_classes = [IsAuthenticated]
+
+#     def get(self, request):
+#         user = request.user
+#         if not hasattr(user, 'employee'):
+#             return Response({'detail': 'No employee record linked'}, status=400)
+
+#         date_str = request.query_params.get('date')
+#         if not date_str:
+#             return Response({'detail': 'date query param required (YYYY-MM-DD)'}, status=400)
+
+#         try:
+#             day = datetime.strptime(date_str, '%Y-%m-%d').date()
+#         except ValueError:
+#             return Response({'detail': 'Invalid date format. Use YYYY-MM-DD'}, status=400)
+
+#         try:
+#             data = get_day_detail_for_employee(user.employee, day)
+#             return Response(data)
+#         except Exception as exc:
+#             logger.exception("Failed to load day detail")
+#             return Response({'detail': str(exc)}, status=500)
+
+
+# class TeamAttendanceMonthView(APIView):
+#     """Manager views their team's monthly attendance summary."""
+#     permission_classes = [IsAuthenticated]
+
+#     def get(self, request):
+#         user = request.user
+#         if not hasattr(user, 'employee'):
+#             return Response({'detail': 'No employee record linked'}, status=400)
+
+#         # Allow managers + HR admins
+#         if not (
+#             user.has_role('MANAGER') or user.has_role('HR_ADMIN')
+#             or user.has_role('SYSTEM_ADMIN')
+#         ):
+#             return Response({'detail': 'Only managers or HR can access team view'}, status=403)
+
+#         year = int(request.query_params.get('year', timezone.now().year))
+#         month = int(request.query_params.get('month', timezone.now().month))
+
+#         # HR can specify any manager, others see own team
+#         target_manager = user.employee
+#         manager_id = request.query_params.get('manager_id')
+#         if manager_id and (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
+#             from HRMSapp.models import Employee
+#             try:
+#                 target_manager = Employee.objects.get(id=manager_id, is_deleted=False)
+#             except Employee.DoesNotExist:
+#                 return Response({'detail': 'Manager not found'}, status=404)
+
+#         try:
+#             data = get_team_monthly_summary(target_manager, year, month)
+#             return Response(data)
+#         except Exception as exc:
+#             logger.exception("Failed to load team attendance")
+#             return Response({'detail': str(exc)}, status=500)
+
+
+# class EmployeeAttendanceMonthView(APIView):
+#     """
+#     Manager/HR views a specific employee's monthly attendance.
+#     Manager can only view their own reportees.
+#     """
+#     permission_classes = [IsAuthenticated]
+
+#     def get(self, request, employee_id):
+#         user = request.user
+#         if not hasattr(user, 'employee'):
+#             return Response({'detail': 'No employee record linked'}, status=400)
+
+#         from HRMSapp.models import Employee
+#         try:
+#             target_employee = Employee.objects.get(id=employee_id, is_deleted=False)
+#         except Employee.DoesNotExist:
+#             return Response({'detail': 'Employee not found'}, status=404)
+
+#         # Permission: HR sees all, manager only sees their team, employee only sees self
+#         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+#         is_manager_of = (
+#             user.has_role('MANAGER') and
+#             target_employee.reporting_manager_id == user.employee.id
+#         )
+#         is_self = user.employee.id == target_employee.id
+
+#         if not (is_hr or is_manager_of or is_self):
+#             return Response(
+#                 {'detail': 'You do not have permission to view this employee'},
+#                 status=403,
+#             )
+
+#         year = int(request.query_params.get('year', timezone.now().year))
+#         month = int(request.query_params.get('month', timezone.now().month))
+
+#         try:
+#             data = get_monthly_attendance_for_employee(target_employee, year, month)
+#             return Response(data)
+#         except Exception as exc:
+#             logger.exception("Failed to load employee attendance")
+#             return Response({'detail': str(exc)}, status=500)
+
 # ==============================================================================
-# EMPLOYEE MY-ATTENDANCE VIEWS
+# EMPLOYEE MY-ATTENDANCE VIEWS (FIXED & IMPROVED)
 # ==============================================================================
 
 from datetime import date, datetime
@@ -645,6 +782,7 @@ from .services.personal_attendance_service import (
     get_day_detail_for_employee,
     get_team_monthly_summary,
 )
+from HRMSapp.models import Employee  # Ensure this import is available here
 
 
 class MyAttendanceMonthView(APIView):
@@ -653,14 +791,18 @@ class MyAttendanceMonthView(APIView):
 
     def get(self, request):
         user = request.user
-        if not hasattr(user, 'employee'):
+        
+        # Explicitly fetch a fresh, concrete Employee object from the database
+        try:
+            employee = Employee.objects.get(user_id=user.id, is_deleted=False)
+        except Employee.DoesNotExist:
             return Response({'detail': 'No employee record linked'}, status=400)
 
         year = int(request.query_params.get('year', timezone.now().year))
         month = int(request.query_params.get('month', timezone.now().month))
 
         try:
-            data = get_monthly_attendance_for_employee(user.employee, year, month)
+            data = get_monthly_attendance_for_employee(employee, year, month)
             return Response(data)
         except Exception as exc:
             logger.exception("Failed to load monthly attendance")
@@ -673,7 +815,11 @@ class MyAttendanceDayView(APIView):
 
     def get(self, request):
         user = request.user
-        if not hasattr(user, 'employee'):
+        
+        # Explicitly fetch a fresh, concrete Employee object from the database
+        try:
+            employee = Employee.objects.get(user_id=user.id, is_deleted=False)
+        except Employee.DoesNotExist:
             return Response({'detail': 'No employee record linked'}, status=400)
 
         date_str = request.query_params.get('date')
@@ -686,7 +832,7 @@ class MyAttendanceDayView(APIView):
             return Response({'detail': 'Invalid date format. Use YYYY-MM-DD'}, status=400)
 
         try:
-            data = get_day_detail_for_employee(user.employee, day)
+            data = get_day_detail_for_employee(employee, day)
             return Response(data)
         except Exception as exc:
             logger.exception("Failed to load day detail")
@@ -699,7 +845,11 @@ class TeamAttendanceMonthView(APIView):
 
     def get(self, request):
         user = request.user
-        if not hasattr(user, 'employee'):
+        
+        # Explicitly fetch a fresh, concrete Employee object from the database
+        try:
+            employee = Employee.objects.get(user_id=user.id, is_deleted=False)
+        except Employee.DoesNotExist:
             return Response({'detail': 'No employee record linked'}, status=400)
 
         # Allow managers + HR admins
@@ -713,10 +863,9 @@ class TeamAttendanceMonthView(APIView):
         month = int(request.query_params.get('month', timezone.now().month))
 
         # HR can specify any manager, others see own team
-        target_manager = user.employee
+        target_manager = employee
         manager_id = request.query_params.get('manager_id')
         if manager_id and (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
-            from HRMSapp.models import Employee
             try:
                 target_manager = Employee.objects.get(id=manager_id, is_deleted=False)
             except Employee.DoesNotExist:
@@ -739,10 +888,13 @@ class EmployeeAttendanceMonthView(APIView):
 
     def get(self, request, employee_id):
         user = request.user
-        if not hasattr(user, 'employee'):
+        
+        # Explicitly fetch a fresh, concrete Employee object from the database
+        try:
+            employee = Employee.objects.get(user_id=user.id, is_deleted=False)
+        except Employee.DoesNotExist:
             return Response({'detail': 'No employee record linked'}, status=400)
 
-        from HRMSapp.models import Employee
         try:
             target_employee = Employee.objects.get(id=employee_id, is_deleted=False)
         except Employee.DoesNotExist:
@@ -752,9 +904,9 @@ class EmployeeAttendanceMonthView(APIView):
         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
         is_manager_of = (
             user.has_role('MANAGER') and
-            target_employee.reporting_manager_id == user.employee.id
+            target_employee.reporting_manager_id == employee.id
         )
-        is_self = user.employee.id == target_employee.id
+        is_self = employee.id == target_employee.id
 
         if not (is_hr or is_manager_of or is_self):
             return Response(
@@ -771,8 +923,6 @@ class EmployeeAttendanceMonthView(APIView):
         except Exception as exc:
             logger.exception("Failed to load employee attendance")
             return Response({'detail': str(exc)}, status=500)
-
-
 
 class AllEmployeesAttendanceView(APIView):
     """HR-only view: All employees' monthly attendance."""
