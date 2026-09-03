@@ -455,6 +455,8 @@ class EmployeeListSerializer(serializers.ModelSerializer):
     department_name = serializers.SerializerMethodField()
     manager_name = serializers.SerializerMethodField()
     location_name = serializers.SerializerMethodField()
+    role_names = serializers.SerializerMethodField()
+    role_codes = serializers.SerializerMethodField()
     class Meta:
         model = Employee
         fields = [
@@ -469,7 +471,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             'position_title',
             'department_name','location_name', 
             'manager_name',
-            'date_of_joining',
+            'date_of_joining','role_names','role_codes'
         ]
         read_only_fields = fields
 
@@ -490,7 +492,32 @@ class EmployeeListSerializer(serializers.ModelSerializer):
         if obj.location:
             return obj.location.name
         return None
+    
+    def get_role_names(self, obj):
+        # 1. Check if user_account exists and has roles
+        if hasattr(obj, 'user_account') and obj.user_account:
+            if hasattr(obj.user_account, 'roles'):
+                return list(obj.user_account.roles.values_list('role_name', flat=True))
+            if hasattr(obj.user_account, 'role') and obj.user_account.role:
+                return [obj.user_account.role.role_name]
+        
+        # 2. Check if roles are attached directly to employee
+        if hasattr(obj, 'roles'):
+            return list(obj.roles.values_list('role_name', flat=True))
+            
+        return []
 
+    def get_role_codes(self, obj):
+        if hasattr(obj, 'user_account') and obj.user_account:
+            if hasattr(obj.user_account, 'roles'):
+                return list(obj.user_account.roles.values_list('code', flat=True))
+            if hasattr(obj.user_account, 'role') and obj.user_account.role:
+                return [obj.user_account.role.code]
+
+        if hasattr(obj, 'roles'):
+            return list(obj.roles.values_list('code', flat=True))
+            
+        return []
 # ------------------------------------------------------------------------------
 # DETAIL SERIALIZER (full profile view)
 # ------------------------------------------------------------------------------

@@ -371,6 +371,7 @@ export default function EmployeeList() {
                     <th className="px-4 py-3">Email</th>
                     <th className="px-4 py-3">Position</th>
                     <th className="px-4 py-3">Department</th>
+                    <th className="px-4 py-3">Role</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
@@ -403,6 +404,34 @@ export default function EmployeeList() {
                       <td className="px-4 py-3 text-gray-600">
                         {emp.department_name || '—'}
                       </td>
+                      {/* Role Column Cell */}
+<td className="px-4 py-3 text-gray-600">
+  {emp.role_names && emp.role_names.length > 0 ? (
+    <div className="flex flex-wrap gap-1">
+      {emp.role_names.map((roleName: string) => (
+        <span
+          key={roleName}
+          className="inline-block rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700 ring-1 ring-inset ring-indigo-200"
+        >
+          {roleName}
+        </span>
+      ))}
+    </div>
+  ) : emp.role_codes && emp.role_codes.length > 0 ? (
+    <div className="flex flex-wrap gap-1">
+      {emp.role_codes.map((code: string) => (
+        <span
+          key={code}
+          className="inline-block rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-semibold uppercase text-indigo-700 ring-1 ring-inset ring-indigo-200"
+        >
+          {code.replace('_', ' ')}
+        </span>
+      ))}
+    </div>
+  ) : (
+    <span className="text-gray-400">—</span>
+  )}
+</td>
                       <td className="px-4 py-3">
                         <span
                           className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${

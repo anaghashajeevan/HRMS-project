@@ -20,6 +20,8 @@ export interface EmployeeListItem {
   department_name: string | null;
   manager_name: string | null;
   date_of_joining: string;
+  role_names?: string[];
+  role_codes?: string[];
 }
 
 export interface EmployeeDetail {
