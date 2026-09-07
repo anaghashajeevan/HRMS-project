@@ -15,7 +15,7 @@ LIVE_STATUS_NOT_ARRIVED = "NOT_ARRIVED"
 LIVE_STATUS_IN_OFFICE = "IN_OFFICE"
 LIVE_STATUS_OUTSIDE = "OUTSIDE"
 LIVE_STATUS_COMPLETED_DAY = "COMPLETED_DAY"
-LIVE_DUPLICATE_IGNORE_SECONDS = 15
+LIVE_DUPLICATE_IGNORE_SECONDS = 60
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +117,16 @@ def build_live_presence_map(employee_codes, report_date, _settings_obj, today=No
     return presence_map
 
 
+from datetime import datetime, time as dtime
+from .essl_service import fetch_logs_for_range
+from .attendance_processor import persist_raw_logs
+
 def sync_live_raw_punches(settings_obj, report_date):
-    xml_text = call_essl_api(settings_obj, report_date)
-    _, str_data = extract_str_data_list(xml_text)
-    logs = parse_punch_logs(str_data)
+    try:
+        mode, logs = fetch_logs_for_range(
+            datetime.combine(report_date, dtime.min),
+            datetime.combine(report_date, dtime(23, 59, 59)),
+        )
+    except Exception:
+        raise
     return persist_raw_logs(logs)

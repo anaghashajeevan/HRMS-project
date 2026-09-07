@@ -225,3 +225,31 @@ export const personalAttendanceApi = {
   },
 };
 
+
+import type { EsslDevice, EsslDeviceListResponse, EsslDevicePayload } from '../types/attendance';
+
+export const esslDevicesApi = {
+  list: async (): Promise<EsslDeviceListResponse> => {
+    const { data } = await api.get<EsslDeviceListResponse>(`${BASE}/devices/`);
+    return data;
+  },
+
+  create: async (payload: EsslDevicePayload): Promise<EsslDevice> => {
+    const { data } = await api.post<EsslDevice>(`${BASE}/devices/`, payload);
+    return data;
+  },
+
+  update: async (id: string, payload: Partial<EsslDevicePayload>): Promise<EsslDevice> => {
+    const { data } = await api.patch<EsslDevice>(`${BASE}/devices/${id}/`, payload);
+    return data;
+  },
+
+  remove: async (id: string): Promise<void> => {
+    await api.delete(`${BASE}/devices/${id}/`);
+  },
+
+  test: async (id: string): Promise<{ ok: boolean; message: string; log_count?: number }> => {
+    const { data } = await api.post(`${BASE}/devices/${id}/test/`);
+    return data;
+  },
+};

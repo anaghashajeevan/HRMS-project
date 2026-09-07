@@ -442,3 +442,44 @@ class MonthlyReportLog(models.Model):
         self.status = self.STATUS_FAILED
         self.error_message = error_message[:2000]
         self.save()
+
+
+
+# ==============================================================================
+# ESSL DEVICE (multi-device: Both / Punch In / Punch Out)
+# ==============================================================================
+
+class EsslDevice(models.Model):
+    """
+    Physical biometric device identity.
+    API URL / username / password stay on AutomationSettings (shared).
+    """
+    ROLE_BOTH = "BOTH"
+    ROLE_PUNCH_IN = "PUNCH_IN"
+    ROLE_PUNCH_OUT = "PUNCH_OUT"
+
+    ROLE_CHOICES = [
+        (ROLE_BOTH, "Both (Single device - In + Out)"),
+        (ROLE_PUNCH_IN, "Punch In only"),
+        (ROLE_PUNCH_OUT, "Punch Out only"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=120)
+    serial_number = models.CharField(max_length=120, unique=True)
+    role = models.CharField(max_length=16, choices=ROLE_CHOICES, default=ROLE_BOTH)
+    is_active = models.BooleanField(default=True)
+
+    last_test_at = models.DateTimeField(null=True, blank=True)
+    last_test_ok = models.BooleanField(default=False)
+    last_test_message = models.CharField(max_length=500, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "attendance_essl_devices"
+        ordering = ["role", "name"]
+
+    def __str__(self):
+        return f"{self.name} [{self.role}] {self.serial_number}"

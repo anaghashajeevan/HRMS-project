@@ -11,9 +11,9 @@ from attendanceapp.models import AutomationSettings, DailyAttendance, EmailRepor
 
 from .attendance_processor import build_summary, process_attendance
 from .email_service import send_attendance_report
-from .essl_service import call_essl_api, extract_str_data_list, parse_punch_logs
+from .essl_service import  fetch_logs_for_range
 from .report_service import generate_excel_report
-
+from datetime import datetime, time as dtime
 logger = logging.getLogger(__name__)
 
 
@@ -45,17 +45,15 @@ def run_attendance_automation(report_date=None, force_send=False):
 
     try:
         mark("Connecting to eSSL API")
-        xml_text = call_essl_api(settings_obj, report_date)
-
-        mark("Fetching Logs")
-        _, str_data = extract_str_data_list(xml_text)
-        if not str_data:
+        mode, logs = fetch_logs_for_range(
+            datetime.combine(report_date, dtime.min),
+            datetime.combine(report_date, dtime(23, 59, 59)),
+        )
+        if not logs:
             raise AttendanceAutomationError("No punch logs received from eSSL API.")
 
-        logs = parse_punch_logs(str_data)
-        if not logs:
-            raise AttendanceAutomationError("No valid punch logs found in eSSL response.")
-
+        mark("Fetching Logs")
+        # logs already parsed
         mark("Processing Attendance")
         with transaction.atomic():
             attendance_rows = process_attendance(logs, settings_obj, report_date)

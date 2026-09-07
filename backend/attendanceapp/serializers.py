@@ -217,3 +217,36 @@ class RawPunchLogSerializer(serializers.ModelSerializer):
             'created_at',
         ]
         read_only_fields = fields
+
+
+
+
+from .models import EsslDevice
+
+class EsslDeviceSerializer(serializers.ModelSerializer):
+    role_display = serializers.CharField(source="get_role_display", read_only=True)
+
+    class Meta:
+        model = EsslDevice
+        fields = [
+            "id",
+            "name",
+            "serial_number",
+            "role",
+            "role_display",
+            "is_active",
+            "last_test_at",
+            "last_test_ok",
+            "last_test_message",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "role_display",
+            "last_test_at",
+            "last_test_ok",
+            "last_test_message",
+            "created_at",
+            "updated_at",
+        ]

@@ -241,27 +241,60 @@ def _metrics_for_row(row, settings_obj):
     }
 
 
+# def fetch_monthly_logs(year, month, settings_obj=None, today=None):
+#     settings_obj = settings_obj or AutomationSettings.get_solo()
+#     period = resolve_report_period(year, month, settings_obj=settings_obj, today=today)
+#     logger.info(
+#         "Fetching monthly eSSL logs: start_date=%s end_date=%s",
+#         period.start_date,
+#         period.end_date,
+#     )
+#     xml_text = call_essl_api_for_range(
+#         settings_obj,
+#         period.from_datetime,
+#         period.to_datetime,
+#     )
+#     _, str_data = extract_str_data_list(xml_text)
+#     if not str_data:
+#         raise MonthlyAttendanceError("No punch logs received from eSSL API for the selected report period.")
+#     logs = parse_punch_logs(str_data)
+#     if not logs:
+#         raise MonthlyAttendanceError("No valid punch logs found in the monthly eSSL response.")
+#     return logs, period
+
 def fetch_monthly_logs(year, month, settings_obj=None, today=None):
     settings_obj = settings_obj or AutomationSettings.get_solo()
     period = resolve_report_period(year, month, settings_obj=settings_obj, today=today)
-    logger.info(
-        "Fetching monthly eSSL logs: start_date=%s end_date=%s",
-        period.start_date,
-        period.end_date,
-    )
-    xml_text = call_essl_api_for_range(
-        settings_obj,
-        period.from_datetime,
-        period.to_datetime,
-    )
-    _, str_data = extract_str_data_list(xml_text)
-    if not str_data:
-        raise MonthlyAttendanceError("No punch logs received from eSSL API for the selected report period.")
-    logs = parse_punch_logs(str_data)
-    if not logs:
-        raise MonthlyAttendanceError("No valid punch logs found in the monthly eSSL response.")
-    return logs, period
 
+    logs = []
+    try:
+        from .essl_service import fetch_logs_for_range
+        mode, logs = fetch_logs_for_range(period.from_datetime, period.to_datetime)
+    except Exception as exc:
+        logger.warning(
+            "eSSL offline during monthly report, falling back to DB: %s", exc
+        )
+
+    if not logs:
+        from attendanceapp.models import RawPunchLog
+        raw_rows = RawPunchLog.objects.filter(
+            punch_date__gte=period.start_date,
+            punch_date__lte=period.end_date,
+        ).values("employee_code", "punch_time", "raw_line")
+        logs = [
+            {
+                "employee_code": r["employee_code"],
+                "punch_time": r["punch_time"],
+                "raw_line": r.get("raw_line") or "",
+            }
+            for r in raw_rows
+        ]
+
+    if not logs:
+        raise MonthlyAttendanceError(
+            "No punch logs found in eSSL or local database for this period."
+        )
+    return logs, period
 
 def process_monthly_logs(year, month, settings_obj=None, today=None, logs=None):
     settings_obj = settings_obj or AutomationSettings.get_solo()

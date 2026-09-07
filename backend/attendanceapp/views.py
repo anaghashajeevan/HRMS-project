@@ -1014,3 +1014,117 @@ class ManualAttendanceEntryView(APIView):
             return Response({'ok': True, 'message': 'Manual attendance saved successfully.'})
         except Exception as e:
             return Response({'detail': str(e)}, status=400)
+
+
+
+
+
+from django.utils import timezone
+from .models import EsslDevice
+from .serializers import EsslDeviceSerializer
+from .services.essl_service import test_connection_for_serial
+from .services.device_service import get_device_mode, get_active_devices
+from HRMSapp.permissions import IsSystemAdmin  # or your admin permission
+
+
+def _validate_device_payload(role, is_active, exclude_id=None):
+    """Enforce: one BOTH only, or one IN + one OUT."""
+    qs = EsslDevice.objects.filter(is_active=True)
+    if exclude_id:
+        qs = qs.exclude(pk=exclude_id)
+
+    if not is_active:
+        return None
+
+    if role == EsslDevice.ROLE_BOTH:
+        if qs.exists():
+            return "Cannot add Both while other active devices exist. Remove them first."
+    else:
+        if qs.filter(role=EsslDevice.ROLE_BOTH).exists():
+            return "A Both device is active. Delete/deactivate it before adding In/Out."
+        if role == EsslDevice.ROLE_PUNCH_IN and qs.filter(role=EsslDevice.ROLE_PUNCH_IN).exists():
+            return "An active Punch In device already exists."
+        if role == EsslDevice.ROLE_PUNCH_OUT and qs.filter(role=EsslDevice.ROLE_PUNCH_OUT).exists():
+            return "An active Punch Out device already exists."
+    return None
+
+
+class EsslDeviceListCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsSystemAdmin]
+
+    def get(self, request):
+        devices = EsslDevice.objects.all()
+        mode = get_device_mode(get_active_devices())
+        return Response(
+            {
+                "mode": mode,
+                "devices": EsslDeviceSerializer(devices, many=True).data,
+            }
+        )
+
+    def post(self, request):
+        role = request.data.get("role", EsslDevice.ROLE_BOTH)
+        is_active = request.data.get("is_active", True)
+        err = _validate_device_payload(role, is_active)
+        if err:
+            return Response({"detail": err}, status=400)
+
+        ser = EsslDeviceSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        device = ser.save()
+        return Response(EsslDeviceSerializer(device).data, status=201)
+
+
+class EsslDeviceDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsSystemAdmin]
+
+    def patch(self, request, pk):
+        try:
+            device = EsslDevice.objects.get(pk=pk)
+        except EsslDevice.DoesNotExist:
+            return Response({"detail": "Not found"}, status=404)
+
+        role = request.data.get("role", device.role)
+        is_active = request.data.get("is_active", device.is_active)
+        err = _validate_device_payload(role, is_active, exclude_id=device.pk)
+        if err:
+            return Response({"detail": err}, status=400)
+
+        ser = EsslDeviceSerializer(device, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        return Response(EsslDeviceSerializer(device).data)
+
+    def delete(self, request, pk):
+        try:
+            device = EsslDevice.objects.get(pk=pk)
+        except EsslDevice.DoesNotExist:
+            return Response({"detail": "Not found"}, status=404)
+        device.delete()
+        return Response({"ok": True})
+
+
+class EsslDeviceTestView(APIView):
+    permission_classes = [IsAuthenticated, IsSystemAdmin]
+
+    def post(self, request, pk):
+        try:
+            device = EsslDevice.objects.get(pk=pk)
+        except EsslDevice.DoesNotExist:
+            return Response({"detail": "Not found"}, status=404)
+
+        try:
+            result = test_connection_for_serial(device.serial_number)
+            device.last_test_at = timezone.now()
+            device.last_test_ok = True
+            device.last_test_message = f"OK — logs: {result['log_count']}"
+            device.save(update_fields=["last_test_at", "last_test_ok", "last_test_message"])
+            return Response(
+                {"ok": True, "message": device.last_test_message, "log_count": result["log_count"]}
+            )
+        except Exception as exc:
+            device.last_test_at = timezone.now()
+            device.last_test_ok = False
+            device.last_test_message = str(exc)[:500]
+            device.save(update_fields=["last_test_at", "last_test_ok", "last_test_message"])
+            return Response({"ok": False, "message": str(exc)}, status=400)

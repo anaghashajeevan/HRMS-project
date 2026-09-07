@@ -385,3 +385,30 @@ export interface AllEmployeesAttendanceData {
     stats: MonthlyStats;
   }>;
 }
+
+
+export interface EsslDevice {
+  id: string;
+  name: string;
+  serial_number: string;
+  role: 'BOTH' | 'PUNCH_IN' | 'PUNCH_OUT';
+  role_display: string;
+  is_active: boolean;
+  last_test_at?: string;
+  last_test_ok: boolean;
+  last_test_message?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EsslDeviceListResponse {
+  mode: 'SINGLE' | 'DUAL' | 'INVALID' | 'EMPTY';
+  devices: EsslDevice[];
+}
+
+export interface EsslDevicePayload {
+  name: string;
+  serial_number: string;
+  role: 'BOTH' | 'PUNCH_IN' | 'PUNCH_OUT';
+  is_active?: boolean;
+}

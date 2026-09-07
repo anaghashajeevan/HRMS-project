@@ -1233,34 +1233,31 @@ def _ensure_attendance_processed_for_period(start_date: date, end_date: date, em
 
     # 1) Sync from eSSL (best effort — if device is down, uses cached DB punches)
     try:
-        from .essl_service import (
-            call_essl_api_for_range,
-            extract_str_data_list,
-            parse_punch_logs,
-        )
+        from datetime import datetime, time as dtime
+        from .essl_service import fetch_logs_for_range
         from .attendance_processor import persist_raw_logs
+        from ..models import normalize_employee_code
 
-        xml_text = call_essl_api_for_range(
-            settings_obj,
-            datetime.combine(start_date, time.min),
-            datetime.combine(effective_end, time(23, 59, 59)),
+        mode, logs = fetch_logs_for_range(
+            datetime.combine(start_date, dtime.min),
+            datetime.combine(effective_end, dtime(23, 59, 59)),
         )
-        _, str_data = extract_str_data_list(xml_text)
-        logs = parse_punch_logs(str_data or "")
-
         if logs and employee is not None:
             target = normalize_employee_code(employee.employee_id)
             logs = [
-                log for log in logs
+                log
+                for log in logs
                 if normalize_employee_code(log.get("employee_code")) == target
             ]
-
         if logs:
             persist_raw_logs(logs)
+            # also process below from raw or from logs
     except Exception as exc:
         logger.warning(
             "eSSL sync skipped for personal attendance (%s to %s): %s",
-            start_date, effective_end, exc,
+            start_date,
+            effective_end,
+            exc,
         )
 
     # 2) Build DailyAttendance rows from RawPunchLog
