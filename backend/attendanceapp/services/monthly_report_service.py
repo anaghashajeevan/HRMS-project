@@ -401,7 +401,7 @@ def collect_monthly_attendance(year, month, settings_obj=None, today=None, atten
             else:
                 status = metrics["status"]
 
-            if status in {"Present", "Week Off Present"}:
+            if status in {"Present", "Week Off Present", "WFH", "Site Visit", "Manual Present"}:
                 employee_summary["attendance_days"] += 1
                 department_summary["attendance_days"] += 1
                 if status == "Week Off Present":

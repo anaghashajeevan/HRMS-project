@@ -1377,7 +1377,7 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
         worked_seconds = row.net_working_hours_seconds if row else 0
         break_seconds = row.break_time_seconds if row else 0
 
-        if status == 'present':
+        if status in ('present', 'wfh', 'site_visit', 'manual_present'):
             present_days += 1
             total_worked_seconds += worked_seconds
             total_break_seconds += break_seconds
