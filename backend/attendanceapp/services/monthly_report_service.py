@@ -270,13 +270,28 @@ def process_monthly_logs(year, month, settings_obj=None, today=None, logs=None):
     else:
         period = resolve_report_period(year, month, settings_obj=settings_obj, today=today)
 
+    # 1. Process raw punches from device
     attendance_rows = process_attendance_period(
         logs,
         settings_obj,
         period.start_date,
         period.end_date,
     )
-    return attendance_rows, period
+
+    # 2. ★ CRITICAL FIX: Fetch all manual HR overrides from DB for this period
+    manual_rows = DailyAttendance.objects.filter(
+        attendance_date__gte=period.start_date,
+        attendance_date__lte=period.end_date,
+        is_manual_override=True,
+    )
+
+    # 3. Merge manual entries into attendance_rows (manual overrides take priority)
+    rows_dict = { (row.employee_code, row.attendance_date): row for row in attendance_rows }
+    for m_row in manual_rows:
+        rows_dict[(m_row.employee_code, m_row.attendance_date)] = m_row
+
+    final_rows = list(rows_dict.values())
+    return final_rows, period
 
 
 def _hrms_employee_display(hrms_employee):

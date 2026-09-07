@@ -173,6 +173,8 @@ def process_attendance_period(logs, settings_obj, start_date, end_date):
     while current_date <= end_date:
         DailyAttendance.objects.filter(attendance_date=current_date).exclude(
             employee_code__in=codes_by_date.get(current_date, [])
+        ).exclude(
+            is_manual_override=True   
         ).delete()
         current_date += timedelta(days=1)
 
