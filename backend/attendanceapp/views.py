@@ -18,7 +18,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from HRMSapp.permissions import IsHRAdmin, IsSystemAdmin
+from HRMSapp.permissions import IsHRAdmin, IsStrictHRAdmin, IsSystemAdmin
 
 from .models import (
     AutomationSettings,
@@ -960,4 +960,57 @@ class AllEmployeesAttendanceView(APIView):
             return Response(data)
         except Exception as exc:
             logger.exception("Failed to load all employees attendance")
-            return Response({'detail': str(exc)}, status=500)        
+            return Response({'detail': str(exc)}, status=500)     
+
+
+
+from datetime import datetime
+from HRMSapp.models import Employee
+
+class ManualAttendanceEntryView(APIView):
+    permission_classes = [IsAuthenticated, IsStrictHRAdmin]
+
+    def post(self, request):
+        employee_id = request.data.get('employee_id')
+        date_str = request.data.get('date')
+        status = request.data.get('status') # WFH, Site Visit, Manual Present
+        punch_in_str = request.data.get('punch_in')
+        punch_out_str = request.data.get('punch_out')
+        reason = request.data.get('reason')
+
+        if not all([employee_id, date_str, status, punch_in_str, punch_out_str, reason]):
+            return Response({'detail': 'All fields are required.'}, status=400)
+
+        try:
+            emp = Employee.objects.get(id=employee_id)
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            
+            # Combine date and time
+            tz = timezone.get_current_timezone()
+            punch_in = timezone.make_aware(datetime.strptime(f"{date_str} {punch_in_str}", "%Y-%m-%d %H:%M"), tz)
+            punch_out = timezone.make_aware(datetime.strptime(f"{date_str} {punch_out_str}", "%Y-%m-%d %H:%M"), tz)
+            
+            working_seconds = int((punch_out - punch_in).total_seconds())
+
+            attendance, _ = DailyAttendance.objects.update_or_create(
+                employee_code=emp.employee_id,
+                attendance_date=target_date,
+                defaults={
+                    'employee': emp,
+                    'employee_name': emp.full_name,
+                    'punch_in': punch_in,
+                    'punch_out': punch_out,
+                    'working_hours_seconds': working_seconds,
+                    'net_working_hours_seconds': working_seconds, # HR manual entries ignore break deductions
+                    'total_punches': 2,
+                    'is_manual_override': True,
+                    'manual_status': status,
+                    'manual_reason': reason,
+                    'updated_by_hr': request.user,
+                    'status': DailyAttendance.STATUS_PRESENT,
+                    'missing_punch': False,
+                }
+            )
+            return Response({'ok': True, 'message': 'Manual attendance saved successfully.'})
+        except Exception as e:
+            return Response({'detail': str(e)}, status=400)

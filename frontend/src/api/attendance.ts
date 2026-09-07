@@ -211,4 +211,17 @@ export const personalAttendanceApi = {
     );
     return data;
   },
+
+  addManualEntry: async (payload: {
+    employee_id: string;
+    date: string;
+    status: string;
+    punch_in: string;
+    punch_out: string;
+    reason: string;
+  }): Promise<{ ok: boolean; message: string }> => {
+    const { data } = await api.post(`${BASE}/manual-entry/`, payload);
+    return data;
+  },
 };
+

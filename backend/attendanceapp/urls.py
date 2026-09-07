@@ -19,7 +19,7 @@ from .views import (
     TestEsslConnectionView,MyAttendanceMonthView,
     MyAttendanceDayView,
     TeamAttendanceMonthView,
-    EmployeeAttendanceMonthView,AllEmployeesAttendanceView,
+    EmployeeAttendanceMonthView,AllEmployeesAttendanceView,ManualAttendanceEntryView
 )
 
 urlpatterns = [
@@ -50,4 +50,6 @@ urlpatterns = [
     path('team-attendance/month/', TeamAttendanceMonthView.as_view(), name='team-attendance-month'),
     path('employee-attendance/<uuid:employee_id>/month/', EmployeeAttendanceMonthView.as_view(), name='employee-attendance-month'),
     path('all-employees-attendance/',AllEmployeesAttendanceView.as_view(),name='all-employees-attendance'),
+
+    path('manual-entry/', ManualAttendanceEntryView.as_view(), name='attendance-manual-entry'),
 ]

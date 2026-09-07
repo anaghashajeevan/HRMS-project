@@ -289,6 +289,14 @@ class DailyAttendance(models.Model):
         choices=STATUS_CHOICES,
         default=STATUS_PRESENT,
     )
+    # === NEW: Manual Override Fields ===
+    is_manual_override = models.BooleanField(default=False)
+    manual_status = models.CharField(max_length=32, blank=True) # e.g., WFH, SITE_VISIT
+    manual_reason = models.TextField(blank=True)
+    updated_by_hr = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='manual_attendance_updates'
+    )
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

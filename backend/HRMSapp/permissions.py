@@ -38,6 +38,10 @@ class IsHRAdmin(BasePermission):
             )
         )
 
+class IsStrictHRAdmin(BasePermission):
+    def has_permission(self, request, view):
+        u = request.user
+        return bool(u and u.is_authenticated and hasattr(u, "has_role") and u.has_role("HR_ADMIN"))
 
 class IsManager(BasePermission):
     def has_permission(self, request, view):

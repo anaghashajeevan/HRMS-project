@@ -239,7 +239,10 @@ export type DayStatus =
   | 'will_be_on_half_leave'    
   | 'leave_but_present'        
   | 'leave_but_partial'        
-  | 'half_leave_present';  
+  | 'half_leave_present'
+  | 'wfh' 
+  | 'site_visit' 
+  | 'manual_present';  
 
 export interface DayEntry {
   date: string;
@@ -320,6 +323,9 @@ export interface DayDetailData {
     is_early_exit: boolean;
     missing_punch: boolean;
     status: string;
+    is_manual?: boolean;
+    manual_status?: string;
+    manual_reason?: string;
   };
   raw_punches: Array<{ time: string; raw_line: string }>;
   expected_hours: number;

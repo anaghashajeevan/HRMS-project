@@ -366,6 +366,9 @@ import Sidebar from '../../components/Sidebar';
 import Topbar from '../../components/Topbar';
 import { personalAttendanceApi } from '../../api/attendance';
 import type { MonthlyAttendanceData, DayEntry, DayStatus } from '../../types/attendance';
+import { authApi } from '../../api/auth';
+import { isHrAdmin } from '../../utils/roles';
+
 
 const STATUS_STYLES: Record<DayStatus, { bg: string; text: string; label: string; dot: string }> = {
   present: { bg: 'bg-green-50 border-green-200', text: 'text-green-700', label: 'Present', dot: 'bg-green-500' },
@@ -382,6 +385,9 @@ const STATUS_STYLES: Record<DayStatus, { bg: string; text: string; label: string
   leave_but_present: { bg: 'bg-lime-50 border-lime-300', text: 'text-lime-800', label: 'Leave but Present', dot: 'bg-lime-500' },
   leave_but_partial: { bg: 'bg-orange-50 border-orange-200', text: 'text-orange-700', label: 'Leave (Partial)', dot: 'bg-orange-500' },
   half_leave_present: { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Half Leave + Present', dot: 'bg-emerald-500' },
+  wfh: { bg: 'bg-indigo-50 border-indigo-200', text: 'text-indigo-700', label: 'WFH', dot: 'bg-indigo-500' },
+  site_visit: { bg: 'bg-fuchsia-50 border-fuchsia-200', text: 'text-fuchsia-700', label: 'Site Visit', dot: 'bg-fuchsia-500' },
+  manual_present: { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Manual Present', dot: 'bg-emerald-500' },
 };
 
 export default function EmployeeAttendanceDetailPage() {
@@ -404,6 +410,33 @@ export default function EmployeeAttendanceDetailPage() {
   );
   const [data, setData] = useState<MonthlyAttendanceData | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState('');
+  const [manualForm, setManualForm] = useState({ status: 'WFH', punch_in: '09:30', punch_out: '18:30', reason: '' });
+  const [savingManual, setSavingManual] = useState(false);
+  const [canAddManual, setCanAddManual] = useState(false);
+  
+  useEffect(() => {
+    let cancelled = false;
+
+    authApi.me()
+      .then((profile) => {
+        if (!cancelled) {
+          setCanAddManual(isHrAdmin(profile));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCanAddManual(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
 
   useEffect(() => {
     if (employeeId) loadData();
@@ -443,6 +476,28 @@ export default function EmployeeAttendanceDetailPage() {
   };
 
   const firstDay = data ? new Date(year, month - 1, 1).getDay() : 0;
+  
+  const handleManualSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingManual(true);
+    try {
+      await personalAttendanceApi.addManualEntry({
+        employee_id: employeeId!,
+        date: selectedDate,
+        ...manualForm,
+      });
+      toast.success('Manual attendance saved');
+      setModalOpen(false);
+      setManualForm({ status: 'WFH', punch_in: '09:30', punch_out: '18:30', reason: '' });
+      loadData(); // Refresh the calendar
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Failed to save');
+    } finally {
+      setSavingManual(false);
+    }
+  };
+
+
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -658,7 +713,18 @@ export default function EmployeeAttendanceDetailPage() {
                     <div key={`empty-${i}`} className="aspect-square" />
                   ))}
                   {data.days.map((day) => (
-                    <DayCard key={day.date} day={day} />
+                    <DayCard key={day.date} day={day}
+                    canAddManual={canAddManual} // Pass prop
+    onClick={() => {
+      // 🔒 Block System Admin or others from opening the modal
+      if (!canAddManual) return;
+
+      if (!day.is_future && day.status !== 'weekend' && day.status !== 'holiday' && day.status !== 'present') {
+        setSelectedDate(day.date);
+        setModalOpen(true);
+      }
+    }}
+                    />
                   ))}
                 </div>
 
@@ -702,6 +768,55 @@ export default function EmployeeAttendanceDetailPage() {
               </div>
             </>
           )}
+
+{/* Manual Entry Modal */}
+{canAddManual && modalOpen && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+    <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+      <h3 className="text-lg font-bold text-gray-900">Add Manual Attendance</h3>
+      <p className="mb-4 text-sm text-gray-500">For {selectedDate}</p>
+      
+      <form onSubmit={handleManualSubmit} className="space-y-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">Status</label>
+          <select 
+            value={manualForm.status} 
+            onChange={(e) => setManualForm({...manualForm, status: e.target.value})}
+            className="w-full rounded-lg border border-gray-300 p-2 text-sm outline-none focus:border-blue-500"
+          >
+            <option value="WFH">Work From Home (WFH)</option>
+            <option value="Site Visit">Site Visit</option>
+            <option value="Manual Present">Manual Present (Missed Punch)</option>
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Punch In</label>
+            <input type="time" required value={manualForm.punch_in} onChange={(e) => setManualForm({...manualForm, punch_in: e.target.value})} className="w-full rounded-lg border border-gray-300 p-2 text-sm outline-none focus:border-blue-500" />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Punch Out</label>
+            <input type="time" required value={manualForm.punch_out} onChange={(e) => setManualForm({...manualForm, punch_out: e.target.value})} className="w-full rounded-lg border border-gray-300 p-2 text-sm outline-none focus:border-blue-500" />
+          </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium text-gray-700">Reason / Remarks (Required)</label>
+          <textarea required placeholder="e.g. Approved WFH by Manager" value={manualForm.reason} onChange={(e) => setManualForm({...manualForm, reason: e.target.value})} className="w-full rounded-lg border border-gray-300 p-2 text-sm outline-none focus:border-blue-500" rows={3}></textarea>
+        </div>
+        
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" onClick={() => setModalOpen(false)} className="rounded-lg px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100">Cancel</button>
+          <button type="submit" disabled={savingManual} className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+            {savingManual && <Loader2 className="h-4 w-4 animate-spin" />}
+            Save Attendance
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
+
+
         </main>
       </div>
     </div>
@@ -764,9 +879,9 @@ function MiniStat({ label, value, color }: { label: string; value: number; color
   );
 }
 
-function DayCard({ day, onClick }: { day: DayEntry; onClick?: () => void }) {
+function DayCard({ day, onClick,canAddManual = false, }: { day: DayEntry; onClick?: () => void;canAddManual?: boolean; }) {
   const style = STATUS_STYLES[day.status];
-  const clickable = !day.is_future && day.status !== 'weekend' && day.status !== 'holiday' && day.status !== 'future';
+  const clickable = canAddManual && !day.is_future && day.status !== 'weekend' && day.status !== 'holiday' && day.status !== 'present';
 
   const isLeaveStatus = ['on_leave', 'on_half_leave', 'will_be_on_leave', 'will_be_on_half_leave',
                          'leave_but_present', 'leave_but_partial', 'half_leave_present'].includes(day.status);
@@ -830,7 +945,11 @@ function DayCard({ day, onClick }: { day: DayEntry; onClick?: () => void }) {
           )}
         </div>
       )}
-
+      {canAddManual && (day.status === 'absent' || day.status === 'missing_punch') && (
+        <span className="mt-1 block text-[9px] font-bold text-blue-600">
+          + Manual
+        </span>
+      )}
       {day.is_late && (
         <span className="absolute bottom-1 right-1 text-[8px] font-bold text-red-600">L</span>
       )}

@@ -188,6 +188,28 @@ def _lunch_overlap_seconds(row, settings_obj):
 
 
 def _metrics_for_row(row, settings_obj):
+    # === NEW: Handle Manual Override ===
+    if row and row.is_manual_override:
+        return {
+            "gross_seconds": row.working_hours_seconds,
+            "break_seconds": row.break_time_seconds,
+            "net_seconds": row.net_working_hours_seconds,
+            "status": row.manual_status,  # Will output "WFH" or "Site Visit"
+            "low_working_hours": False,
+            "is_manual": True,
+            "manual_reason": row.manual_reason,
+        }
+
+    if not row or row.missing_punch or not row.punch_in or not row.punch_out:
+        return {
+            "gross_seconds": 0,
+            "break_seconds": 0,
+            "net_seconds": 0,
+            "status": "Missing Punch" if row else "Absent",
+            "low_working_hours": False,
+            "is_manual": False,
+        }
+
     if not row or row.missing_punch or not row.punch_in or not row.punch_out:
         return {
             "gross_seconds": 0,
@@ -531,6 +553,12 @@ def _remarks_for_issue(issue_type):
 
 def _remarks_for_detail(status, metrics):
     remarks = []
+    if metrics.get("is_manual"):
+        return f"Manual Entry by HR: {metrics.get('manual_reason', '')}"
+        
+    if status == "Week Off Present":
+        remarks.append("Worked on week off")
+
     if status == "Week Off Present":
         remarks.append("Worked on week off")
     elif status == "Absent":

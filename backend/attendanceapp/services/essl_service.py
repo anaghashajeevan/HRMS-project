@@ -85,7 +85,7 @@ def call_essl_api_for_range(settings_obj, from_datetime, to_datetime):
             api_url,
             data=soap_body.encode("utf-8"),
             headers=headers,
-            timeout=30,
+            timeout=3,
             proxies={"http": None, "https": None},
         )
         response.raise_for_status()

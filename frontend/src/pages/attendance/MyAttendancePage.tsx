@@ -31,6 +31,9 @@ const STATUS_STYLES: Record<DayStatus, { bg: string; text: string; label: string
   leave_but_present: { bg: 'bg-lime-50 border-lime-300', text: 'text-lime-800', label: 'Leave but Present', dot: 'bg-lime-500' },
   leave_but_partial: { bg: 'bg-orange-50 border-orange-200', text: 'text-orange-700', label: 'Leave (Partial)', dot: 'bg-orange-500' },
   half_leave_present: { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Half Leave + Present', dot: 'bg-emerald-500' },
+  wfh: { bg: 'bg-indigo-50 border-indigo-200', text: 'text-indigo-700', label: 'WFH', dot: 'bg-indigo-500' },
+  site_visit: { bg: 'bg-fuchsia-50 border-fuchsia-200', text: 'text-fuchsia-700', label: 'Site Visit', dot: 'bg-fuchsia-500' },
+  manual_present: { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Manual Present', dot: 'bg-emerald-500' },
 };
 
 export default function MyAttendancePage() {

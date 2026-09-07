@@ -1165,6 +1165,13 @@ def _day_status(attendance_row, day, holiday_dates, leaves_by_date, is_future, t
     leave_info = leaves_by_date.get(day)
     has_punch = attendance_row and (attendance_row.punch_in or attendance_row.punch_out)
     has_full_attendance = attendance_row and attendance_row.punch_in and attendance_row.punch_out
+
+    if attendance_row and attendance_row.is_manual_override:
+        if attendance_row.manual_status == 'WFH':
+            return 'wfh'
+        elif attendance_row.manual_status == 'Site Visit':
+            return 'site_visit'
+        return 'manual_present'
     
     # 1. FUTURE DATE
     if is_future:
@@ -1571,6 +1578,9 @@ def get_day_detail_for_employee(employee, day: date):
             'is_early_exit': attendance.is_early_exit if attendance else False,
             'missing_punch': attendance.missing_punch if attendance else False,
             'status': attendance.get_status_display() if attendance else 'Absent',
+            'is_manual': attendance.is_manual_override if attendance else False,
+            'manual_status': attendance.manual_status if attendance else None,
+            'manual_reason': attendance.manual_reason if attendance else None,
         },
         'raw_punches': punches,
         'expected_hours': float(settings_obj.full_day_min_hours),

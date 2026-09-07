@@ -49,6 +49,13 @@ def _build_attendance_row(employee_code, attendance_date, punch_times, settings_
     Build/update a DailyAttendance row for one employee on one date.
     Uses HRMS Employee matcher to link employee + populate name.
     """
+    # === NEW: Protect manual entries from being overwritten by eSSL ===
+    existing = DailyAttendance.objects.filter(
+        attendance_date=attendance_date, employee_code=employee_code
+    ).first()
+    if existing and existing.is_manual_override:
+        return existing
+    
     clean_punches = remove_duplicate_punches(
         punch_times,
         settings_obj.duplicate_punch_ignore_seconds,
