@@ -78,9 +78,11 @@ def _calculate_lunch_overlap(punch_in, punch_out, settings_obj):
 
 def _build_attendance_row(employee_code, attendance_date, punch_entries, settings_obj):
     """
-    punch_entries:
-      - SINGLE: list of datetime
-      - DUAL: list of {"punch_time": dt, "device_role": "PUNCH_IN"|"PUNCH_OUT"}
+    Multi-device pairing:
+    - Merges punches from ALL devices for this employee/date
+    - Sort by time, dedupe near-duplicates
+    - First punch = Punch In, Last punch = Punch Out
+    - Middle punches = potential break inference (like single-device)
     """
     existing = DailyAttendance.objects.filter(
         attendance_date=attendance_date,
@@ -89,66 +91,39 @@ def _build_attendance_row(employee_code, attendance_date, punch_entries, setting
     if existing and getattr(existing, "is_manual_override", False):
         return existing
 
-    is_dual = bool(
-        punch_entries
-        and isinstance(punch_entries[0], dict)
-        and "device_role" in punch_entries[0]
-    )
-
-    if is_dual:
-        in_times = sorted(
-            [
-                e["punch_time"]
-                for e in punch_entries
-                if e.get("device_role") == "PUNCH_IN"
-            ]
-        )
-        out_times = sorted(
-            [
-                e["punch_time"]
-                for e in punch_entries
-                if e.get("device_role") == "PUNCH_OUT"
-            ]
-        )
-        punch_in = in_times[0] if in_times else None
-        punch_out = out_times[-1] if out_times else None
-        total_punches = len(in_times) + len(out_times)
-        inferred_break_seconds = 0
-        clean_for_missing = [p for p in (punch_in, punch_out) if p]
-        if not clean_for_missing:
-            return None
+    # Extract just the datetime objects (whether entries are dicts or datetimes)
+    if punch_entries and isinstance(punch_entries[0], dict):
+        raw_times = [e["punch_time"] for e in punch_entries]
     else:
-        clean_punches = remove_duplicate_punches(
-            punch_entries,
-            settings_obj.duplicate_punch_ignore_seconds,
-        )
-        if not clean_punches:
-            return None
-        punch_in = clean_punches[0]
-        punch_out = clean_punches[-1] if len(clean_punches) > 1 else None
-        total_punches = len(clean_punches)
-        inferred_break_seconds = int(calculate_break_time(clean_punches).total_seconds())
+        raw_times = list(punch_entries)
 
-    missing_punch = punch_in is None or punch_out is None
+    clean_punches = remove_duplicate_punches(
+        raw_times, settings_obj.duplicate_punch_ignore_seconds
+    )
+    if not clean_punches:
+        return None
+
+    punch_in = clean_punches[0]
+    punch_out = clean_punches[-1] if len(clean_punches) > 1 else None
+    total_punches = len(clean_punches)
+    missing_punch = punch_out is None
 
     working_time = timedelta()
     if punch_in and punch_out:
         working_time = punch_out - punch_in
 
-    lunch_seconds = (
+    inferred_break_seconds = int(calculate_break_time(clean_punches).total_seconds())
+    lunch_overlap_seconds = (
         _calculate_lunch_overlap(punch_in, punch_out, settings_obj)
-        if punch_in and punch_out
-        else 0
+        if punch_in and punch_out else 0
     )
-    total_break_seconds = max(inferred_break_seconds, lunch_seconds)
+    total_break_seconds = max(inferred_break_seconds, lunch_overlap_seconds)
     net_working_time = max(working_time - timedelta(seconds=total_break_seconds), timedelta())
 
     local_punch_in = timezone.localtime(punch_in) if punch_in else None
     local_punch_out = timezone.localtime(punch_out) if punch_out else None
     is_late = bool(local_punch_in and local_punch_in.time() > settings_obj.shift_in_time)
-    is_early_exit = bool(
-        local_punch_out and local_punch_out.time() < settings_obj.shift_out_time
-    )
+    is_early_exit = bool(local_punch_out and local_punch_out.time() < settings_obj.shift_out_time)
 
     hrms_employee = find_hrms_employee_by_code(employee_code)
     employee_name = get_employee_display_name(hrms_employee)
@@ -169,8 +144,7 @@ def _build_attendance_row(employee_code, attendance_date, punch_entries, setting
             "is_early_exit": is_early_exit,
             "missing_punch": missing_punch,
             "status": (
-                DailyAttendance.STATUS_MISSING
-                if missing_punch
+                DailyAttendance.STATUS_MISSING if missing_punch
                 else DailyAttendance.STATUS_PRESENT
             ),
         },
@@ -206,10 +180,7 @@ def persist_raw_logs(logs):
 def process_attendance_period(logs, settings_obj, start_date, end_date):
     persist_raw_logs(logs)
 
-    has_device_role = bool(
-        logs and isinstance(logs[0], dict) and logs[0].get("device_role")
-    )
-
+    # Group ALL punches by (employee, date) — merge across all devices
     grouped_logs = defaultdict(list)
     for log in logs:
         employee_code = normalize_employee_code(log["employee_code"])
@@ -217,24 +188,14 @@ def process_attendance_period(logs, settings_obj, start_date, end_date):
             continue
         punch_time = _make_aware(log["punch_time"])
         attendance_date = timezone.localtime(punch_time).date()
-        if not (start_date <= attendance_date <= end_date):
-            continue
-
-        if has_device_role:
-            grouped_logs[(employee_code, attendance_date)].append(
-                {
-                    "punch_time": punch_time,
-                    "device_role": log["device_role"],
-                }
-            )
-        else:
+        if start_date <= attendance_date <= end_date:
             grouped_logs[(employee_code, attendance_date)].append(punch_time)
 
     attendance_rows = []
     codes_by_date = defaultdict(list)
-    for (employee_code, attendance_date), punch_entries in grouped_logs.items():
+    for (employee_code, attendance_date), punch_times in grouped_logs.items():
         attendance = _build_attendance_row(
-            employee_code, attendance_date, punch_entries, settings_obj
+            employee_code, attendance_date, punch_times, settings_obj
         )
         if attendance:
             attendance_rows.append(attendance)
@@ -244,14 +205,10 @@ def process_attendance_period(logs, settings_obj, start_date, end_date):
     while current_date <= end_date:
         DailyAttendance.objects.filter(attendance_date=current_date).exclude(
             employee_code__in=codes_by_date.get(current_date, [])
-        ).exclude(
-            is_manual_override=True  # keep HR manual rows
-        ).delete()
+        ).exclude(is_manual_override=True).delete()
         current_date += timedelta(days=1)
 
-    return sorted(
-        attendance_rows, key=lambda row: (row.attendance_date, row.employee_code)
-    )
+    return sorted(attendance_rows, key=lambda row: (row.attendance_date, row.employee_code))
 
 def process_attendance(logs, settings_obj, report_date):
     return process_attendance_period(logs, settings_obj, report_date, report_date)

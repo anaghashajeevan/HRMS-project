@@ -58,33 +58,19 @@ export default function AttendanceSettingsPage() {
 
   // Smart Role Determination
   const activeDevices = deviceData.devices.filter((d) => d.is_active);
-  const hasBoth = activeDevices.some((d) => d.role === 'BOTH');
-  const hasIn = activeDevices.some((d) => d.role === 'PUNCH_IN');
-  const hasOut = activeDevices.some((d) => d.role === 'PUNCH_OUT');
+const bothCount = activeDevices.filter((d) => d.role === 'BOTH').length;
+const inCount = activeDevices.filter((d) => d.role === 'PUNCH_IN').length;
+const outCount = activeDevices.filter((d) => d.role === 'PUNCH_OUT').length;
 
-  // Can user add another device?
-  const canAddDevice = !hasBoth && !(hasIn && hasOut);
+// Multi-device: ALWAYS allow adding
+const canAddDevice = true;
 
-  // Available roles for the modal
-  const getAvailableRoles = () => {
-    if (editingDevice) {
-      return [
-        { value: 'BOTH', label: 'Both (Single device - In + Out)' },
-        { value: 'PUNCH_IN', label: 'Punch In only' },
-        { value: 'PUNCH_OUT', label: 'Punch Out only' },
-      ];
-    }
-    if (activeDevices.length === 0) {
-      return [
-        { value: 'BOTH', label: 'Both (Single device - In + Out)' },
-        { value: 'PUNCH_IN', label: 'Punch In only' },
-        { value: 'PUNCH_OUT', label: 'Punch Out only' },
-      ];
-    }
-    if (hasIn) return [{ value: 'PUNCH_OUT', label: 'Punch Out only' }];
-    if (hasOut) return [{ value: 'PUNCH_IN', label: 'Punch In only' }];
-    return [];
-  };
+// All roles always available (unlimited devices)
+const getAvailableRoles = () => [
+  { value: 'BOTH', label: 'Both (In + Out)' },
+  { value: 'PUNCH_IN', label: 'Punch In only' },
+  { value: 'PUNCH_OUT', label: 'Punch Out only' },
+];
 
   const handleOpenAddDevice = () => {
     setEditingDevice(null);
@@ -324,10 +310,9 @@ export default function AttendanceSettingsPage() {
                   <p className="text-xs text-slate-400">
                     Mode:{' '}
                     <strong className="text-blue-300">
-                      {deviceData.mode === 'SINGLE' && 'Single Device (In + Out)'}
-                      {deviceData.mode === 'DUAL' && 'Dual Devices (Separate In / Out)'}
-                      {deviceData.mode === 'INVALID' && 'Invalid Configuration'}
-                      {deviceData.mode === 'EMPTY' && 'Fallback (.env / Global)'}
+                     {deviceData.mode === 'EMPTY' && 'Fallback (.env / Global)'}
+{deviceData.mode === 'SINGLE' && '1 Active Device'}
+{deviceData.mode === 'MULTI' && `${activeDevices.length} Active Devices (${bothCount} Both, ${inCount} In-only, ${outCount} Out-only)`}
                     </strong>
                   </p>
                 </div>
@@ -340,21 +325,12 @@ export default function AttendanceSettingsPage() {
               </div>
 
               {/* Notice Banners */}
-              {hasBoth && (
-                <div className="mb-3 rounded-lg border border-amber-400/30 bg-amber-500/10 p-2.5 text-xs text-amber-200">
-                  ⚠️ 'Both' device is active. To switch to dual In/Out devices, remove or deactivate this device first.
-                </div>
-              )}
-              {hasIn && !hasOut && (
-                <div className="mb-3 rounded-lg border border-blue-400/30 bg-blue-500/10 p-2.5 text-xs text-blue-200">
-                  ℹ️ 'Punch In' device configured. Click <strong>Add Device</strong> to configure the 'Punch Out' device.
-                </div>
-              )}
-              {hasOut && !hasIn && (
-                <div className="mb-3 rounded-lg border border-blue-400/30 bg-blue-500/10 p-2.5 text-xs text-blue-200">
-                  ℹ️ 'Punch Out' device configured. Click <strong>Add Device</strong> to configure the 'Punch In' device.
-                </div>
-              )}
+              {activeDevices.length > 0 && (
+  <div className="mb-3 rounded-lg border border-blue-400/30 bg-blue-500/10 p-2.5 text-xs text-blue-200">
+    ℹ️ Multi-device mode: All active devices are used simultaneously.
+    Employees can punch on any device, and the system merges all punches per day (earliest = Punch In, latest = Punch Out).
+  </div>
+)}
 
               {/* Devices Table / List */}
               {loadingDevices ? (

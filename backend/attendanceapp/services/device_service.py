@@ -17,27 +17,17 @@ def get_active_devices():
 
 def get_device_mode(devices=None):
     """
-    Returns:
-      - "SINGLE" : one BOTH device (or legacy fallback)
-      - "DUAL"   : one PUNCH_IN + one PUNCH_OUT
-      - "INVALID": any other combo
-      - "EMPTY"  : no active devices
+    Multi-device mode:
+      - "EMPTY"     : No active devices (fallback to .env)
+      - "SINGLE"    : Exactly 1 active device (any role)
+      - "MULTI"     : 2+ active devices (any combination)
     """
     devices = devices if devices is not None else get_active_devices()
     if not devices:
         return "EMPTY"
-
-    roles = [d.role for d in devices]
-    both = [d for d in devices if d.role == EsslDevice.ROLE_BOTH]
-    ins = [d for d in devices if d.role == EsslDevice.ROLE_PUNCH_IN]
-    outs = [d for d in devices if d.role == EsslDevice.ROLE_PUNCH_OUT]
-
-    if len(devices) == 1 and both:
+    if len(devices) == 1:
         return "SINGLE"
-    if len(ins) == 1 and len(outs) == 1 and not both:
-        return "DUAL"
-    return "INVALID"
-
+    return "MULTI"
 
 def get_shared_credentials():
     """URL / user / password from AutomationSettings only."""

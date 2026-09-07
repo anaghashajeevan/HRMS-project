@@ -1028,24 +1028,11 @@ from HRMSapp.permissions import IsSystemAdmin  # or your admin permission
 
 
 def _validate_device_payload(role, is_active, exclude_id=None):
-    """Enforce: one BOTH only, or one IN + one OUT."""
-    qs = EsslDevice.objects.filter(is_active=True)
-    if exclude_id:
-        qs = qs.exclude(pk=exclude_id)
-
-    if not is_active:
-        return None
-
-    if role == EsslDevice.ROLE_BOTH:
-        if qs.exists():
-            return "Cannot add Both while other active devices exist. Remove them first."
-    else:
-        if qs.filter(role=EsslDevice.ROLE_BOTH).exists():
-            return "A Both device is active. Delete/deactivate it before adding In/Out."
-        if role == EsslDevice.ROLE_PUNCH_IN and qs.filter(role=EsslDevice.ROLE_PUNCH_IN).exists():
-            return "An active Punch In device already exists."
-        if role == EsslDevice.ROLE_PUNCH_OUT and qs.filter(role=EsslDevice.ROLE_PUNCH_OUT).exists():
-            return "An active Punch Out device already exists."
+    """
+    Multi-device setup: unlimited active devices allowed of any role.
+    Only prevent duplicate serial numbers (handled by DB unique constraint).
+    """
+    # No role-based restrictions — company can have many devices
     return None
 
 

@@ -402,7 +402,7 @@ export interface EsslDevice {
 }
 
 export interface EsslDeviceListResponse {
-  mode: 'SINGLE' | 'DUAL' | 'INVALID' | 'EMPTY';
+  mode: 'EMPTY' | 'SINGLE' | 'MULTI';
   devices: EsslDevice[];
 }
 

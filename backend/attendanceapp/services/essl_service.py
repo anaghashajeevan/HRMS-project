@@ -223,12 +223,11 @@ def call_essl_api_with_serial(api_url, username, password, serial_number, from_d
 
     return response.text
 
-
 def fetch_logs_for_range(from_datetime, to_datetime):
     """
-    Main entry for all attendance features.
-    - SINGLE / BOTH: logs without dual tags (current behavior)
-    - DUAL: each log has device_role PUNCH_IN or PUNCH_OUT
+    Fetches punches from ALL active devices simultaneously.
+    Each punch is tagged with device_serial for audit.
+    Role is stored but NOT used for pairing — timeline pairing handles that.
     """
     from .device_service import get_fetch_plan, DeviceConfigError
 
@@ -255,25 +254,17 @@ def fetch_logs_for_range(from_datetime, to_datetime):
             )
             _, str_data = extract_str_data_list(xml_text)
             logs = parse_punch_logs(str_data or "")
-            if mode == "DUAL":
-                for log in logs:
-                    log["device_role"] = item["role"]
-                    log["device_serial"] = item["serial"]
-            else:
-                # SINGLE: do not set device_role → old processor path
-                for log in logs:
-                    log["device_serial"] = item["serial"]
+            for log in logs:
+                log["device_serial"] = item["serial"]
+                log["device_role"] = item["role"]  # kept for audit only
             all_logs.extend(logs)
         except Exception as exc:
             logger.warning(
                 "eSSL fetch failed serial=%s role=%s err=%s",
-                item.get("serial"),
-                item.get("role"),
-                exc,
+                item.get("serial"), item.get("role"), exc,
             )
             errors.append(str(exc))
 
-    # If everything failed and no logs, surface first error
     if not all_logs and errors:
         raise EsslServiceError(errors[0])
 
