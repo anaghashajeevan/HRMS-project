@@ -1158,22 +1158,77 @@ def _seconds_to_hours_decimal(seconds: int) -> float:
     return round((seconds or 0) / 3600, 2)
 
 
-def _day_status(attendance_row, day, holiday_dates, leaves_by_date, is_future, today):
+# def _day_status(attendance_row, day, holiday_dates, leaves_by_date, is_future, today):
+#     """
+#     Determine status for a single day.
+#     """
+#     leave_info = leaves_by_date.get(day)
+#     has_punch = attendance_row and (attendance_row.punch_in or attendance_row.punch_out)
+#     has_full_attendance = attendance_row and attendance_row.punch_in and attendance_row.punch_out
+
+#     if attendance_row and attendance_row.is_manual_override:
+#         if attendance_row.manual_status == 'WFH':
+#             return 'wfh'
+#         elif attendance_row.manual_status == 'Site Visit':
+#             return 'site_visit'
+#         return 'manual_present'
+    
+#     # 1. FUTURE DATE
+#     if is_future:
+#         if leave_info:
+#             if leave_info['is_half_day']:
+#                 return 'will_be_on_half_leave'
+#             return 'will_be_on_leave'
+#         return 'future'
+    
+#     # 2. HOLIDAY
+#     if _is_holiday(day, holiday_dates):
+#         return 'holiday'
+    
+#     # 3. WEEKEND
+#     if _is_weekend(day):
+#         if has_punch:
+#             return 'weekend_present'
+#         return 'weekend'
+    
+#     # 4. LEAVE APPROVED
+#     if leave_info:
+#         if leave_info['is_half_day']:
+#             if has_punch:
+#                 return 'half_leave_present'
+#             return 'on_half_leave'
+#         else:
+#             if has_full_attendance:
+#                 return 'leave_but_present'
+#             elif has_punch:
+#                 return 'leave_but_partial'
+#             else:
+#                 return 'on_leave'
+    
+#     # 5-7. Regular attendance logic
+#     if not attendance_row:
+#         return 'absent'
+#     if attendance_row.missing_punch:
+#         return 'missing_punch'
+#     return 'present'
+
+def _day_status(attendance_row, day, holiday_dates, leaves_by_date, is_future, today, joining_date=None, sys_start_date=None):
     """
     Determine status for a single day.
     """
+    # 1. BEFORE SYSTEM START (Company level)
+    if sys_start_date and day < sys_start_date:
+        return 'before_system_start'
+        
+    # 2. BEFORE JOINING (Employee level)
+    if joining_date and day < joining_date:
+        return 'before_joining'
+
     leave_info = leaves_by_date.get(day)
     has_punch = attendance_row and (attendance_row.punch_in or attendance_row.punch_out)
     has_full_attendance = attendance_row and attendance_row.punch_in and attendance_row.punch_out
-
-    if attendance_row and attendance_row.is_manual_override:
-        if attendance_row.manual_status == 'WFH':
-            return 'wfh'
-        elif attendance_row.manual_status == 'Site Visit':
-            return 'site_visit'
-        return 'manual_present'
     
-    # 1. FUTURE DATE
+    # 3. FUTURE DATE
     if is_future:
         if leave_info:
             if leave_info['is_half_day']:
@@ -1181,17 +1236,17 @@ def _day_status(attendance_row, day, holiday_dates, leaves_by_date, is_future, t
             return 'will_be_on_leave'
         return 'future'
     
-    # 2. HOLIDAY
+    # 4. HOLIDAY
     if _is_holiday(day, holiday_dates):
         return 'holiday'
     
-    # 3. WEEKEND
+    # 5. WEEKEND
     if _is_weekend(day):
         if has_punch:
             return 'weekend_present'
         return 'weekend'
     
-    # 4. LEAVE APPROVED
+    # 6. LEAVE APPROVED
     if leave_info:
         if leave_info['is_half_day']:
             if has_punch:
@@ -1205,13 +1260,12 @@ def _day_status(attendance_row, day, holiday_dates, leaves_by_date, is_future, t
             else:
                 return 'on_leave'
     
-    # 5-7. Regular attendance logic
+    # 7. REGULAR ATTENDANCE LOGIC
     if not attendance_row:
         return 'absent'
     if attendance_row.missing_punch:
         return 'missing_punch'
     return 'present'
-
 
 # ==============================================================================
 # ON-DEMAND ATTENDANCE SYNC & PROCESSING (NO DAILY AUTOMATION NEEDED)
@@ -1305,12 +1359,6 @@ def _ensure_month_attendance_for_all(year: int, month: int):
 # ==============================================================================
 
 def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_sync: bool = True):
-    """
-    Get comprehensive monthly attendance data — INTEGRATED WITH LEAVES.
-    
-    ensure_sync=True  -> syncs eSSL & updates DailyAttendance (for single employee view)
-    ensure_sync=False -> skips sync because bulk sync was already done (for Team/All view)
-    """
     settings_obj = AutomationSettings.get_solo()
     today = timezone.localdate()
 
@@ -1318,6 +1366,35 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
     start_date = date(year, month, 1)
     _, last_day = calendar.monthrange(year, month)
     end_date = date(year, month, last_day)
+
+    # === NEW: System Start Date Check ===
+    sys_start_date = settings_obj.get_resolved_start_date()
+    
+    # If the ENTIRE requested month is before the system even started tracking data
+    if sys_start_date and end_date < sys_start_date:
+        return {
+            'year': year,
+            'month': month,
+            'month_label': date(year, month, 1).strftime('%B %Y'),
+            'no_attendance_data': True,
+            'message': f"Attendance tracking started from {sys_start_date.strftime('%B %Y')}",
+            'employee': {
+                'id': str(employee.id),
+                'employee_id': employee.employee_id,
+                'full_name': employee.full_name,
+                'department': getattr(employee.department, 'name', None) or getattr(employee.structure_location, 'name', None),
+            },
+            'stats': {
+                'working_days_in_month': 0, 'working_days_elapsed': 0, 'effective_working_days': 0,
+                'present_days': 0, 'absent_days': 0, 'missing_punch_days': 0,
+                'weekend_worked_days': 0, 'on_leave_days': 0, 'on_half_leave_days': 0, 'lop_days': 0,
+                'total_worked_hours': "00:00", 'total_worked_hours_decimal': 0.0,
+                'total_break_time': "00:00", 'expected_hours': 0.0, 'expected_hours_full_month': 0.0,
+                'shortage_hours': 0.0, 'attendance_percent': 0.0, 'full_day_hours': float(settings_obj.full_day_min_hours),
+            },
+            'days': []
+        }
+    # ====================================
 
     # Process live attendance on-demand if enabled
     if ensure_sync:
@@ -1330,7 +1407,6 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
         employee=employee,
     )
 
-    # Also try by employee_code (for unlinked records)
     if not attendance_rows.exists():
         attendance_rows = DailyAttendance.objects.filter(
             attendance_date__gte=start_date,
@@ -1339,12 +1415,13 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
         )
 
     rows_by_date = {row.attendance_date: row for row in attendance_rows}
-
-    # Get holidays & approved leaves
     holiday_dates = _get_holidays_for_period(start_date, end_date, employee)
     leaves_by_date = _get_leaves_for_period(start_date, end_date, employee)
+    
+    # NEW: Get Employee Date of Joining
+    joining_date = getattr(employee, 'date_of_joining', None)
 
-    # Build daily breakdown
+    # Variables for daily breakdown
     days = []
     total_worked_seconds = 0
     total_break_seconds = 0
@@ -1363,9 +1440,21 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
         is_future = current > today
         row = rows_by_date.get(current)
         leave_info = leaves_by_date.get(current)
-        status = _day_status(row, current, holiday_dates, leaves_by_date, is_future, today)
+        
+        # Pass new variables to _day_status
+        status = _day_status(
+            row, current, holiday_dates, leaves_by_date, is_future, today, 
+            joining_date=joining_date, sys_start_date=sys_start_date
+        )
 
-        is_working_day = not _is_weekend(current) and not _is_holiday(current, holiday_dates)
+        # Count working days ONLY IF it's on/after DOJ and System Start Date
+        is_working_day = (
+            not _is_weekend(current) 
+            and not _is_holiday(current, holiday_dates)
+            and (not joining_date or current >= joining_date)
+            and (not sys_start_date or current >= sys_start_date)
+        )
+        
         if is_working_day:
             working_days_in_month += 1
             if not is_future:
@@ -1374,11 +1463,12 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
         worked_seconds = row.net_working_hours_seconds if row else 0
         break_seconds = row.break_time_seconds if row else 0
 
-        if status in ('present', 'wfh', 'site_visit', 'manual_present'):
+        # Include manual entries (wfh, site_visit, manual_present)
+        if status in ('present', 'wfh', 'site_visit', 'manual_present', 'leave_but_present', 'leave_but_partial', 'half_leave_present'):
             present_days += 1
             total_worked_seconds += worked_seconds
             total_break_seconds += break_seconds
-
+            
         elif status == 'missing_punch':
             missing_punch_days += 1
             total_worked_seconds += worked_seconds
@@ -1397,32 +1487,11 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
             if leave_info and leave_info.get('is_lop'):
                 lop_days += 1
 
-        elif status == 'will_be_on_leave':
-            pass
-
         elif status == 'on_half_leave':
             on_half_leave_days += 1
             if row and worked_seconds > 0:
                 total_worked_seconds += worked_seconds
                 total_break_seconds += break_seconds
-
-        elif status == 'will_be_on_half_leave':
-            pass
-
-        elif status == 'leave_but_present':
-            present_days += 1
-            total_worked_seconds += worked_seconds
-            total_break_seconds += break_seconds
-
-        elif status == 'leave_but_partial':
-            present_days += 1
-            total_worked_seconds += worked_seconds
-            total_break_seconds += break_seconds
-
-        elif status == 'half_leave_present':
-            present_days += 1
-            total_worked_seconds += worked_seconds
-            total_break_seconds += break_seconds
 
         days.append({
             'date': current.isoformat(),

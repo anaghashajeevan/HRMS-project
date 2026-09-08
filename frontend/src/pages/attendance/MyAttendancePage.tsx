@@ -34,6 +34,8 @@ const STATUS_STYLES: Record<DayStatus, { bg: string; text: string; label: string
   wfh: { bg: 'bg-indigo-50 border-indigo-200', text: 'text-indigo-700', label: 'WFH', dot: 'bg-indigo-500' },
   site_visit: { bg: 'bg-fuchsia-50 border-fuchsia-200', text: 'text-fuchsia-700', label: 'Site Visit', dot: 'bg-fuchsia-500' },
   manual_present: { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Manual Present', dot: 'bg-emerald-500' },
+   before_joining: { bg: 'bg-slate-50 border-slate-200', text: 'text-slate-400', label: 'Not joined', dot: 'bg-slate-300' },
+  before_system_start: { bg: 'bg-slate-50 border-slate-100', text: 'text-slate-300', label: 'No data', dot: 'bg-slate-200' },
 };
 
 export default function MyAttendancePage() {
@@ -106,30 +108,39 @@ export default function MyAttendancePage() {
             </div>
           </div>
 
-          {loading || !data ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-            </div>
-          ) : (
-            <>
-              {/* Month Navigation */}
-              <div className="mb-4 flex items-center justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-gray-100">
-                <button
-                  onClick={() => navigateMonth(-1)}
-                  className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
-                <h2 className="text-lg font-bold text-gray-900">
-                  {data.month_label}
-                </h2>
-                <button
-                  onClick={() => navigateMonth(1)}
-                  className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
-                >
-                  <ChevronRight className="h-5 w-5" />
-                </button>
-              </div>
+          <div className="mb-4 flex items-center justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-gray-100">
+  <button
+    onClick={() => navigateMonth(-1)}
+    className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
+  >
+    <ChevronLeft className="h-5 w-5" />
+  </button>
+  <h2 className="text-lg font-bold text-gray-900">
+    {data?.month_label || 'Loading...'}
+  </h2>
+  <button
+    onClick={() => navigateMonth(1)}
+    className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
+  >
+    <ChevronRight className="h-5 w-5" />
+  </button>
+</div>
+
+{loading || !data ? (
+  <div className="flex items-center justify-center py-16">
+    <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+  </div>
+) : data.no_attendance_data ? (
+  /* Month before system start — NOT full of Absents */
+  <div className="rounded-xl bg-white p-16 text-center shadow-sm ring-1 ring-gray-100">
+    <CalIcon className="mx-auto h-12 w-12 text-gray-300" />
+    <h2 className="mt-4 text-lg font-bold text-gray-900">No Attendance Data</h2>
+    <p className="mt-2 text-sm text-gray-500">
+      {data.message || `No attendance records for ${data.month_label}.`}
+    </p>
+  </div>
+) : (
+  <>
 
               {/* Stats Cards */}
               <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -323,20 +334,22 @@ function StatCard({
     </div>
   );
 }
-
 function DayCard({ day, onClick }: { day: DayEntry; onClick?: () => void }) {
-  const style = STATUS_STYLES[day.status];
-  const clickable = !day.is_future && day.status !== 'weekend' && day.status !== 'holiday' && day.status !== 'future';
+  const style = STATUS_STYLES[day.status] || STATUS_STYLES.future;
 
-  const isLeaveStatus = ['on_leave', 'on_half_leave', 'will_be_on_leave', 'will_be_on_half_leave',
-                         'leave_but_present', 'leave_but_partial', 'half_leave_present'].includes(day.status);
-  
-  const isWillBe = day.status.startsWith('will_be_');
-  const cameOnLeave = day.status === 'leave_but_present' || day.status === 'leave_but_partial';
+  // Days that must NOT open detail / look like absent work days
+  const isBlocked =
+    day.status === 'before_joining' ||
+    day.status === 'before_system_start' ||
+    day.status === 'future' ||
+    day.status === 'weekend' ||
+    day.status === 'holiday';
+
+  const clickable = !isBlocked && Boolean(onClick);
 
   return (
     <div
-      onClick={clickable && onClick ? onClick : undefined}
+      onClick={clickable ? onClick : undefined}
       className={`
         relative aspect-square rounded-lg border p-2
         ${style.bg}
@@ -348,51 +361,52 @@ function DayCard({ day, onClick }: { day: DayEntry; onClick?: () => void }) {
         <span className={`text-sm font-bold ${style.text}`}>
           {day.day_number}
         </span>
-        {day.status !== 'future' && day.status !== 'weekend' && day.status !== 'holiday' && (
-          <span className={`h-2 w-2 rounded-full ${style.dot} ${isWillBe ? 'opacity-60' : ''}`} />
+        {!isBlocked && day.status !== 'weekend' && day.status !== 'holiday' && (
+          <span className={`h-2 w-2 rounded-full ${style.dot}`} />
         )}
       </div>
 
-      {/* Leave badge */}
-      {day.leave_info && isLeaveStatus && (
+      {/* Leave badge — keep your existing leave_info block if you have it */}
+      {day.leave_info && !isBlocked && (
         <div className="mt-1">
           <span
-            className={`inline-block rounded px-1 py-0.5 text-[9px] font-bold text-white ${isWillBe ? 'opacity-70' : ''}`}
+            className="inline-block rounded px-1 py-0.5 text-[9px] font-bold text-white"
             style={{ backgroundColor: day.leave_info.leave_type_color }}
           >
             {day.leave_info.leave_type_code}
             {day.leave_info.is_half_day && ` (${day.leave_info.half_day_period})`}
           </span>
-          {/* Special indicators */}
-          {cameOnLeave && (
-            <div className="mt-0.5 text-[8px] font-bold text-lime-800">
-              ✓ Present!
-            </div>
-          )}
-          {isWillBe && (
-            <div className="mt-0.5 text-[8px] italic text-cyan-600">
-              upcoming
-            </div>
-          )}
         </div>
       )}
 
-      {/* Show worked hours */}
-      {day.worked_hours !== '00:00' && !day.is_future && day.status !== 'on_leave' && day.status !== 'will_be_on_leave' && (
-        <div className="mt-1 flex flex-col">
-          <span className="text-[10px] font-bold text-gray-900">
-            {day.worked_hours}
-          </span>
-          {day.punch_in && day.punch_out && (
-            <span className="text-[9px] text-gray-500">
-              {day.punch_in}-{day.punch_out}
+      {/* Worked hours — only on real work days */}
+      {day.worked_hours !== '00:00' &&
+        !isBlocked &&
+        day.status !== 'on_leave' &&
+        day.status !== 'will_be_on_leave' && (
+          <div className="mt-1 flex flex-col">
+            <span className="text-[10px] font-bold text-gray-900">
+              {day.worked_hours}
             </span>
-          )}
+            {day.punch_in && day.punch_out && (
+              <span className="text-[9px] text-gray-500">
+                {day.punch_in}-{day.punch_out}
+              </span>
+            )}
+          </div>
+        )}
+
+      {/* Optional: tiny label for not joined / no data */}
+      {(day.status === 'before_joining' || day.status === 'before_system_start') && (
+        <div className="mt-1 text-[8px] font-semibold text-slate-400">
+          {day.status === 'before_joining' ? 'Not joined' : 'No data'}
         </div>
       )}
 
-      {day.is_late && (
-        <span className="absolute bottom-1 right-1 text-[8px] font-bold text-red-600">L</span>
+      {day.is_late && !isBlocked && (
+        <span className="absolute bottom-1 right-1 text-[8px] font-bold text-red-600">
+          L
+        </span>
       )}
     </div>
   );

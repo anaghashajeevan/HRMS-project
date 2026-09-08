@@ -22,7 +22,7 @@ class AutomationSettingsSerializer(serializers.ModelSerializer):
     api_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
     smtp_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
     secret_statuses = serializers.SerializerMethodField()
-
+    resolved_attendance_start = serializers.SerializerMethodField()
     class Meta:
         model = AutomationSettings
         fields = [
@@ -65,11 +65,16 @@ class AutomationSettingsSerializer(serializers.ModelSerializer):
             'lunch_start_time',
             'lunch_end_time',
             'excluded_dates',
+
+            'attendance_start_mode',
+            'attendance_start_month',
+            'resolved_attendance_start',
+
             # Meta
             'updated_at',
             'secret_statuses',
         ]
-        read_only_fields = ['id', 'updated_at', 'secret_statuses']
+        read_only_fields = ['id', 'updated_at', 'secret_statuses','resolved_attendance_start']
         # Never expose the encrypted password fields
         extra_kwargs = {
             'api_password_encrypted': {'write_only': True},
@@ -96,7 +101,12 @@ class AutomationSettingsSerializer(serializers.ModelSerializer):
 
         instance.save()
         return instance
-
+    
+    def get_resolved_attendance_start(self, obj):
+        resolved_date = obj.get_resolved_start_date()
+        if resolved_date:
+            return resolved_date.strftime("%Y-%m")
+        return None
 
 # ==============================================================================
 # DAILY ATTENDANCE

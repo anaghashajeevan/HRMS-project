@@ -142,6 +142,9 @@ export interface AttendanceSettings {
   lunch_start_time: string;
   lunch_end_time: string;
   excluded_dates: string;
+  attendance_start_mode?: 'AUTO' | 'MANUAL';
+  attendance_start_month?: string;
+  resolved_attendance_start?: string | null;
   // Meta
   updated_at: string;
   secret_statuses: {
@@ -242,7 +245,8 @@ export type DayStatus =
   | 'half_leave_present'
   | 'wfh' 
   | 'site_visit' 
-  | 'manual_present';  
+  | 'manual_present'
+  | 'before_joining' | 'before_system_start';  
 
 export interface DayEntry {
   date: string;
@@ -297,6 +301,8 @@ export interface MonthlyAttendanceData {
   year: number;
   month: number;
   month_label: string;
+  no_attendance_data?: boolean; 
+  message?: string; 
   start_date: string;
   end_date: string;
   employee: EmployeeInfo;

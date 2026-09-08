@@ -424,7 +424,48 @@ const getAvailableRoles = () => [
             <FormField label="Shift Out Time" type="time" value={settings.shift_out_time} onChange={(e) => updateField('shift_out_time', e.target.value)} />
             <FormField label="Duplicate Punch Ignore Seconds" type="number" value={settings.duplicate_punch_ignore_seconds} onChange={(e) => updateField('duplicate_punch_ignore_seconds', Number(e.target.value))} />
           </SettingsSection>
+                     {/* ================= ATTENDANCE DATA PERIOD ================= */}
+          <SettingsSection title="Attendance Data Period">
+            <SectionLabel icon={CalendarRange} text="When calendars start showing attendance" />
+            <p className="mb-3 text-xs leading-5 text-slate-400">
+              Months before this date show as "No attendance data" instead of marking everyone Absent.
+              Leave on <strong>Auto</strong> to automatically use the first month that has punch records.
+            </p>
 
+            <label className="grid gap-2">
+              <span className="text-sm font-medium text-slate-300">Start mode</span>
+              <select
+                className="min-h-11 w-full rounded-xl border border-white/10 bg-[#070A12]/80 px-3 text-sm text-slate-100 outline-none transition focus:border-blue-400/60"
+                value={settings.attendance_start_mode || 'AUTO'}
+                onChange={(e) => updateField('attendance_start_mode', e.target.value as any)}
+              >
+                <option value="AUTO">Auto (from first punch / attendance data)</option>
+                <option value="MANUAL">Manual (fixed month)</option>
+              </select>
+            </label>
+
+            {(settings.attendance_start_mode || 'AUTO') === 'MANUAL' && (
+              <FormField 
+                label="Attendance starts from (month)" 
+                type="month" 
+                value={settings.attendance_start_month || ''} 
+                onChange={(e) => updateField('attendance_start_month', e.target.value)} 
+              />
+            )}
+
+            <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/45 px-3 py-2 text-xs text-slate-300">
+              Resolved start:{' '}
+              <strong className="text-white">
+                {settings.resolved_attendance_start
+                  ? (() => {
+                      const [y, m] = settings.resolved_attendance_start.split('-');
+                      const d = new Date(Number(y), Number(m) - 1, 1);
+                      return d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+                    })()
+                  : 'No data yet (will calculate automatically after first punches)'}
+              </strong>
+            </div>
+          </SettingsSection>
           {/* ================= 4. AUTOMATION SCHEDULE ================= */}
           <SettingsSection title="Automation Schedule">
             <SectionLabel icon={Timer} text="Scheduled email" />

@@ -65,7 +65,7 @@ def normalize_employee_code(value):
         return ""
     return str(value).strip().replace("-", "").replace(" ", "").upper()
 
-
+from datetime import date, datetime
 # ==============================================================================
 # AUTOMATION SETTINGS (Global config, singleton)
 # ==============================================================================
@@ -93,6 +93,13 @@ class AutomationSettings(models.Model):
         (MONTHLY_MODE_CURRENT, "Current month"),
     ]
 
+    START_MODE_AUTO = "AUTO"
+    START_MODE_MANUAL = "MANUAL"
+    START_MODE_CHOICES = [
+        (START_MODE_AUTO, "Auto (from first data)"),
+        (START_MODE_MANUAL, "Manual (fixed month)"),
+    ]
+    
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # eSSL API
@@ -148,6 +155,9 @@ class AutomationSettings(models.Model):
     lunch_end_time = models.TimeField(default="14:00")
     excluded_dates = models.TextField(blank=True)
 
+    attendance_start_mode = models.CharField(max_length=16, choices=START_MODE_CHOICES, default=START_MODE_AUTO)
+    attendance_start_month = models.CharField(max_length=7, blank=True, help_text="Format: YYYY-MM")
+    
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -210,7 +220,37 @@ class AutomationSettings(models.Model):
             "api_password": "Configured" if self.has_api_password() else "Not Configured",
             "smtp_password": "Configured" if self.has_smtp_password() else "Not Configured",
         }
+    def get_resolved_start_date(self):
+        """
+        Returns a datetime.date object representing the 1st day of the month 
+        from which attendance tracking officially starts.
+        Returns None if there is absolutely no data and no manual month set.
+        """
+        # 1. Manual Override
+        if self.attendance_start_mode == self.START_MODE_MANUAL and self.attendance_start_month:
+            try:
+                # e.g., "2026-08" -> date(2026, 8, 1)
+                return datetime.strptime(self.attendance_start_month, "%Y-%m").date()
+            except ValueError:
+                pass
 
+        # 2. Auto (Find the earliest punch or daily attendance row in the DB)
+        from attendanceapp.models import RawPunchLog, DailyAttendance
+        
+        first_punch = RawPunchLog.objects.order_by('punch_date').first()
+        first_att = DailyAttendance.objects.order_by('attendance_date').first()
+        
+        dates = []
+        if first_punch and first_punch.punch_date:
+            dates.append(first_punch.punch_date)
+        if first_att and first_att.attendance_date:
+            dates.append(first_att.attendance_date)
+            
+        if dates:
+            earliest = min(dates)
+            return date(earliest.year, earliest.month, 1)
+            
+        return None
 
 # ==============================================================================
 # RAW PUNCH LOG (raw data from eSSL device)
