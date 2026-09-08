@@ -1358,7 +1358,7 @@ def _ensure_month_attendance_for_all(year: int, month: int):
 # PERSONAL ATTENDANCE PUBLIC SERVICES
 # ==============================================================================
 
-def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_sync: bool = True):
+def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_sync: bool = False):
     settings_obj = AutomationSettings.get_solo()
     today = timezone.localdate()
 

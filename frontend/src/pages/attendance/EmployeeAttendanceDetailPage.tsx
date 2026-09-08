@@ -517,75 +517,90 @@ export default function EmployeeAttendanceDetailPage() {
             {backLabel}
           </button>
 
-          {loading || !data ? (
-  <div className="flex items-center justify-center py-16">
-    <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-  </div>
-) : data.no_attendance_data ? (
-  <div className="rounded-xl bg-white p-16 text-center shadow-sm ring-1 ring-gray-100">
-    <h2 className="text-lg font-bold text-gray-900">No Attendance Data</h2>
-    <p className="mt-2 text-sm text-gray-500">
-      {data.message || `No attendance for ${data.month_label}.`}
-    </p>
-  </div>
-) : (
-  <>
-              {/* Employee Header */}
-              <div className="mb-6 rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-lg font-bold text-white">
-                    {data.employee.full_name
-                      .split(' ')
-                      .map((n) => n[0])
-                      .slice(0, 2)
-                      .join('')
-                      .toUpperCase()}
-                  </div>
-                  <div className="flex-1">
-                    <h1 className="text-xl font-bold text-gray-900">
-                      {data.employee.full_name}
-                    </h1>
-                    <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-gray-500">
+                   {/* Employee header — show when we have employee (stays on July too if API sent employee) */}
+          {data?.employee && (
+            <div className="mb-6 rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-lg font-bold text-white">
+                  {data.employee.full_name
+                    .split(' ')
+                    .map((n) => n[0])
+                    .slice(0, 2)
+                    .join('')
+                    .toUpperCase()}
+                </div>
+                <div className="flex-1">
+                  <h1 className="text-xl font-bold text-gray-900">
+                    {data.employee.full_name}
+                  </h1>
+                  <div className="mt-1 flex flex-wrap items-center gap-3 text-sm text-gray-500">
+                    <span className="flex items-center gap-1">
+                      <User className="h-3.5 w-3.5" />
+                      {data.employee.employee_id}
+                    </span>
+                    {data.employee.position && (
                       <span className="flex items-center gap-1">
-                        <User className="h-3.5 w-3.5" />
-                        {data.employee.employee_id}
+                        <Briefcase className="h-3.5 w-3.5" />
+                        {data.employee.position}
                       </span>
-                      {data.employee.position && (
-                        <span className="flex items-center gap-1">
-                          <Briefcase className="h-3.5 w-3.5" />
-                          {data.employee.position}
-                        </span>
-                      )}
-                      {data.employee.department && (
-                        <span className="flex items-center gap-1">
-                          <Building2 className="h-3.5 w-3.5" />
-                          {data.employee.department}
-                        </span>
-                      )}
-                    </div>
+                    )}
+                    {data.employee.department && (
+                      <span className="flex items-center gap-1">
+                        <Building2 className="h-3.5 w-3.5" />
+                        {data.employee.department}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
+            </div>
+          )}
 
-              {/* Month Navigation */}
-              <div className="mb-4 flex items-center justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-gray-100">
-                <button
-                  onClick={() => navigateMonth(-1)}
-                  className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
-                <h2 className="text-lg font-bold text-gray-900">
-                  {data.month_label}
-                </h2>
-                <button
-                  onClick={() => navigateMonth(1)}
-                  className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
-                >
-                  <ChevronRight className="h-5 w-5" />
-                </button>
-              </div>
+          {/* Month Navigation — ALWAYS visible (July + August) */}
+          <div className="mb-4 flex items-center justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-gray-100">
+            <button
+              type="button"
+              onClick={() => navigateMonth(-1)}
+              disabled={loading}
+              className="rounded-lg p-2 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+            <h2 className="text-lg font-bold text-gray-900">
+              {data?.month_label ||
+                new Date(year, month - 1, 1).toLocaleString('en-US', {
+                  month: 'long',
+                  year: 'numeric',
+                })}
+            </h2>
+            <button
+              type="button"
+              onClick={() => navigateMonth(1)}
+              disabled={loading}
+              className="rounded-lg p-2 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          </div>
 
+          {/* Content under nav */}
+          {loading && !data ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+            </div>
+          ) : data?.no_attendance_data ? (
+            <div className="rounded-xl bg-white p-16 text-center shadow-sm ring-1 ring-gray-100">
+              <CalIcon className="mx-auto h-12 w-12 text-gray-300" />
+              <h2 className="mt-4 text-lg font-bold text-gray-900">No Attendance Data</h2>
+              <p className="mt-2 text-sm text-gray-500">
+                {data.message || `No attendance for ${data.month_label}.`}
+              </p>
+              <p className="mt-2 text-xs text-gray-400">
+                Use the arrows above to open August 2026 or a later month.
+              </p>
+            </div>
+          ) : data ? (
+            <>
               {/* Main Stats Cards */}
               <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
                 <StatCard
@@ -677,7 +692,7 @@ export default function EmployeeAttendanceDetailPage() {
                 </div>
               )}
 
-              {/* Leave Summary Card — shows if employee took any leaves */}
+              {/* Leave Summary Card */}
               {(data.stats.on_leave_days > 0 || data.stats.on_half_leave_days > 0) && (
                 <div className="mb-4 rounded-xl border border-cyan-200 bg-cyan-50 p-4">
                   <div className="flex items-start gap-3">
@@ -685,16 +700,20 @@ export default function EmployeeAttendanceDetailPage() {
                       <CalIcon className="h-5 w-5" />
                     </div>
                     <div>
-                      <h3 className="text-sm font-bold text-cyan-900">
-                        Leave Summary
-                      </h3>
+                      <h3 className="text-sm font-bold text-cyan-900">Leave Summary</h3>
                       <p className="mt-1 text-xs text-cyan-800">
                         {data.stats.on_leave_days > 0 && (
-                          <>Took <strong>{data.stats.on_leave_days}</strong> full-day leave{data.stats.on_leave_days > 1 ? 's' : ''}</>
+                          <>
+                            Took <strong>{data.stats.on_leave_days}</strong> full-day leave
+                            {data.stats.on_leave_days > 1 ? 's' : ''}
+                          </>
                         )}
                         {data.stats.on_leave_days > 0 && data.stats.on_half_leave_days > 0 && ' and '}
                         {data.stats.on_half_leave_days > 0 && (
-                          <>{data.stats.on_half_leave_days} half-day leave{data.stats.on_half_leave_days > 1 ? 's' : ''}</>
+                          <>
+                            {data.stats.on_half_leave_days} half-day leave
+                            {data.stats.on_half_leave_days > 1 ? 's' : ''}
+                          </>
                         )}
                         {data.stats.lop_days > 0 && (
                           <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-red-700">
@@ -709,82 +728,96 @@ export default function EmployeeAttendanceDetailPage() {
 
               {/* Calendar */}
               <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
-                {/* Day Headers */}
                 <div className="mb-2 grid grid-cols-7 gap-2 text-center text-xs font-semibold uppercase text-gray-500">
                   {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
-                    <div key={d} className="py-2">{d}</div>
+                    <div key={d} className="py-2">
+                      {d}
+                    </div>
                   ))}
                 </div>
 
-                {/* Calendar Grid */}
                 <div className="grid grid-cols-7 gap-2">
                   {Array.from({ length: firstDay }).map((_, i) => (
                     <div key={`empty-${i}`} className="aspect-square" />
                   ))}
                   {data.days.map((day) => (
-  <DayCard
-    key={day.date}
-    day={day}
-    canAddManual={canAddManual}
-    onClick={() => {
-      if (!canAddManual) return;
-      if (
-        day.status === 'before_joining' ||
-        day.status === 'before_system_start' ||
-        day.is_future ||
-        day.status === 'weekend' ||
-        day.status === 'holiday' ||
-        day.status === 'present'
-      ) {
-        return;
-      }
-      setSelectedDate(day.date);
-      setModalOpen(true);
-    }}
-  />
-))}
+                    <DayCard
+                      key={day.date}
+                      day={day}
+                      canAddManual={canAddManual}
+                      onClick={() => {
+                        if (!canAddManual) return;
+                        if (
+                          day.status === 'before_joining' ||
+                          day.status === 'before_system_start' ||
+                          day.is_future ||
+                          day.status === 'weekend' ||
+                          day.status === 'holiday' ||
+                          day.status === 'present'
+                        ) {
+                          return;
+                        }
+                        setSelectedDate(day.date);
+                        setModalOpen(true);
+                      }}
+                    />
+                  ))}
                 </div>
 
-                {/* Legend */}
-                {/* Legend */}
-<div className="mt-6 border-t border-gray-100 pt-4">
-  <p className="mb-3 text-xs font-semibold uppercase text-gray-500">Legend</p>
-  
-  {/* Actual Attendance */}
-  <div className="mb-2">
-    <p className="text-[10px] font-semibold uppercase text-gray-400 mb-1">Actual Attendance</p>
-    <div className="flex flex-wrap gap-3">
-      {(['present', 'absent', 'missing_punch', 'weekend', 'holiday'] as DayStatus[]).map((key) => {
-        const style = STATUS_STYLES[key];
-        return (
-          <div key={key} className="flex items-center gap-2">
-            <span className={`h-3 w-3 rounded-full ${style.dot}`} />
-            <span className="text-xs text-gray-600">{style.label}</span>
-          </div>
-        );
-      })}
-    </div>
-  </div>
-
-  {/* Leave-related */}
-  <div className="mt-3">
-    <p className="text-[10px] font-semibold uppercase text-gray-400 mb-1">Leave Status</p>
-    <div className="flex flex-wrap gap-3">
-      {(['on_leave', 'on_half_leave', 'will_be_on_leave', 'leave_but_present', 'half_leave_present'] as DayStatus[]).map((key) => {
-        const style = STATUS_STYLES[key];
-        return (
-          <div key={key} className="flex items-center gap-2">
-            <span className={`h-3 w-3 rounded-full ${style.dot}`} />
-            <span className="text-xs text-gray-600">{style.label}</span>
-          </div>
-        );
-      })}
-    </div>
-  </div>
-</div>
+                <div className="mt-6 border-t border-gray-100 pt-4">
+                  <p className="mb-3 text-xs font-semibold uppercase text-gray-500">Legend</p>
+                  <div className="mb-2">
+                    <p className="mb-1 text-[10px] font-semibold uppercase text-gray-400">
+                      Actual Attendance
+                    </p>
+                    <div className="flex flex-wrap gap-3">
+                      {(
+                        [
+                          'present',
+                          'absent',
+                          'missing_punch',
+                          'weekend',
+                          'holiday',
+                        ] as DayStatus[]
+                      ).map((key) => {
+                        const style = STATUS_STYLES[key];
+                        return (
+                          <div key={key} className="flex items-center gap-2">
+                            <span className={`h-3 w-3 rounded-full ${style.dot}`} />
+                            <span className="text-xs text-gray-600">{style.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <p className="mb-1 text-[10px] font-semibold uppercase text-gray-400">
+                      Leave Status
+                    </p>
+                    <div className="flex flex-wrap gap-3">
+                      {(
+                        [
+                          'on_leave',
+                          'on_half_leave',
+                          'will_be_on_leave',
+                          'leave_but_present',
+                          'half_leave_present',
+                        ] as DayStatus[]
+                      ).map((key) => {
+                        const style = STATUS_STYLES[key];
+                        return (
+                          <div key={key} className="flex items-center gap-2">
+                            <span className={`h-3 w-3 rounded-full ${style.dot}`} />
+                            <span className="text-xs text-gray-600">{style.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
             </>
-          )}
+          ) : null}
 
 {/* Manual Entry Modal */}
 {canAddManual && modalOpen && (
