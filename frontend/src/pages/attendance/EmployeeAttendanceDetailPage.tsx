@@ -928,6 +928,7 @@ function MiniStat({ label, value, color }: { label: string; value: number; color
     </div>
   );
 }
+
 function DayCard({ day, onClick, canAddManual = false }: { day: DayEntry; onClick?: () => void; canAddManual?: boolean }) {
   const style = STATUS_STYLES[day.status] || STATUS_STYLES.future;
   const isBlocked = day.status === 'before_joining' || day.status === 'before_system_start' || day.status === 'future' || day.status === 'weekend' || day.status === 'holiday';
@@ -936,37 +937,55 @@ function DayCard({ day, onClick, canAddManual = false }: { day: DayEntry; onClic
   return (
     <div 
       onClick={clickable ? onClick : undefined} 
-      // 👇 ADDED 'group' class here
-      className={`group relative aspect-square rounded-lg border p-2 ${style.bg} ${clickable ? 'cursor-pointer hover:shadow-md' : ''}`}
+      className={`group relative aspect-square rounded-lg border p-2 ${style.bg} ${clickable ? 'cursor-pointer hover:shadow-md transition' : ''} ${day.is_today ? 'ring-2 ring-blue-500' : ''}`}
     >
       <div className="flex items-start justify-between">
         <span className={`text-sm font-bold ${style.text}`}>{day.day_number}</span>
         {!isBlocked && <span className={`h-2 w-2 rounded-full ${style.dot}`} />}
       </div>
-      
-      {day.worked_hours !== '00:00' && !isBlocked && day.status !== 'on_leave' && day.status !== 'will_be_on_leave' && (
-        <div className="mt-1 flex flex-col">
-          <span className="text-[10px] font-bold">{day.worked_hours}</span>
+
+      {day.leave_info && !isBlocked && (
+        <div className="mt-1">
+          <span className="inline-block rounded px-1 py-0.5 text-[9px] font-bold text-white" style={{ backgroundColor: day.leave_info.leave_type_color }}>
+            {day.leave_info.leave_type_code} {day.leave_info.is_half_day && `(${day.leave_info.half_day_period})`}
+          </span>
         </div>
       )}
-      
-      {(day.status === 'before_joining' || day.status === 'before_system_start') && (
-        <div className="mt-1 text-[8px] text-slate-400">{day.status === 'before_joining' ? 'Not joined' : 'No data'}</div>
+
+      {/* ===== ALWAYS VISIBLE ON CELL: Punch In - Out & Net Hours ===== */}
+      {!isBlocked && day.status !== 'on_leave' && day.status !== 'will_be_on_leave' && day.status !== 'absent' && (
+        <div className="mt-1 flex flex-col leading-tight">
+          {(day.punch_in || day.punch_out) && (
+            <span className={`text-[9px] ${day.status === 'missing_punch' ? 'text-amber-700 font-semibold' : 'text-gray-600'}`}>
+              {day.punch_in || '--:--'} - {day.punch_out || '--:--'}
+            </span>
+          )}
+          {day.worked_hours && day.worked_hours !== '00:00' && (
+            <span className="text-[10px] font-bold text-gray-900 mt-0.5">{day.worked_hours}</span>
+          )}
+        </div>
       )}
-      
+
+      {(day.status === 'before_joining' || day.status === 'before_system_start') && (
+        <div className="mt-1 text-[8px] font-semibold text-slate-400">{day.status === 'before_joining' ? 'Not joined' : 'No data'}</div>
+      )}
+
+      {/* + Manual only for HR on absent/missing */}
       {canAddManual && !isBlocked && (day.status === 'absent' || day.status === 'missing_punch') && (
         <span className="mt-1 block text-[9px] font-bold text-blue-600">+ Manual</span>
       )}
 
-      {/* ================= NEW: HOVER TOOLTIP ================= */}
+      {day.is_late && !isBlocked && (
+        <span className="absolute bottom-1 right-1 text-[8px] font-bold text-red-600">L</span>
+      )}
+
+      {/* ===== HOVER TOOLTIP ===== */}
       {!isBlocked && (
         <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden w-44 -translate-x-1/2 flex-col rounded-lg bg-gray-900 p-3 text-xs text-white shadow-xl opacity-0 transition-opacity group-hover:flex group-hover:opacity-100">
-          <div className="mb-2 border-b border-gray-700 pb-1 text-center font-bold text-gray-100">
-            {day.date}
-          </div>
+          <div className="mb-2 border-b border-gray-700 pb-1 text-center font-bold text-gray-100">{day.date}</div>
           <div className="flex justify-between py-0.5">
             <span className="text-gray-400">Status:</span>
-            <span className={`font-semibold ${style.text.replace('text-', 'text-').replace('-700', '-400')}`}>{style.label}</span>
+            <span className="font-semibold text-gray-100">{style.label}</span>
           </div>
           <div className="flex justify-between py-0.5">
             <span className="text-gray-400">Punch In:</span>
@@ -984,11 +1003,9 @@ function DayCard({ day, onClick, canAddManual = false }: { day: DayEntry; onClic
             <span className="font-bold text-gray-300">Net Hrs:</span>
             <span className="font-bold text-blue-400">{day.worked_hours || '00:00'}</span>
           </div>
-          {/* Tooltip bottom arrow triangle */}
           <div className="absolute -bottom-1 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 bg-gray-900"></div>
         </div>
       )}
-      {/* ======================================================== */}
     </div>
   );
 }
