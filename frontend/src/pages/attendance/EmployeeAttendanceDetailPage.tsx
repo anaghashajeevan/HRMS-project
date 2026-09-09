@@ -556,28 +556,81 @@ export default function EmployeeAttendanceDetailPage() {
             </div>
           )}
 
-          {/* Month Navigation — ALWAYS visible (July + August) */}
-          <div className="mb-4 flex items-center justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-gray-100">
+          
+                    {/* Month Navigation —  */}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-gray-100">
             <button
               type="button"
               onClick={() => navigateMonth(-1)}
               disabled={loading}
               className="rounded-lg p-2 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+              title="Previous month"
             >
               <ChevronLeft className="h-5 w-5" />
             </button>
-            <h2 className="text-lg font-bold text-gray-900">
-              {data?.month_label ||
-                new Date(year, month - 1, 1).toLocaleString('en-US', {
-                  month: 'long',
-                  year: 'numeric',
-                })}
-            </h2>
+
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {/* Month select */}
+              <select
+                value={month}
+                disabled={loading}
+                onChange={(e) => {
+                  const newMonth = parseInt(e.target.value, 10);
+                  setMonth(newMonth);
+                  setSearchParams({
+                    year: String(year),
+                    month: String(newMonth),
+                  });
+                }}
+                className="min-h-10 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+              >
+                {[
+                  'January', 'February', 'March', 'April', 'May', 'June',
+                  'July', 'August', 'September', 'October', 'November', 'December',
+                ].map((name, index) => (
+                  <option key={name} value={index + 1}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+
+              {/* Year select */}
+              <select
+                value={year}
+                disabled={loading}
+                onChange={(e) => {
+                  const newYear = parseInt(e.target.value, 10);
+                  setYear(newYear);
+                  setSearchParams({
+                    year: String(newYear),
+                    month: String(month),
+                  });
+                }}
+                className="min-h-10 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+              >
+                {Array.from({ length: 11 }, (_, i) => today.getFullYear() - 5 + i).map(
+                  (y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  )
+                )}
+              </select>
+
+              {/* Optional label from API */}
+              {data?.month_label && (
+                <span className="hidden text-xs text-gray-400 sm:inline">
+                  {data.month_label}
+                </span>
+              )}
+            </div>
+
             <button
               type="button"
               onClick={() => navigateMonth(1)}
               disabled={loading}
               className="rounded-lg p-2 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+              title="Next month"
             >
               <ChevronRight className="h-5 w-5" />
             </button>
