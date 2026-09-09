@@ -152,8 +152,33 @@ def _build_attendance_row(employee_code, attendance_date, punch_entries, setting
     return attendance
 
 
+# def persist_raw_logs(logs):
+#     """Save raw punches to DB. Auto-links to HRMS Employee if match found."""
+#     saved = 0
+#     for log in logs:
+#         employee_code = normalize_employee_code(log["employee_code"])
+#         if not employee_code:
+#             continue
+#         punch_time = _make_aware(log["punch_time"])
+
+#         # 🎯 HRMS INTEGRATION: Try to link to HRMS Employee
+#         hrms_employee = find_hrms_employee_by_code(employee_code)
+
+#         _, created = RawPunchLog.objects.get_or_create(
+#             employee_code=employee_code,
+#             punch_time=punch_time,
+#             defaults={
+#                 "punch_date": timezone.localtime(punch_time).date(),
+#                 "raw_line": log.get("raw_line", ""),
+#                 "employee": hrms_employee,
+#             },
+#         )
+#         if created:
+#             saved += 1
+#     return saved
+
 def persist_raw_logs(logs):
-    """Save raw punches to DB. Auto-links to HRMS Employee if match found."""
+    """Save raw punches to DB. Preserves device_serial in raw_line for live presence tracking."""
     saved = 0
     for log in logs:
         employee_code = normalize_employee_code(log["employee_code"])
@@ -161,15 +186,20 @@ def persist_raw_logs(logs):
             continue
         punch_time = _make_aware(log["punch_time"])
 
-        # 🎯 HRMS INTEGRATION: Try to link to HRMS Employee
         hrms_employee = find_hrms_employee_by_code(employee_code)
+
+        # Append device_serial to raw_line so live presence can read which machine was used
+        raw_line = log.get("raw_line", "")
+        device_serial = log.get("device_serial", "")
+        if device_serial and f"| {device_serial}" not in raw_line:
+            raw_line = f"{raw_line} | {device_serial}"
 
         _, created = RawPunchLog.objects.get_or_create(
             employee_code=employee_code,
             punch_time=punch_time,
             defaults={
                 "punch_date": timezone.localtime(punch_time).date(),
-                "raw_line": log.get("raw_line", ""),
+                "raw_line": raw_line,
                 "employee": hrms_employee,
             },
         )
