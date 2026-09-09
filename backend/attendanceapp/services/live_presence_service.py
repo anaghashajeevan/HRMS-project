@@ -162,18 +162,118 @@ def _latest_completed_out_punch(punch_records, report_date, today):
     return punch_records[-1]["punch_time"]
 
 
+# def _presence_for_punches(punch_records, report_date, today, active_devices_by_serial):
+#     """
+#     Determine live presence status:
+#     - Last punch on PUNCH_IN device  -> "In Office"
+#     - Last punch on PUNCH_OUT device -> "Outside"
+#     - Last punch on BOTH device      -> Odd count = "In Office", Even count = "Outside"
+#     """
+#     punch_count = len(punch_records)
+#     last_record = punch_records[-1] if punch_records else None
+#     last_punch = last_record["punch_time"] if last_record else None
+#     punch_in = punch_records[0]["punch_time"] if punch_records else None
+#     punch_out = _latest_completed_out_punch(punch_records, report_date, today)
+
+#     if report_date != today:
+#         return {
+#             "live_status": LIVE_STATUS_COMPLETED_DAY,
+#             "current_presence_display": "Completed Day",
+#             "punch_count": punch_count,
+#             "last_punch_time": last_punch,
+#             "punch_in_time": punch_in,
+#             "punch_out_time": punch_out,
+#             "is_live_day": False,
+#         }
+
+#     if punch_count == 0:
+#         return {
+#             "live_status": LIVE_STATUS_NOT_ARRIVED,
+#             "current_presence_display": "Not Arrived",
+#             "punch_count": 0,
+#             "last_punch_time": None,
+#             "punch_in_time": None,
+#             "punch_out_time": None,
+#             "is_live_day": True,
+#         }
+
+#     # Determine device role of the LAST punch
+#     last_serial = last_record.get("device_serial", "") if last_record else ""
+#     device = active_devices_by_serial.get(last_serial)
+#     last_role = device.role if device else "BOTH"
+
+#     # Rule 1: Last punch on a PUNCH_IN device -> ALWAYS In Office
+#     if last_role == EsslDevice.ROLE_PUNCH_IN:
+#         return {
+#             "live_status": LIVE_STATUS_IN_OFFICE,
+#             "current_presence_display": "In Office",
+#             "punch_count": punch_count,
+#             "last_punch_time": last_punch,
+#             "punch_in_time": punch_in,
+#             "punch_out_time": punch_out,
+#             "is_live_day": True,
+#         }
+
+#     # Rule 2: Last punch on a PUNCH_OUT device -> ALWAYS Outside
+#     if last_role == EsslDevice.ROLE_PUNCH_OUT:
+#         return {
+#             "live_status": LIVE_STATUS_OUTSIDE,
+#             "current_presence_display": "Outside",
+#             "punch_count": punch_count,
+#             "last_punch_time": last_punch,
+#             "punch_in_time": punch_in,
+#             "punch_out_time": punch_out,
+#             "is_live_day": True,
+#         }
+
+#     # Rule 3: Last punch on a BOTH device -> ODD = In Office, EVEN = Outside
+#     if punch_count % 2 != 0:
+#         return {
+#             "live_status": LIVE_STATUS_IN_OFFICE,
+#             "current_presence_display": "In Office",
+#             "punch_count": punch_count,
+#             "last_punch_time": last_punch,
+#             "punch_in_time": punch_in,
+#             "punch_out_time": punch_out,
+#             "is_live_day": True,
+#         }
+
+#     return {
+#         "live_status": LIVE_STATUS_OUTSIDE,
+#         "current_presence_display": "Outside",
+#         "punch_count": punch_count,
+#         "last_punch_time": last_punch,
+#         "punch_in_time": punch_in,
+#         "punch_out_time": punch_out,
+#         "is_live_day": True,
+#     }
+
 def _presence_for_punches(punch_records, report_date, today, active_devices_by_serial):
     """
-    Determine live presence status:
-    - Last punch on PUNCH_IN device  -> "In Office"
-    - Last punch on PUNCH_OUT device -> "Outside"
-    - Last punch on BOTH device      -> Odd count = "In Office", Even count = "Outside"
+    Determine live presence status and accurately extract punch_in and punch_out.
     """
     punch_count = len(punch_records)
     last_record = punch_records[-1] if punch_records else None
     last_punch = last_record["punch_time"] if last_record else None
     punch_in = punch_records[0]["punch_time"] if punch_records else None
-    punch_out = _latest_completed_out_punch(punch_records, report_date, today)
+
+    # Calculate Punch Out (Only select actual exit punches)
+    punch_out = None
+    if punch_count >= 2:
+        # Check if any punch was from a dedicated PUNCH_OUT device
+        out_device_records = [
+            r for r in punch_records 
+            if active_devices_by_serial.get(r.get("device_serial", ""), None) 
+            and active_devices_by_serial[r["device_serial"]].role == EsslDevice.ROLE_PUNCH_OUT
+        ]
+        if out_device_records:
+            punch_out = out_device_records[-1]["punch_time"]
+        else:
+            # BOTH device setup: If count is odd (1, 3), punch_out is the last EVEN punch [-2]
+            if punch_count % 2 != 0:
+                punch_out = punch_records[-2]["punch_time"]
+            else:
+                punch_out = punch_records[-1]["punch_time"]
 
     if report_date != today:
         return {
@@ -202,7 +302,6 @@ def _presence_for_punches(punch_records, report_date, today, active_devices_by_s
     device = active_devices_by_serial.get(last_serial)
     last_role = device.role if device else "BOTH"
 
-    # Rule 1: Last punch on a PUNCH_IN device -> ALWAYS In Office
     if last_role == EsslDevice.ROLE_PUNCH_IN:
         return {
             "live_status": LIVE_STATUS_IN_OFFICE,
@@ -214,7 +313,6 @@ def _presence_for_punches(punch_records, report_date, today, active_devices_by_s
             "is_live_day": True,
         }
 
-    # Rule 2: Last punch on a PUNCH_OUT device -> ALWAYS Outside
     if last_role == EsslDevice.ROLE_PUNCH_OUT:
         return {
             "live_status": LIVE_STATUS_OUTSIDE,
@@ -226,7 +324,7 @@ def _presence_for_punches(punch_records, report_date, today, active_devices_by_s
             "is_live_day": True,
         }
 
-    # Rule 3: Last punch on a BOTH device -> ODD = In Office, EVEN = Outside
+    # BOTH device logic (Odd = In Office, Even = Outside)
     if punch_count % 2 != 0:
         return {
             "live_status": LIVE_STATUS_IN_OFFICE,
