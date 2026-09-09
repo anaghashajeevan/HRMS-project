@@ -7,6 +7,7 @@ from .models import (
     AutomationSettings,
     DailyAttendance,
     EmailReportLog,
+    EsslDevice,
     MonthlyReportLog,
     RawPunchLog,
 )
@@ -30,6 +31,74 @@ class AutomationSettingsAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return not AutomationSettings.objects.exists()
+
+
+@admin.register(EsslDevice)
+class EsslDeviceAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "serial_number",
+        "role",
+        "is_active",
+        "last_test_ok",
+        "last_test_at",
+        "last_test_message",
+        "updated_at",
+        "created_at",
+    )
+    list_filter = (
+        "role",
+        "is_active",
+        "last_test_ok",
+    )
+    search_fields = (
+        "name",
+        "serial_number",
+    )
+    list_editable = (
+        "is_active",
+        "role",
+    )
+    readonly_fields = (
+        "last_test_at",
+        "last_test_ok",
+        "last_test_message",
+        "created_at",
+        "updated_at",
+    )
+    ordering = ("role", "name")
+    fieldsets = (
+        (
+            "Device",
+            {
+                "fields": (
+                    "name",
+                    "serial_number",
+                    "role",
+                    "is_active",
+                )
+            },
+        ),
+        (
+            "Last connection test",
+            {
+                "fields": (
+                    "last_test_ok",
+                    "last_test_at",
+                    "last_test_message",
+                )
+            },
+        ),
+        (
+            "Timestamps",
+            {
+                "fields": (
+                    "created_at",
+                    "updated_at",
+                )
+            },
+        ),
+    )
 
 
 @admin.register(RawPunchLog)
