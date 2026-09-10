@@ -108,23 +108,62 @@ export default function MyAttendancePage() {
             </div>
           </div>
 
-          <div className="mb-4 flex items-center justify-between rounded-xl bg-white p-3 shadow-sm ring-1 ring-gray-100">
-  <button
-    onClick={() => navigateMonth(-1)}
-    className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
-  >
-    <ChevronLeft className="h-5 w-5" />
-  </button>
-  <h2 className="text-lg font-bold text-gray-900">
-    {data?.month_label || 'Loading...'}
-  </h2>
-  <button
-    onClick={() => navigateMonth(1)}
-    className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
-  >
-    <ChevronRight className="h-5 w-5" />
-  </button>
-</div>
+                    {/* Month Navigation — arrows + month/year selectors */}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-gray-100">
+            <button
+              type="button"
+              onClick={() => navigateMonth(-1)}
+              disabled={loading}
+              className="rounded-lg p-2 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+              title="Previous month"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <select
+                value={month}
+                disabled={loading}
+                onChange={(e) => setMonth(parseInt(e.target.value, 10))}
+                className="min-h-10 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+              >
+                {MONTHS.map((name, index) => (
+                  <option key={name} value={index + 1}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={year}
+                disabled={loading}
+                onChange={(e) => setYear(parseInt(e.target.value, 10))}
+                className="min-h-10 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+              >
+                {Array.from({ length: 11 }, (_, i) => today.getFullYear() - 5 + i).map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+
+              {data?.month_label && (
+                <span className="hidden text-xs text-gray-400 sm:inline">
+                  {data.month_label}
+                </span>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => navigateMonth(1)}
+              disabled={loading}
+              className="rounded-lg p-2 text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+              title="Next month"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          </div>
 
 {loading || !data ? (
   <div className="flex items-center justify-center py-16">
