@@ -140,7 +140,8 @@ load_dotenv()
 # ==============================================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
+load_dotenv(BASE_DIR / '.env')
+print("[DEBUG] CORS_ALLOW_ALL_ORIGINS raw:", os.getenv('CORS_ALLOW_ALL_ORIGINS'))
 # ==============================================================================
 # DOCKER DETECTION
 # ==============================================================================
