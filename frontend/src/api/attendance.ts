@@ -223,6 +223,27 @@ export const personalAttendanceApi = {
     const { data } = await api.post(`${BASE}/manual-entry/`, payload);
     return data;
   },
+
+    getSelfAttendanceConfig: async (): Promise<{
+    enabled: boolean;
+    work_mode: string;
+    allowed_types: string[];
+    require_approval: boolean;
+  }> => {
+    const { data } = await api.get(`${BASE}/self-attendance/`);
+    return data;
+  },
+
+  addSelfAttendance: async (payload: {
+    date: string;
+    status: string;
+    punch_in: string;
+    punch_out: string;
+    reason: string;
+  }): Promise<{ ok: boolean; message: string }> => {
+    const { data } = await api.post(`${BASE}/self-attendance/`, payload);
+    return data;
+  },
 };
 
 

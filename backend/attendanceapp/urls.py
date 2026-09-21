@@ -21,7 +21,7 @@ from .views import (
     TeamAttendanceMonthView,
     EmployeeAttendanceMonthView,AllEmployeesAttendanceView,ManualAttendanceEntryView,EsslDeviceListCreateView,
     EsslDeviceDetailView,
-    EsslDeviceTestView,
+    EsslDeviceTestView,EmployeeSelfAttendanceView
 )
 
 urlpatterns = [
@@ -58,4 +58,5 @@ urlpatterns = [
     path("devices/", EsslDeviceListCreateView.as_view()),
     path("devices/<uuid:pk>/", EsslDeviceDetailView.as_view()),
     path("devices/<uuid:pk>/test/", EsslDeviceTestView.as_view()),
+    path('self-attendance/', EmployeeSelfAttendanceView.as_view(), name='self-attendance'),
 ]

@@ -151,6 +151,10 @@ export interface AttendanceSettings {
     api_password: 'Configured' | 'Not Configured';
     smtp_password: 'Configured' | 'Not Configured';
   };
+
+  enable_employee_self_attendance?: boolean;
+  self_attendance_allowed_types?: string[];
+  self_attendance_require_approval?: boolean;
 }
 
 export interface AttendanceSettingsUpdatePayload extends Partial<AttendanceSettings> {

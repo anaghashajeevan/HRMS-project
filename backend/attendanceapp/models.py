@@ -157,6 +157,22 @@ class AutomationSettings(models.Model):
 
     attendance_start_mode = models.CharField(max_length=16, choices=START_MODE_CHOICES, default=START_MODE_AUTO)
     attendance_start_month = models.CharField(max_length=7, blank=True, help_text="Format: YYYY-MM")
+
+    enable_employee_self_attendance = models.BooleanField(
+        default=False,
+        help_text="Master switch: allow employees to self-report WFH/Site Visit attendance"
+    )
+    self_attendance_allowed_types = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Statuses employees can self-report, e.g. ['WFH', 'Site Visit']"
+    )
+    self_attendance_require_approval = models.BooleanField(
+        default=False,
+        help_text="Phase 2 placeholder: require manager approval for self-reported entries"
+    )
+
+
     
     updated_at = models.DateTimeField(auto_now=True)
 

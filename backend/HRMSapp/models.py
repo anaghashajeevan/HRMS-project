@@ -193,7 +193,12 @@ class Employee(models.Model):
         ('FEMALE', 'Female'),
         ('OTHER', 'Other'),
     ]
-
+    WORK_MODE_CHOICES = [
+        ('REGULAR', 'Regular (On-Site)'),
+        ('WFH', 'Work From Home'),
+        ('HYBRID', 'Hybrid'),
+    ]
+    
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     employee_id = models.CharField(max_length=20, unique=True, help_text="e.g. EMP-2026-001")
 
@@ -246,6 +251,18 @@ class Employee(models.Model):
     date_of_joining = models.DateField()
     date_of_exit = models.DateField(null=True, blank=True)
 
+    work_mode = models.CharField(
+        max_length=10,
+        choices=WORK_MODE_CHOICES,
+        default='REGULAR',
+        help_text="REGULAR = must punch on device, WFH = can self-report, HYBRID = both"
+    )
+    can_self_attend = models.BooleanField(
+        default=False,
+        help_text="If True, employee can self-report WFH/Site Visit from their calendar. Auto-True when work_mode is WFH/HYBRID."
+    )
+
+
     # Encrypted PII fields (AES-256 at rest via django-cryptography)
     bank_account_encrypted = encrypt(models.TextField(blank=True, null=True))
     bank_ifsc_code = models.CharField(max_length=20, blank=True, null=True)  # Not sensitive — plain text OK
@@ -271,7 +288,34 @@ class Employee(models.Model):
         if self.last_name and self.last_name.strip() and self.last_name.strip() != '-':
             parts.append(self.last_name.strip())
         return ' '.join(parts).strip()
+    
+    def save(self, *args, **kwargs):
+        """
+        Auto-sync can_self_attend based on work_mode:
+        - New employee with WFH/HYBRID → can_self_attend = True
+        - Existing employee whose work_mode changes to WFH/HYBRID → can_self_attend = True
+        - HR can still manually toggle can_self_attend afterwards.
+        """
+        if not self.pk:
+            # Creating a new employee
+            if self.work_mode in ('WFH', 'HYBRID'):
+                self.can_self_attend = True
+            else:
+                self.can_self_attend = False
+        else:
+            # Updating existing employee: only auto-set when work_mode actually changed
+            try:
+                old = Employee.objects.get(pk=self.pk)
+                if old.work_mode != self.work_mode:
+                    if self.work_mode in ('WFH', 'HYBRID'):
+                        self.can_self_attend = True
+                    else:
+                        # Regular → auto disable self-attendance
+                        self.can_self_attend = False
+            except Employee.DoesNotExist:
+                pass
 
+        super().save(*args, **kwargs)
 
 # ==============================================================================
 # EMPLOYEE DOCUMENTS (contracts, IDs, certificates with expiry alerts)

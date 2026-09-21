@@ -19,7 +19,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from HRMSapp.permissions import IsHRAdmin, IsStrictHRAdmin, IsSystemAdmin
-
+from HRMSapp.models import Employee
 from .models import (
     AutomationSettings,
     DailyAttendance,
@@ -1115,3 +1115,155 @@ class EsslDeviceTestView(APIView):
             device.last_test_message = str(exc)[:500]
             device.save(update_fields=["last_test_at", "last_test_ok", "last_test_message"])
             return Response({"ok": False, "message": str(exc)}, status=400)
+
+
+
+
+# ==============================================================================
+# EMPLOYEE SELF-ATTENDANCE (WFH / Site Visit self-reporting)
+# ==============================================================================
+
+class EmployeeSelfAttendanceView(APIView):
+    """
+    GET  /api/v1/attendance/self-attendance/  → Config for current user
+    POST /api/v1/attendance/self-attendance/  → Submit self-attendance
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        settings_obj = AutomationSettings.get_solo()
+        try:
+            employee = Employee.objects.get(user_account=request.user, is_deleted=False)
+            user_allowed = (
+                settings_obj.enable_employee_self_attendance
+                and employee.can_self_attend
+            )
+            work_mode = employee.work_mode
+        except Employee.DoesNotExist:
+            user_allowed = False
+            work_mode = 'REGULAR'
+
+        return Response({
+            'enabled': user_allowed,
+            'work_mode': work_mode,
+            'allowed_types': settings_obj.self_attendance_allowed_types or [],
+            'require_approval': settings_obj.self_attendance_require_approval,
+        })
+
+    def post(self, request):
+        settings_obj = AutomationSettings.get_solo()
+
+        # 1. Global toggle
+        if not settings_obj.enable_employee_self_attendance:
+            return Response(
+                {'detail': 'Self-service attendance is disabled by HR. Contact your HR department.'},
+                status=403,
+            )
+
+        # 2. Employee lookup
+        try:
+            employee = Employee.objects.get(user_account=request.user, is_deleted=False)
+        except Employee.DoesNotExist:
+            return Response({'detail': 'No employee record linked to your account.'}, status=400)
+
+        # 3. Individual permission
+        if not employee.can_self_attend:
+            return Response(
+                {'detail': 'You are not authorized for self-attendance. Contact HR if this is incorrect.'},
+                status=403,
+            )
+
+        # 4. Check if Employee's Work Mode is globally allowed
+        # (We use 'WFH' to represent both WFH and Hybrid, and 'REGULAR' for Regular)
+        allowed_modes = settings_obj.self_attendance_allowed_types or []
+        emp_group = 'WFH' if employee.work_mode in ('WFH', 'HYBRID') else 'REGULAR'
+        
+        if emp_group not in allowed_modes:
+            return Response(
+                {'detail': f'HR has not enabled self-attendance for {employee.get_work_mode_display()} employees at this time.'},
+                status=403,
+            )
+
+        # 5. Validate required fields
+        date_str = request.data.get('date')
+        att_status = request.data.get('status')
+        punch_in_str = request.data.get('punch_in')
+        punch_out_str = request.data.get('punch_out')
+        reason = (request.data.get('reason') or '').strip()
+
+        if not all([date_str, att_status, punch_in_str, punch_out_str]):
+            return Response({'detail': 'date, status, punch_in, and punch_out are required.'}, status=400)
+
+        if not reason or len(reason) < 5:
+            return Response({'detail': 'Please provide a reason (minimum 5 characters).'}, status=400)
+
+        # 6. Parse date
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'detail': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+
+        # 7. No future dates
+        today = timezone.localdate()
+        if target_date > today:
+            return Response({'detail': 'Cannot add attendance for future dates.'}, status=400)
+
+        # 8. Max 7 days back
+        from datetime import timedelta
+        if target_date < today - timedelta(days=7):
+            return Response({'detail': 'Cannot add attendance for dates older than 7 days. Contact HR.'}, status=400)
+
+        # 9. No overwriting real device punches
+        existing = DailyAttendance.objects.filter(
+            employee_code=employee.employee_id,
+            attendance_date=target_date,
+        ).first()
+
+        if existing:
+            if existing.punch_in and existing.punch_out and not existing.is_manual_override:
+                return Response({'detail': 'You already have device-based attendance for this date.'}, status=400)
+            if existing.is_manual_override:
+                return Response({'detail': f'Attendance already recorded for this date ({existing.manual_status}).'}, status=400)
+
+        # 10. Build punch times
+        try:
+            tz = timezone.get_current_timezone()
+            punch_in = timezone.make_aware(datetime.strptime(f"{date_str} {punch_in_str}", "%Y-%m-%d %H:%M"), tz)
+            punch_out = timezone.make_aware(datetime.strptime(f"{date_str} {punch_out_str}", "%Y-%m-%d %H:%M"), tz)
+        except ValueError:
+            return Response({'detail': 'Invalid time format. Use HH:MM.'}, status=400)
+
+        if punch_out <= punch_in:
+            return Response({'detail': 'Punch out must be after punch in.'}, status=400)
+
+        working_seconds = int((punch_out - punch_in).total_seconds())
+
+        if working_seconds < 4 * 3600:
+            return Response({'detail': 'Minimum 4 working hours required for self-reported attendance.'}, status=400)
+
+        # 11. Save
+        attendance, created = DailyAttendance.objects.update_or_create(
+            employee_code=employee.employee_id,
+            attendance_date=target_date,
+            defaults={
+                'employee': employee,
+                'employee_name': employee.full_name,
+                'punch_in': punch_in,
+                'punch_out': punch_out,
+                'working_hours_seconds': working_seconds,
+                'net_working_hours_seconds': working_seconds,
+                'total_punches': 2,
+                'is_manual_override': True,
+                'manual_status': att_status,  # WFH, Site Visit, or Manual Present
+                'manual_reason': f"[Self-Reported] {reason}",
+                'updated_by_hr': None,
+                'status': DailyAttendance.STATUS_PRESENT,
+                'missing_punch': False,
+            },
+        )
+
+        action_word = "added" if created else "updated"
+        return Response({
+            'ok': True,
+            'message': f'{att_status} attendance {action_word} for {target_date.strftime("%d %b %Y")}.',
+        })

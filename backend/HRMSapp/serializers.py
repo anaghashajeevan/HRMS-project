@@ -457,6 +457,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
     location_name = serializers.SerializerMethodField()
     role_names = serializers.SerializerMethodField()
     role_codes = serializers.SerializerMethodField()
+    work_mode_display = serializers.CharField(source='get_work_mode_display', read_only=True)
     class Meta:
         model = Employee
         fields = [
@@ -471,7 +472,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             'position_title',
             'department_name','location_name', 
             'manager_name',
-            'date_of_joining','role_names','role_codes'
+            'date_of_joining','role_names','role_codes','work_mode', 'work_mode_display', 'can_self_attend',
         ]
         read_only_fields = fields
 
@@ -663,7 +664,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
             'has_user_account', 'user_account_info',
 
             # Timestamps
-            'created_at', 'updated_at',
+            'created_at', 'updated_at','work_mode', 'can_self_attend',
         ]
         read_only_fields = fields
 
@@ -897,7 +898,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
             'phone_number', 'date_of_birth', 'gender',
             'status', 'position', 'reporting_manager', 'structure_location',
             'department', 'location', 'cost_center',
-            'date_of_joining', 'date_of_exit',
+            'date_of_joining', 'date_of_exit','work_mode', 'can_self_attend',
             'bank_account_encrypted', 'bank_ifsc_code',
             'pan_number_encrypted', 'aadhaar_number_encrypted', 'uan_number_encrypted',
             'create_user_account', 'password', 'role_ids',
@@ -1107,6 +1108,8 @@ class EmployeeAuditLogSerializer(serializers.ModelSerializer):
             'date_of_joining': 'Date of Joining',
             'date_of_exit': 'Date of Exit',
             'bank_ifsc_code': 'Bank IFSC Code',
+            'work_mode': 'Work Mode',               
+        'can_self_attend': 'Self-Attendance',   
         }
         return labels.get(obj.field_name, obj.field_name.replace('_', ' ').title())
 

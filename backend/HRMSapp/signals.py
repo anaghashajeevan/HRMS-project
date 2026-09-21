@@ -13,7 +13,7 @@ AUDITED_FIELDS = [
     'position_id', 'reporting_manager_id', 'structure_location_id',
     'department_id', 'location_id', 'cost_center_id',   # 🆕 Track hierarchy changes
     'date_of_joining', 'date_of_exit',
-    'bank_ifsc_code',
+    'bank_ifsc_code','work_mode', 'can_self_attend',
 ]
 
 

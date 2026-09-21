@@ -25,6 +25,9 @@ export interface EmployeeCreatePayload {
   structure_location?: string | null;
   date_of_joining: string;
   date_of_exit?: string | null;
+  
+  work_mode?: 'REGULAR' | 'WFH' | 'HYBRID';
+  can_self_attend?: boolean;
 
   // Bank / statutory
   bank_account_encrypted?: string;

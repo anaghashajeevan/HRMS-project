@@ -70,6 +70,10 @@ class AutomationSettingsSerializer(serializers.ModelSerializer):
             'attendance_start_month',
             'resolved_attendance_start',
 
+            'enable_employee_self_attendance',
+            'self_attendance_allowed_types',
+            'self_attendance_require_approval',
+            
             # Meta
             'updated_at',
             'secret_statuses',

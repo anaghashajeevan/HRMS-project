@@ -22,6 +22,9 @@ export interface EmployeeListItem {
   date_of_joining: string;
   role_names?: string[];
   role_codes?: string[];
+  work_mode?: 'REGULAR' | 'WFH' | 'HYBRID';
+  work_mode_display?: string;
+  can_self_attend?: boolean;
 }
 
 export interface EmployeeDetail {
@@ -69,6 +72,8 @@ export interface EmployeeDetail {
   user_account_info: UserAccountInfo | null;
   created_at: string;
   updated_at: string;
+  work_mode?: 'REGULAR' | 'WFH' | 'HYBRID';
+  can_self_attend?: boolean;
 }
 
 export interface PaginatedEmployees {

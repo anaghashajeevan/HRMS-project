@@ -233,26 +233,29 @@ WSGI_APPLICATION = 'HRMS.wsgi.application'
 # DATABASE CONFIGURATION
 # ==============================================================================
 
-DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "django.db.backends.sqlite3")
+import socket
 
-if DATABASE_ENGINE == "django.db.backends.sqlite3":
-    # ---------------- SQLite (Development) ----------------
-    DATABASES = {
-        "default": {
-            "ENGINE": DATABASE_ENGINE,
-            "NAME": BASE_DIR / os.getenv("DATABASE_NAME", "db.sqlite3"),
-        }
-    }
-    print("[HRMS Settings] Database: SQLite (Development)")
+def is_postgres_reachable(host, port, timeout=1.5):
+    """Quick TCP probe — avoids Django's long connection timeout."""
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
 
-else:
+DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "django.db.backends.postgresql")
+
+database_host = os.getenv("DATABASE_HOST", "postgres")
+if not RUNNING_IN_DOCKER and database_host == "postgres":
+    database_host = "127.0.0.1"
+
+database_port = os.getenv("DATABASE_PORT", "5432")
+
+postgres_configured = DATABASE_ENGINE == "django.db.backends.postgresql"
+postgres_available = postgres_configured and is_postgres_reachable(database_host, database_port)
+
+if postgres_available:
     # ---------------- PostgreSQL (Production) ----------------
-    database_host = os.getenv("DATABASE_HOST", "postgres")
-    
-    # If not running in Docker, use localhost instead of 'postgres'
-    if not RUNNING_IN_DOCKER and database_host == "postgres":
-        database_host = "127.0.0.1"
-
     DATABASES = {
         "default": {
             "ENGINE": DATABASE_ENGINE,
@@ -260,10 +263,23 @@ else:
             "USER": os.getenv("DATABASE_USER", "postgres"),
             "PASSWORD": os.getenv("DATABASE_PASSWORD", ""),
             "HOST": database_host,
-            "PORT": os.getenv("DATABASE_PORT", "5432"),
+            "PORT": database_port,
         }
     }
     print(f"[HRMS Settings] Database: PostgreSQL (Production) - Host: {database_host}")
+
+else:
+    # ---------------- SQLite (Local Dev Fallback) ----------------
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / os.getenv("SQLITE_NAME", "db.sqlite3"),
+        }
+    }
+    if postgres_configured:
+        print(f"[HRMS Settings] PostgreSQL unreachable at {database_host}:{database_port} → falling back to SQLite (Local Dev)")
+    else:
+        print("[HRMS Settings] Database: SQLite (Local Dev)")
 
 # ==============================================================================
 # CORS / CSRF SETTINGS
