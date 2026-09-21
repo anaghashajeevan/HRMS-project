@@ -369,6 +369,23 @@ export const policiesApi = {
     const { data } = await api.get(`${BASE}/policies/pending-approvals/`);
     return Array.isArray(data) ? data : data.results ?? [];
   },
+  // Inside src/api/policy.ts (add to existing policiesApi export)
+  downloadStampedPdf: async (id: string, filename: string) => {
+    // We use responseType 'blob' to handle binary file data
+    const response = await api.get(`/policies/policies/${id}/download/`, {
+      responseType: 'blob',
+    });
+    
+    // Create a URL for the downloaded blob and trigger a click
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    link.parentNode?.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  },
 };
 
 // ==============================================================================

@@ -239,6 +239,7 @@ class PolicyVersion(models.Model):
         ('HTML', 'Rich Text (HTML)'),
         ('PDF', 'PDF Upload'),
         ('DOCX', 'Word Document'),
+        ('XLSX', 'Excel Spreadsheet'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

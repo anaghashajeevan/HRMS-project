@@ -37,12 +37,13 @@ class PolicyVersionSerializer(serializers.ModelSerializer):
         source='created_by.full_name', read_only=True, default=None
     )
     file_url = serializers.SerializerMethodField()
+    preview_url = serializers.SerializerMethodField()
 
     class Meta:
         model = PolicyVersion
         fields = [
             'id', 'policy', 'version_number',
-            'content_html', 'content_file', 'file_url', 'content_type',
+            'content_html', 'content_file', 'file_url', 'preview_url', 'content_type',
             'change_summary',
             'created_by', 'created_by_name',
             'is_published', 'published_at',
@@ -54,6 +55,13 @@ class PolicyVersionSerializer(serializers.ModelSerializer):
         ]
 
     def get_file_url(self, obj):
+        if obj.content_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.content_file.url)
+        return None
+
+    def get_preview_url(self, obj):
         if obj.content_file:
             request = self.context.get('request')
             if request:
@@ -195,6 +203,7 @@ class PolicyDetailSerializer(serializers.ModelSerializer):
     returned_by_name = serializers.CharField(
         source='returned_by.full_name', read_only=True, default=None
     )
+    approval_chain = serializers.SerializerMethodField()
     class Meta:
         model = Policy
         fields = [
@@ -216,11 +225,11 @@ class PolicyDetailSerializer(serializers.ModelSerializer):
             'ack_stats',
             'is_active', 'created_at', 'updated_at','return_comments', 'returned_at',           # ← ADD
             'returned_by', 'returned_by_name',           # ← ADD
-            'return_count', 
+            'return_count', 'approval_chain',
         ]
         read_only_fields = [
             'id', 'policy_number', 'current_version', 'versions',
-            'published_at', 'created_at', 'updated_at','return_comments', 'returned_at', 'returned_by', 'return_count', 
+            'published_at', 'created_at', 'updated_at','return_comments', 'returned_at', 'returned_by', 'return_count', 'approval_chain',
         ]
 
     def get_applicable_department_names(self, obj):
@@ -245,7 +254,46 @@ class PolicyDetailSerializer(serializers.ModelSerializer):
             'overdue': overdue,
             'percentage': round((acked / total * 100), 1) if total > 0 else 0,
         }
+    
+    def get_approval_chain(self, obj):
+        """Return the full approval chain for digital stamp display."""
+        from .models import PolicyApproval
 
+        if obj.status not in ['APPROVED', 'PUBLISHED']:
+            return None
+
+        version = obj.current_version
+        if not version:
+            return None
+
+        approvals = PolicyApproval.objects.filter(
+            version=version,
+            status='APPROVED',
+        ).select_related('approver').order_by('step_number')
+
+        chain = []
+        for approval in approvals:
+            approver = approval.approver
+            position_title = ''
+            if approver and hasattr(approver, 'position') and approver.position:
+                position_title = approver.position.title
+
+            chain.append({
+                'step_number': approval.step_number,
+                'step_name': approval.step_name,
+                'approver_name': approver.full_name if approver else 'Unknown',
+                'approver_employee_id': approver.employee_id if approver else '',
+                'approver_position': position_title,
+                'approved_at': approval.acted_at.isoformat() if approval.acted_at else None,
+                'comments': approval.comments,
+            })
+
+        return {
+            'approved': len(chain) > 0,
+            'published_at': obj.published_at.isoformat() if obj.published_at else None,
+            'published_by': obj.created_by.full_name if obj.created_by else None,
+            'steps': chain,
+        }
 
 class PolicyCreateSerializer(serializers.ModelSerializer):
     """For creating/updating policies."""

@@ -206,9 +206,10 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware', 
+    # 'django.middleware.clickjacking.XFrameOptionsMiddleware', 
 ]
 
+X_FRAME_OPTIONS = 'ALLOWALL'
 ROOT_URLCONF = 'HRMS.urls'
 
 TEMPLATES = [
@@ -548,3 +549,8 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(hour=23, minute=0),
     },
 }
+
+
+# Allow PDF files to display inline in browser (not force download)
+import mimetypes
+mimetypes.add_type('application/pdf', '.pdf', True)

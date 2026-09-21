@@ -48,9 +48,11 @@ export default function PolicyCreateVersionPage() {
       'application/pdf',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/msword',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
     ];
     if (!allowed.includes(file.type)) {
-      toast.error('Only PDF or Word documents are allowed');
+      toast.error('Only PDF, Word, or Excel files are allowed');
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
@@ -69,10 +71,12 @@ export default function PolicyCreateVersionPage() {
       const formData = new FormData();
       formData.append('content_file', contentFile);
       formData.append('content_html', '');
-      formData.append(
-        'content_type',
-        contentFile.name.toLowerCase().endsWith('.pdf') ? 'PDF' : 'DOCX'
-      );
+      const fileExt = contentFile.name.toLowerCase().split('.').pop();
+      const detectedType = fileExt === 'pdf' ? 'PDF'
+        : ['docx', 'doc'].includes(fileExt || '') ? 'DOCX'
+        : ['xlsx', 'xls'].includes(fileExt || '') ? 'XLSX'
+        : 'PDF';
+      formData.append('content_type', detectedType);
       formData.append('change_summary', changeSummary.trim());
       formData.append('effective_from', effectiveFrom);
 
@@ -241,11 +245,11 @@ if (!wasPublished) {
                       Click to upload updated document
                     </p>
                     <p className="mt-1 text-xs text-gray-500">
-                      PDF or Word (.docx) • Max 10 MB
+                      PDF, Word, or Excel • Max 10 MB
                     </p>
                     <input
                       type="file"
-                      accept=".pdf,.docx,.doc"
+                     accept=".pdf,.docx,.doc,.xlsx,.xls"
                       onChange={handleFileChange}
                       className="hidden"
                     />

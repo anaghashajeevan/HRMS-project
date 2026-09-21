@@ -13,6 +13,7 @@ import { policiesApi } from '../../api/policy';
 import { useAuth } from '../../context/AuthContext';
 import type { PolicyDetail, ComplianceStats, PolicyDistribution } from '../../types/policy';
 import { RotateCcw } from 'lucide-react';  // Add to icon imports
+import PolicyDocumentViewer from '../policies/PolicyDocumentViewer';
 
 export default function PolicyDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -142,6 +143,20 @@ export default function PolicyDetailPage() {
     setActionLoading('');
   }
 };
+  const handleDownload = async () => {
+    if (!policy) return;
+    const toastId = toast.loading('Preparing stamped document...');
+    try {
+      const ext = policy.current_version?.content_type === 'PDF' ? '.pdf' : '';
+      const filename = `${policy.title.replace(/\s+/g, '_')}_Certified${ext}`;
+      await policiesApi.downloadStampedPdf(policy.id, filename);
+      toast.success('Downloaded successfully', { id: toastId });
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to download document', { id: toastId });
+    }
+  };
+
 
   if (loading || !policy) {
     return (
@@ -200,6 +215,16 @@ export default function PolicyDetailPage() {
 
               {/* Action Buttons */}
               <div className="flex gap-2">
+                {/* NEW DOWNLOAD BUTTON */}
+                {policy.current_version && (
+                  <button
+                    onClick={handleDownload}
+                    className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download
+                  </button>
+                )}
                 {isHR && policy.status === 'DRAFT' && (
   <button
     onClick={() => handleAction('submit')}
@@ -303,299 +328,178 @@ export default function PolicyDetailPage() {
 </div>
 
           {/* Content Tab */}
-         {/* Content Tab */}
-{activeTab === 'content' && (
-  <div className="space-y-6">
-    {/* Content Card — Full Width */}
-    {policy.status === 'DRAFT' && policy.return_comments && policy.returned_at && (
-      <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-5 shadow-sm">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center
-                          rounded-full bg-amber-200">
-            <RotateCcw className="h-5 w-5 text-amber-800" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-bold text-amber-900">🔄 Changes Requested</h3>
-              {policy.return_count && policy.return_count > 1 && (
-                <span className="rounded-full bg-amber-200 px-2 py-0.5
-                                 text-xs font-semibold text-amber-900">
-                  Returned {policy.return_count}× times
-                </span>
+             {/* Content Tab */}
+          {activeTab === 'content' && (
+            <div className="space-y-6">
+              {/* Return Comments Banner */}
+              {policy.status === 'DRAFT' && policy.return_comments && policy.returned_at && (
+                <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-5 shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-200">
+                      <RotateCcw className="h-5 w-5 text-amber-800" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-bold text-amber-900">🔄 Changes Requested</h3>
+                        {policy.return_count && policy.return_count > 1 && (
+                          <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                            Returned {policy.return_count}× times
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-sm text-amber-800">
+                        Returned by <strong>{policy.returned_by_name}</strong> on{' '}
+                        {new Date(policy.returned_at).toLocaleDateString('en-IN', {
+                          day: 'numeric', month: 'long', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                        })}
+                      </p>
+                      <div className="mt-3 rounded-lg bg-white border border-amber-200 p-3">
+                        <p className="text-xs font-semibold text-amber-900 mb-1">📝 Reviewer's Comments:</p>
+                        <p className="text-sm text-gray-800 whitespace-pre-wrap">{policy.return_comments}</p>
+                      </div>
+                      {isHR && (
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            onClick={() => navigate(`/policies/${id}/create-version`)}
+                            className="flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700"
+                          >
+                            Upload Revised Version
+                          </button>
+                          <button
+                            onClick={() => handleAction('submit')}
+                            disabled={actionLoading === 'submit'}
+                            className="flex items-center gap-2 rounded-lg border border-amber-600 bg-white px-4 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                          >
+                            {actionLoading === 'submit' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                            Resubmit for Approval
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* DOCUMENT VIEWER — Handles PDF, Word, Excel inline */}
+              {policy.current_version ? (
+                <div style={{ minHeight: '700px' }}>
+                  <PolicyDocumentViewer policy={policy} />
+                </div>
+              ) : (
+                <div className="rounded-xl bg-white p-12 text-center shadow-sm ring-1 ring-gray-100">
+                  <FileText className="mx-auto h-12 w-12 text-gray-300" />
+                  <p className="mt-3 text-gray-600">No version created yet</p>
+                </div>
+              )}
+
+              {/* Change Summary */}
+              {policy.current_version?.change_summary && (
+                <div className="rounded-xl bg-blue-50 border border-blue-200 p-4">
+                  <p className="text-xs font-semibold text-blue-900">📝 What Changed in This Version:</p>
+                  <p className="mt-1 text-sm text-blue-800">{policy.current_version.change_summary}</p>
+                </div>
+              )}
+
+              {/* Policy Details Cards */}
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">📋 Policy Details</h3>
+                  <dl className="space-y-2 text-sm">
+                    <div className="flex justify-between"><dt className="text-gray-500">Status</dt><dd className="font-semibold">{policy.status_display}</dd></div>
+                    <div className="flex justify-between"><dt className="text-gray-500">Category</dt><dd>{policy.category?.name}</dd></div>
+                    <div className="flex justify-between"><dt className="text-gray-500">Version</dt><dd>v{policy.current_version?.version_number || '—'}</dd></div>
+                    <div className="flex justify-between"><dt className="text-gray-500">Priority</dt><dd>{policy.priority_display}</dd></div>
+                    {policy.effective_date && <div className="flex justify-between"><dt className="text-gray-500">Effective Date</dt><dd>{new Date(policy.effective_date).toLocaleDateString('en-IN')}</dd></div>}
+                    {policy.expiry_date && <div className="flex justify-between"><dt className="text-gray-500">Expiry Date</dt><dd>{new Date(policy.expiry_date).toLocaleDateString('en-IN')}</dd></div>}
+                    {policy.policy_owner_name && <div className="flex justify-between"><dt className="text-gray-500">Owner</dt><dd>{policy.policy_owner_name}</dd></div>}
+                    {policy.created_by_name && <div className="flex justify-between"><dt className="text-gray-500">Created By</dt><dd>{policy.created_by_name}</dd></div>}
+                  </dl>
+                </div>
+                <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">👥 Applicability</h3>
+                  {policy.applies_to_all ? (
+                    <div className="flex items-center gap-2 rounded-lg bg-green-50 border border-green-200 p-3">
+                      <Users className="h-5 w-5 text-green-600" />
+                      <span className="text-sm font-semibold text-green-800">All Employees</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {policy.applicable_department_names?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-500 mb-1">Departments:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {policy.applicable_department_names.map((d) => (
+                              <span key={d.id} className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">{d.name}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {policy.applicable_position_titles?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-500 mb-1">Positions:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {policy.applicable_position_titles.map((p) => (
+                              <span key={p.id} className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700">{p.title}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">✅ Acknowledgment</h3>
+                  <dl className="space-y-2 text-sm">
+                    <div className="flex justify-between"><dt className="text-gray-500">Required</dt><dd>{policy.requires_acknowledgment ? '✅ Yes' : '❌ No'}</dd></div>
+                    {policy.requires_acknowledgment && <div className="flex justify-between"><dt className="text-gray-500">Deadline</dt><dd>{policy.acknowledgment_deadline_days} days</dd></div>}
+                    <div className="flex justify-between"><dt className="text-gray-500">Mandatory</dt><dd>{policy.is_mandatory ? '✅ Yes (new hires)' : 'No'}</dd></div>
+                    <div className="flex justify-between"><dt className="text-gray-500">Review Interval</dt><dd>{policy.review_interval_months > 0 ? `${policy.review_interval_months} months` : 'No auto-review'}</dd></div>
+                  </dl>
+                </div>
+              </div>
+
+              {/* Employee Acknowledge Section */}
+              {policy.status === 'PUBLISHED' && policy.requires_acknowledgment && myDist && (
+                <div className="rounded-xl border-2 border-blue-200 bg-blue-50 p-6">
+                  {myDist.acknowledged ? (
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="h-8 w-8 text-green-600" />
+                      <div>
+                        <h3 className="font-semibold text-green-900">Acknowledged ✅</h3>
+                        <p className="text-sm text-green-700">
+                          You acknowledged this policy on{' '}
+                          {myDist.acknowledged_at ? new Date(myDist.acknowledged_at).toLocaleDateString('en-IN') : ''}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <h3 className="text-lg font-semibold text-blue-900 mb-3">📋 Policy Acknowledgment Required</h3>
+                      <div className="rounded-lg bg-white p-4 mb-4 border border-blue-200">
+                        <p className="text-sm text-gray-700">{policy.acknowledgment_text}</p>
+                      </div>
+                      {myDist.deadline && (
+                        <p className={`text-sm mb-4 ${myDist.is_overdue ? 'text-red-700 font-bold' : 'text-blue-700'}`}>
+                          {myDist.is_overdue
+                            ? `⛔ OVERDUE — Deadline was ${new Date(myDist.deadline).toLocaleDateString('en-IN')}`
+                            : `⏰ Deadline: ${new Date(myDist.deadline).toLocaleDateString('en-IN')}`}
+                        </p>
+                      )}
+                      <button
+                        onClick={() => handleAction('acknowledge')}
+                        disabled={actionLoading === 'acknowledge'}
+                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {actionLoading === 'acknowledge' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
+                        I Acknowledge This Policy
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
             </div>
-            <p className="mt-1 text-sm text-amber-800">
-              Returned by <strong>{policy.returned_by_name}</strong> on{' '}
-              {new Date(policy.returned_at).toLocaleDateString('en-IN', {
-                day: 'numeric', month: 'long', year: 'numeric',
-                hour: '2-digit', minute: '2-digit',
-              })}
-            </p>
-            <div className="mt-3 rounded-lg bg-white border border-amber-200 p-3">
-              <p className="text-xs font-semibold text-amber-900 mb-1">
-                📝 Reviewer's Comments:
-              </p>
-              <p className="text-sm text-gray-800 whitespace-pre-wrap">
-                {policy.return_comments}
-              </p>
-            </div>
-            {isHR && (
-              <div className="mt-3 flex gap-2">
-                <button
-                  onClick={() => navigate(`/policies/${id}/create-version`)}
-                  className="flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2
-                             text-xs font-semibold text-white hover:bg-amber-700"
-                >
-                  Upload Revised Version
-                </button>
-                <button
-                  onClick={() => handleAction('submit')}
-                  disabled={actionLoading === 'submit'}
-                  className="flex items-center gap-2 rounded-lg border border-amber-600
-                             bg-white px-4 py-2 text-xs font-semibold text-amber-700
-                             hover:bg-amber-100 disabled:opacity-50"
-                >
-                  {actionLoading === 'submit'
-                    ? <Loader2 className="h-3 w-3 animate-spin" />
-                    : <Send className="h-3 w-3" />}
-                  Resubmit for Approval
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    )}
-    {policy.current_version ? (
-      <div className="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-500 uppercase">
-            Policy Content — v{policy.current_version.version_number}
-          </h3>
-          {policy.current_version.content_file && policy.current_version.file_url && (
-            <a
-              href={policy.current_version.file_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Download Document
-            </a>
           )}
-        </div>
-
-        {policy.current_version.content_html ? (
-          <div
-            className="prose prose-sm max-w-none text-gray-800 leading-relaxed"
-            dangerouslySetInnerHTML={{ __html: policy.current_version.content_html }}
-          />
-        ) : policy.current_version.content_file ? (
-          <div className="rounded-lg bg-gray-50 border border-gray-200 p-8 text-center">
-            <FileText className="mx-auto h-12 w-12 text-gray-400" />
-            <p className="mt-3 text-gray-600">
-              This policy content is in an uploaded document.
-            </p>
-            {policy.current_version.file_url && (
-              <a
-                href={policy.current_version.file_url}
-                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700"
-              >
-                <Download className="h-4 w-4" />
-                View Document
-              </a>
-            )}
-          </div>
-        ) : (
-          <div className="rounded-lg bg-amber-50 border border-amber-200 p-6 text-center">
-            <FileText className="mx-auto h-10 w-10 text-amber-400" />
-            <p className="mt-3 text-amber-800 font-semibold">No content added yet</p>
-            <p className="mt-1 text-sm text-amber-700">
-              Edit this policy to add content before submitting for review.
-            </p>
-          </div>
-        )}
-
-        {/* Change Summary */}
-        {policy.current_version.change_summary && (
-          <div className="mt-4 rounded-lg bg-blue-50 border border-blue-200 p-3">
-            <p className="text-xs font-semibold text-blue-900">📝 What Changed:</p>
-            <p className="mt-1 text-sm text-blue-800">{policy.current_version.change_summary}</p>
-          </div>
-        )}
-      </div>
-    ) : (
-      <div className="rounded-xl bg-white p-12 text-center shadow-sm ring-1 ring-gray-100">
-        <FileText className="mx-auto h-12 w-12 text-gray-300" />
-        <p className="mt-3 text-gray-600">No version created yet</p>
-      </div>
-    )}
-
-    {/* Policy Details Card (below content, not sidebar) */}
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-      {/* Details */}
-      <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">📋 Policy Details</h3>
-        <dl className="space-y-2 text-sm">
-          <div className="flex justify-between">
-            <dt className="text-gray-500">Status</dt>
-            <dd className="font-semibold">{policy.status_display}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-gray-500">Category</dt>
-            <dd>{policy.category?.name}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-gray-500">Version</dt>
-            <dd>v{policy.current_version?.version_number || '—'}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-gray-500">Priority</dt>
-            <dd>{policy.priority_display}</dd>
-          </div>
-          {policy.effective_date && (
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Effective Date</dt>
-              <dd>{new Date(policy.effective_date).toLocaleDateString('en-IN')}</dd>
-            </div>
-          )}
-          {policy.expiry_date && (
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Expiry Date</dt>
-              <dd>{new Date(policy.expiry_date).toLocaleDateString('en-IN')}</dd>
-            </div>
-          )}
-          {policy.policy_owner_name && (
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Owner</dt>
-              <dd>{policy.policy_owner_name}</dd>
-            </div>
-          )}
-          {policy.created_by_name && (
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Created By</dt>
-              <dd>{policy.created_by_name}</dd>
-            </div>
-          )}
-        </dl>
-      </div>
-
-      {/* Applicability */}
-      <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">👥 Applicability</h3>
-        {policy.applies_to_all ? (
-          <div className="flex items-center gap-2 rounded-lg bg-green-50 border border-green-200 p-3">
-            <Users className="h-5 w-5 text-green-600" />
-            <span className="text-sm font-semibold text-green-800">All Employees</span>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {policy.applicable_department_names?.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-gray-500 mb-1">Departments:</p>
-                <div className="flex flex-wrap gap-1">
-                  {policy.applicable_department_names.map((d) => (
-                    <span key={d.id} className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">{d.name}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {policy.applicable_position_titles?.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-gray-500 mb-1">Positions:</p>
-                <div className="flex flex-wrap gap-1">
-                  {policy.applicable_position_titles.map((p) => (
-                    <span key={p.id} className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700">{p.title}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {policy.applicable_department_names?.length === 0 && policy.applicable_position_titles?.length === 0 && (
-              <p className="text-sm text-gray-500">No specific targets set</p>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Acknowledgment Settings */}
-      <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">✅ Acknowledgment</h3>
-        <dl className="space-y-2 text-sm">
-          <div className="flex justify-between">
-            <dt className="text-gray-500">Required</dt>
-            <dd>{policy.requires_acknowledgment ? '✅ Yes' : '❌ No'}</dd>
-          </div>
-          {policy.requires_acknowledgment && (
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Deadline</dt>
-              <dd>{policy.acknowledgment_deadline_days} days</dd>
-            </div>
-          )}
-          <div className="flex justify-between">
-            <dt className="text-gray-500">Mandatory</dt>
-            <dd>{policy.is_mandatory ? '✅ Yes (new hires)' : 'No'}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-gray-500">Review Interval</dt>
-            <dd>{policy.review_interval_months > 0 ? `${policy.review_interval_months} months` : 'No auto-review'}</dd>
-          </div>
-        </dl>
-      </div>
-    </div>
-
-    {/* Employee Acknowledge Section */}
-   {/* Acknowledge Section — for ANYONE with a distribution */}
-{policy.status === 'PUBLISHED' && policy.requires_acknowledgment && myDist && (
-  <div className="rounded-xl border-2 border-blue-200 bg-blue-50 p-6">
-    {myDist.acknowledged ? (
-      <div className="flex items-center gap-3">
-        <CheckCircle2 className="h-8 w-8 text-green-600" />
-        <div>
-          <h3 className="font-semibold text-green-900">Acknowledged ✅</h3>
-          <p className="text-sm text-green-700">
-            You acknowledged this policy on{' '}
-            {myDist.acknowledged_at
-              ? new Date(myDist.acknowledged_at).toLocaleDateString('en-IN')
-              : ''
-            }
-          </p>
-        </div>
-      </div>
-    ) : (
-      <>
-        <h3 className="text-lg font-semibold text-blue-900 mb-3">
-          📋 Policy Acknowledgment Required
-        </h3>
-        <div className="rounded-lg bg-white p-4 mb-4 border border-blue-200">
-          <p className="text-sm text-gray-700">{policy.acknowledgment_text}</p>
-        </div>
-        {myDist.deadline && (
-          <p className={`text-sm mb-4 ${
-            myDist.is_overdue ? 'text-red-700 font-bold' : 'text-blue-700'
-          }`}>
-            {myDist.is_overdue
-              ? `⛔ OVERDUE — Deadline was ${new Date(myDist.deadline).toLocaleDateString('en-IN')}`
-              : `⏰ Deadline: ${new Date(myDist.deadline).toLocaleDateString('en-IN')}`
-            }
-          </p>
-        )}
-        <button
-          onClick={() => handleAction('acknowledge')}
-          disabled={actionLoading === 'acknowledge'}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {actionLoading === 'acknowledge'
-            ? <Loader2 className="h-4 w-4 animate-spin" />
-            : <Shield className="h-4 w-4" />
-          }
-          I Acknowledge This Policy
-        </button>
-      </>
-    )}
-  </div>
-)}
-  </div>
-)}
 
           {/* Compliance Tab */}
           {activeTab === 'compliance' && compliance && (

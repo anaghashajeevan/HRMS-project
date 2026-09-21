@@ -110,7 +110,16 @@ export default function ReimbursementReportsPage() {
       setGenerating(null);
     }
   };
-
+  const getDownloadUrl = (fileUrl: string) => {
+  if (!fileUrl) return '';
+  if (fileUrl.startsWith('/')) return fileUrl;
+  try {
+    const parsed = new URL(fileUrl);
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return fileUrl;
+  }
+};
   const formatDate = (dateStr: string) =>
     new Date(dateStr).toLocaleString('en-IN', {
       day: 'numeric', month: 'short', year: 'numeric',
@@ -297,7 +306,7 @@ export default function ReimbursementReportsPage() {
                         </div>
                       </div>
                       <a
-                        href={report.file}
+                        href={getDownloadUrl(report.file)}
                         target="_blank"
                         rel="noreferrer"
                         className="flex items-center gap-1 rounded-lg bg-primary-50 px-3 py-2 text-xs font-medium text-primary-700 hover:bg-primary-100"

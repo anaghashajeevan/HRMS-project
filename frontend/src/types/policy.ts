@@ -25,7 +25,8 @@ export interface PolicyVersion {
   content_html: string;
   content_file: string | null;
   file_url: string | null;
-  content_type: 'HTML' | 'PDF' | 'DOCX';
+  preview_url: string | null;
+  content_type: 'HTML' | 'PDF' | 'DOCX' | 'XLSX';
   change_summary: string;
   created_by: string | null;
   created_by_name: string | null;
@@ -57,6 +58,23 @@ export interface PolicyApproval {
   acted_at: string | null;
   comments: string;
   created_at: string;
+}
+
+export interface ApprovalChainStep {
+  step_number: number;
+  step_name: string;
+  approver_name: string;
+  approver_employee_id: string;
+  approver_position: string;
+  approved_at: string | null;
+  comments: string;
+}
+
+export interface ApprovalChain {
+  approved: boolean;
+  published_at: string | null;
+  published_by: string | null;
+  steps: ApprovalChainStep[];
 }
 
 // ACK STATS
@@ -134,7 +152,8 @@ export interface PolicyDetail extends Omit<PolicyListItem, 'category'> {
   returned_at?: string | null;                       // ← ADD
   returned_by?: string | null;                       // ← ADD
   returned_by_name?: string | null;                  // ← ADD
-  return_count?: number;     
+  return_count?: number;
+  approval_chain?: ApprovalChain | null;   
 }
 
 // DISTRIBUTION

@@ -306,9 +306,15 @@ class UploadedReimbursementFormSerializer(serializers.ModelSerializer):
 
 
 class GeneratedReportSerializer(serializers.ModelSerializer):
+    file = serializers.SerializerMethodField()
     batch_title = serializers.CharField(source="batch.title", read_only=True)
     claim_employee_name = serializers.CharField(source="claim.employee.full_name", read_only=True)
 
+    def get_file(self, obj):
+        if not obj.file:
+            return None
+        # Return relative path so browser uses its active domain/port
+        return obj.file.url if obj.file.url.startswith('/') else f"/media/{obj.file.name}"
     class Meta:
         model = GeneratedReport
         fields = [
