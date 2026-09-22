@@ -14,6 +14,10 @@ import { useAuth } from '../../context/AuthContext';
 import type { PolicyDetail, ComplianceStats, PolicyDistribution } from '../../types/policy';
 import { RotateCcw } from 'lucide-react';  // Add to icon imports
 import PolicyDocumentViewer from '../policies/PolicyDocumentViewer';
+// import html2pdf from 'html2pdf.js';
+import html2canvas from 'html2canvas-pro';
+import { jsPDF } from 'jspdf';
+
 
 export default function PolicyDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -29,6 +33,7 @@ export default function PolicyDetailPage() {
   const [activeTab, setActiveTab] = useState<'content' | 'compliance' | 'versions'>('content');
   const [isActualApprover, setIsActualApprover] = useState(false);
   const [myDist, setMyDist] = useState<any>(null);
+  const [docReady, setDocReady] = useState(false);
 
   useEffect(() => {
     if (id) loadPolicy();
@@ -156,7 +161,156 @@ export default function PolicyDetailPage() {
       toast.error('Failed to download document', { id: toastId });
     }
   };
+// const handleDownloadReadablePdf = async () => {
+//   const viewerElement = document.getElementById('policy-document-content');
+//   if (!viewerElement) {
+//     toast.error('Document not loaded yet');
+//     return;
+//   }
+//   const toastId = toast.loading('Preparing document...');
+//   try {
+//     await html2pdf()
+//       .set({
+//         margin: 10,
+//         filename: `${policy!.title.replace(/\s+/g, '_')}_v${policy!.current_version?.version_number}.pdf`,
+//         html2canvas: { scale: 2 },
+//         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+//       })
+//       .from(viewerElement)
+//       .save();
+//     toast.success('Downloaded successfully', { id: toastId });
+//   } catch (error) {
+//     toast.error('Failed to generate PDF', { id: toastId });
+//   }
+// };
 
+// const handleDownloadReadablePdf = async () => {
+//   const viewerElement = document.getElementById('policy-document-content');
+//   if (!viewerElement) {
+//     toast.error('Document not loaded yet');
+//     return;
+//   }
+//   const toastId = toast.loading('Preparing document...');
+//   try {
+//     const options = {
+//       margin: 0,
+//       filename: `${policy!.title.replace(/\s+/g, '_')}_v${policy!.current_version?.version_number}.pdf`,
+//       html2canvas: { scale: 2, useCORS: true },
+//       jsPDF: { unit: 'px', format: [794, 1123], orientation: 'portrait' },
+//       pagebreak: { mode: ['css', 'legacy'] },
+//     } as any; // html2pdf.js's type defs don't declare `pagebreak`, though the library supports it at runtime
+
+//     await html2pdf().set(options).from(viewerElement).save();
+//     toast.success('Downloaded successfully', { id: toastId });
+//   } catch (error) {
+//     console.error(error);
+//     toast.error('Failed to generate PDF', { id: toastId });
+//   }
+// };
+const handleDownloadReadablePdf = async () => {
+  const el = document.getElementById('policy-document-content');
+  if (!el) {
+    toast.error('Document not loaded yet');
+    return;
+  }
+  const toastId = toast.loading('Preparing document...');
+  try {
+    const PAGE_W = 794;      // A4 @ 96dpi
+    const PAGE_H = 1123;
+    const MARGIN_X = 48;     // ~12.7mm left/right
+    const MARGIN_Y = 56;     // ~14.8mm top/bottom
+    const CONTENT_W = PAGE_W - MARGIN_X * 2;
+    const CONTENT_H = PAGE_H - MARGIN_Y * 2;
+
+    const canvas = await html2canvas(el as HTMLElement, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+    });
+
+    const pdf = new jsPDF({
+      unit: 'px',
+      format: [PAGE_W, PAGE_H],
+      orientation: 'portrait',
+      hotfixes: ['px_scaling'],
+    });
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    const ratio = canvas.width / CONTENT_W;            // canvas px per PDF px
+    const sliceHeightPx = Math.floor(CONTENT_H * ratio);
+    const searchBand = Math.floor(sliceHeightPx * 0.18);
+
+    // Find a fully-blank row near the ideal boundary so we never cut through text
+    const safeCut = (start: number): number => {
+      const ideal = Math.min(start + sliceHeightPx, canvas.height);
+      if (ideal >= canvas.height) return ideal;
+
+      const bandTop = Math.max(start + 1, ideal - searchBand);
+      let data: Uint8ClampedArray;
+      try {
+        data = ctx.getImageData(0, bandTop, canvas.width, ideal - bandTop).data;
+      } catch {
+        return ideal; // canvas tainted by a cross-origin image
+      }
+
+      const rowBytes = canvas.width * 4;
+      const isBlank = (r: number) => {
+        const offset = r * rowBytes;
+        for (let x = 0; x < rowBytes; x += 16) { // sample every 4th pixel
+          if (
+            data[offset + x] < 250 ||
+            data[offset + x + 1] < 250 ||
+            data[offset + x + 2] < 250
+          ) {
+            return false;
+          }
+        }
+        return true;
+      };
+
+      for (let r = ideal - bandTop - 1; r >= 2; r--) {
+        if (isBlank(r) && isBlank(r - 1) && isBlank(r - 2)) return bandTop + r;
+      }
+      return ideal; // no clean gap found (solid block) — hard cut
+    };
+
+    let y = 0;
+    let page = 0;
+    while (y < canvas.height) {
+      const cut = safeCut(y);
+      const sliceH = cut - y;
+
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceH;
+      const pctx = pageCanvas.getContext('2d')!;
+      pctx.fillStyle = '#ffffff';
+      pctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      pctx.drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+
+      if (page > 0) pdf.addPage([PAGE_W, PAGE_H], 'portrait');
+      pdf.addImage(
+        pageCanvas.toDataURL('image/jpeg', 0.95),
+        'JPEG',
+        MARGIN_X,
+        MARGIN_Y,
+        CONTENT_W,
+        sliceH / ratio,
+      );
+
+      y = cut;
+      page++;
+    }
+
+    pdf.save(
+      `${policy!.title.replace(/\s+/g, '_')}_v${policy!.current_version?.version_number}.pdf`,
+    );
+    toast.success('Downloaded successfully', { id: toastId });
+  } catch (error) {
+    console.error(error);
+    toast.error('Failed to generate PDF', { id: toastId });
+  }
+};
 
   if (loading || !policy) {
     return (
@@ -216,7 +370,7 @@ export default function PolicyDetailPage() {
               {/* Action Buttons */}
               <div className="flex gap-2">
                 {/* NEW DOWNLOAD BUTTON */}
-                {policy.current_version && (
+                {/* {policy.current_version && (
                   <button
                     onClick={handleDownload}
                     className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
@@ -224,7 +378,25 @@ export default function PolicyDetailPage() {
                     <Download className="h-4 w-4" />
                     Download
                   </button>
-                )}
+                )} */}
+               {policy.current_version && (
+  <>
+    {policy.current_version.content_type === 'PDF' ? (
+      <button onClick={handleDownload} className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
+        <Download className="h-4 w-4" /> Download
+      </button>
+    ) : (
+      <button
+        onClick={handleDownloadReadablePdf}
+        disabled={!docReady}
+        className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {docReady ? <Download className="h-4 w-4" /> : <Loader2 className="h-4 w-4 animate-spin" />}
+        {docReady ? 'Download (PDF)' : 'Preparing…'}
+      </button>
+    )}
+  </>
+)}
                 {isHR && policy.status === 'DRAFT' && (
   <button
     onClick={() => handleAction('submit')}
@@ -384,7 +556,7 @@ export default function PolicyDetailPage() {
               {/* DOCUMENT VIEWER — Handles PDF, Word, Excel inline */}
               {policy.current_version ? (
                 <div style={{ minHeight: '700px' }}>
-                  <PolicyDocumentViewer policy={policy} />
+                  <PolicyDocumentViewer policy={policy} onReadyChange={setDocReady}/>
                 </div>
               ) : (
                 <div className="rounded-xl bg-white p-12 text-center shadow-sm ring-1 ring-gray-100">

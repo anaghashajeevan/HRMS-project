@@ -638,6 +638,273 @@
 //   );
 // }
 
+// =================================================================================================================
+
+// import { useEffect, useRef, useState } from 'react';
+// import mammoth from 'mammoth';
+// import * as XLSX from 'xlsx';
+// import api from '../../api/axios';
+// import type { PolicyDetail } from '../../types/policy';
+
+// interface PolicyDocumentViewerProps {
+//   policy: PolicyDetail;
+// }
+
+// // Simulated A4 page at 96dpi
+// const PAGE_WIDTH = 794;
+// const PAGE_HEIGHT = 1123;
+// const PAGE_PADDING = 56;
+// const CONTENT_HEIGHT = PAGE_HEIGHT - PAGE_PADDING * 2;
+// const STAMP_ESTIMATED_HEIGHT = 190; // conservative height for the stamp block
+
+// function ApprovalStamp({ policy }: { policy: PolicyDetail }) {
+//   const chain = (policy as any).approval_chain;
+//   if (!chain || !chain.approved || !chain.steps?.length) return null;
+
+//   return (
+//     <div className="border-2 border-emerald-600 rounded-lg overflow-hidden mt-6">
+//       <div className="bg-emerald-600 text-white text-center text-xs font-bold py-1.5 tracking-wide">
+//         OFFICIALLY APPROVED & DIGITALLY SEALED DOCUMENT
+//       </div>
+//       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4">
+//         {chain.steps.map((step: any, i: number) => (
+//           <div key={i}>
+//             <p className="text-[10px] font-bold text-gray-500 uppercase">
+//               {step.step_name || 'Approved By'}
+//             </p>
+//             <p className="text-sm font-bold text-gray-900">{step.approver_name}</p>
+//             <p className="text-xs text-gray-500">
+//               {step.approved_at ? new Date(step.approved_at).toLocaleDateString('en-IN') : 'N/A'}
+//             </p>
+//             {step.approver_employee_id && (
+//               <p className="text-xs text-gray-500">Emp ID: {step.approver_employee_id}</p>
+//             )}
+//             <span className="mt-1 inline-block rounded-full bg-emerald-50 border border-emerald-600 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+//               ✓ DIGITALLY SIGNED
+//             </span>
+//           </div>
+//         ))}
+//       </div>
+//     </div>
+//   );
+// }
+
+// /**
+//  * Splits raw HTML into fixed-height "pages" by measuring each top-level
+//  * block element in a hidden container, then figures out whether the
+//  * approval stamp fits on the last page or needs a page of its own.
+//  */
+// function usePaginatedDocument(htmlContent: string | null, hasStamp: boolean) {
+//   const [pages, setPages] = useState<string[]>([]);
+//   const [stampOnNewPage, setStampOnNewPage] = useState(false);
+//   const measureRef = useRef<HTMLDivElement>(null);
+
+//   useEffect(() => {
+//     const measureEl = measureRef.current;
+//     if (!htmlContent || !measureEl) {
+//       setPages([]);
+//       return;
+//     }
+
+//     measureEl.innerHTML = htmlContent;
+//     const blocks = Array.from(measureEl.children) as HTMLElement[];
+
+//     const builtPages: string[] = [];
+//     let currentPageHtml = '';
+//     let currentHeight = 0;
+
+//     blocks.forEach((block) => {
+//       const blockHeight = block.offsetHeight;
+
+//       // If a single block is taller than a whole page (e.g. a huge table),
+//       // it still gets placed alone on its own page rather than looping forever.
+//       if (currentHeight + blockHeight > CONTENT_HEIGHT && currentPageHtml) {
+//         builtPages.push(currentPageHtml);
+//         currentPageHtml = '';
+//         currentHeight = 0;
+//       }
+
+//       currentPageHtml += block.outerHTML;
+//       currentHeight += blockHeight;
+//     });
+
+//     if (currentPageHtml) {
+//       builtPages.push(currentPageHtml);
+//     }
+//     if (builtPages.length === 0) {
+//       builtPages.push('');
+//     }
+
+//     const remainingOnLastPage = CONTENT_HEIGHT - currentHeight;
+//     setStampOnNewPage(hasStamp && remainingOnLastPage < STAMP_ESTIMATED_HEIGHT);
+//     setPages(builtPages);
+
+//     measureEl.innerHTML = '';
+//   }, [htmlContent, hasStamp]);
+
+//   return { pages, stampOnNewPage, measureRef };
+// }
+
+// export default function PolicyDocumentViewer({ policy }: PolicyDocumentViewerProps) {
+//   const version = policy.current_version;
+//   const [htmlContent, setHtmlContent] = useState<string | null>(null);
+//   const [loading, setLoading] = useState(false);
+//   const [error, setError] = useState<string | null>(null);
+
+//   const contentType = version?.content_type?.toUpperCase() || '';
+//   const isPdf = contentType === 'PDF' || !!version?.file_url?.toLowerCase().endsWith('.pdf');
+//   const isDocx = contentType === 'DOCX' || !!version?.file_url?.toLowerCase().match(/\.docx?$/);
+//   const isXlsx = contentType === 'XLSX' || !!version?.file_url?.toLowerCase().match(/\.xlsx?$/);
+//   const isPaginated = isDocx || isXlsx;
+
+//   const chain = (policy as any).approval_chain;
+//   const hasStamp = !!(chain && chain.approved && chain.steps?.length);
+
+//   const { pages, stampOnNewPage, measureRef } = usePaginatedDocument(
+//     isPaginated ? htmlContent : null,
+//     hasStamp
+//   );
+
+//   useEffect(() => {
+//     if (!version || isPdf || !isPaginated) return;
+
+//     let cancelled = false;
+//     setLoading(true);
+//     setError(null);
+//     setHtmlContent(null);
+
+//     api
+//       .get(`/policies/policies/${policy.id}/download/`, { responseType: 'arraybuffer' })
+//       .then(async (res) => {
+//         if (cancelled) return;
+//         if (isDocx) {
+//           const result = await mammoth.convertToHtml({ arrayBuffer: res.data });
+//           if (!cancelled) setHtmlContent(result.value);
+//         } else if (isXlsx) {
+//           const workbook = XLSX.read(new Uint8Array(res.data), { type: 'array' });
+//           const firstSheetName = workbook.SheetNames[0];
+//           const sheet = workbook.Sheets[firstSheetName];
+//           const html = XLSX.utils.sheet_to_html(sheet);
+//           if (!cancelled) setHtmlContent(html);
+//         }
+//       })
+//       .catch(() => {
+//         if (!cancelled) setError('Failed to load document preview.');
+//       })
+//       .finally(() => {
+//         if (!cancelled) setLoading(false);
+//       });
+
+//     return () => {
+//       cancelled = true;
+//     };
+//   }, [policy.id, version, isDocx, isXlsx, isPdf, isPaginated]);
+
+//   if (!version) {
+//     return (
+//       <div className="rounded-xl bg-white p-12 text-center text-gray-500 shadow-sm border border-gray-200">
+//         No document version available.
+//       </div>
+//     );
+//   }
+
+//   const previewUrl = `${api.defaults.baseURL}/policies/policies/${policy.id}/preview/`;
+
+//   if (isPdf) {
+//     return (
+//       <div className="w-full bg-slate-800 rounded-xl p-2 shadow-inner">
+//         <iframe
+//           src={previewUrl}
+//           className="w-full h-[850px] rounded-lg border-0 bg-white"
+//           title={policy.title}
+//         />
+//       </div>
+//     );
+//   }
+
+//   if (isPaginated) {
+//     return (
+//       <div className="w-full bg-slate-800 rounded-xl p-4 shadow-inner">
+//         {/* Hidden measuring container — never visible, used only to compute block heights */}
+//         <div
+//           ref={measureRef}
+//           className="prose max-w-none"
+//           style={{
+//             position: 'fixed',
+//             visibility: 'hidden',
+//             pointerEvents: 'none',
+//             width: PAGE_WIDTH - PAGE_PADDING * 2,
+//             top: -99999,
+//             left: -99999,
+//           }}
+//         />
+
+//         {loading && (
+//           <div className="rounded-xl bg-white p-12 text-center text-gray-500 shadow-sm">
+//             Loading document…
+//           </div>
+//         )}
+
+//         {error && (
+//           <div className="rounded-xl bg-white p-12 text-center text-red-600 shadow-sm">
+//             {error}
+//           </div>
+//         )}
+
+//         {!loading && !error && pages.length > 0 && (
+//           <div className="flex flex-col items-center gap-6">
+//             {pages.map((pageHtml, i) => {
+//               const isLastPage = i === pages.length - 1;
+//               return (
+//                 <div
+//                   key={i}
+//                   className="bg-white shadow-lg rounded-sm"
+//                   style={{
+//                     width: PAGE_WIDTH,
+//                     minHeight: PAGE_HEIGHT,
+//                     padding: PAGE_PADDING,
+//                     boxSizing: 'border-box',
+//                   }}
+//                 >
+//                   <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: pageHtml }} />
+//                   {isLastPage && !stampOnNewPage && <ApprovalStamp policy={policy} />}
+//                 </div>
+//               );
+//             })}
+
+//             {stampOnNewPage && (
+//               <div
+//                 className="bg-white shadow-lg rounded-sm"
+//                 style={{
+//                   width: PAGE_WIDTH,
+//                   minHeight: PAGE_HEIGHT,
+//                   padding: PAGE_PADDING,
+//                   boxSizing: 'border-box',
+//                 }}
+//               >
+//                 <ApprovalStamp policy={policy} />
+//               </div>
+//             )}
+//           </div>
+//         )}
+//       </div>
+//     );
+//   }
+
+//   if (version.content_html) {
+//     return (
+//       <div className="rounded-xl bg-white p-8 shadow-sm border border-gray-200 min-h-[500px] prose max-w-none">
+//         <div dangerouslySetInnerHTML={{ __html: version.content_html }} />
+//       </div>
+//     );
+//   }
+
+//   return (
+//     <div className="rounded-xl bg-white p-12 text-center text-gray-500 shadow-sm border border-gray-200">
+//       Preview not available for this file type.
+//     </div>
+//   );
+// }
 
 
 import { useEffect, useRef, useState } from 'react';
@@ -648,14 +915,14 @@ import type { PolicyDetail } from '../../types/policy';
 
 interface PolicyDocumentViewerProps {
   policy: PolicyDetail;
+  onReadyChange?: (ready: boolean) => void;
 }
 
-// Simulated A4 page at 96dpi
 const PAGE_WIDTH = 794;
 const PAGE_HEIGHT = 1123;
 const PAGE_PADDING = 56;
 const CONTENT_HEIGHT = PAGE_HEIGHT - PAGE_PADDING * 2;
-const STAMP_ESTIMATED_HEIGHT = 190; // conservative height for the stamp block
+const STAMP_ESTIMATED_HEIGHT = 190;
 
 function ApprovalStamp({ policy }: { policy: PolicyDetail }) {
   const chain = (policy as any).approval_chain;
@@ -689,11 +956,6 @@ function ApprovalStamp({ policy }: { policy: PolicyDetail }) {
   );
 }
 
-/**
- * Splits raw HTML into fixed-height "pages" by measuring each top-level
- * block element in a hidden container, then figures out whether the
- * approval stamp fits on the last page or needs a page of its own.
- */
 function usePaginatedDocument(htmlContent: string | null, hasStamp: boolean) {
   const [pages, setPages] = useState<string[]>([]);
   const [stampOnNewPage, setStampOnNewPage] = useState(false);
@@ -715,15 +977,11 @@ function usePaginatedDocument(htmlContent: string | null, hasStamp: boolean) {
 
     blocks.forEach((block) => {
       const blockHeight = block.offsetHeight;
-
-      // If a single block is taller than a whole page (e.g. a huge table),
-      // it still gets placed alone on its own page rather than looping forever.
       if (currentHeight + blockHeight > CONTENT_HEIGHT && currentPageHtml) {
         builtPages.push(currentPageHtml);
         currentPageHtml = '';
         currentHeight = 0;
       }
-
       currentPageHtml += block.outerHTML;
       currentHeight += blockHeight;
     });
@@ -745,7 +1003,7 @@ function usePaginatedDocument(htmlContent: string | null, hasStamp: boolean) {
   return { pages, stampOnNewPage, measureRef };
 }
 
-export default function PolicyDocumentViewer({ policy }: PolicyDocumentViewerProps) {
+export default function PolicyDocumentViewer({ policy, onReadyChange }: PolicyDocumentViewerProps) {
   const version = policy.current_version;
   const [htmlContent, setHtmlContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -772,6 +1030,7 @@ export default function PolicyDocumentViewer({ policy }: PolicyDocumentViewerPro
     setLoading(true);
     setError(null);
     setHtmlContent(null);
+    onReadyChange?.(false);
 
     api
       .get(`/policies/policies/${policy.id}/download/`, { responseType: 'arraybuffer' })
@@ -800,6 +1059,18 @@ export default function PolicyDocumentViewer({ policy }: PolicyDocumentViewerPro
     };
   }, [policy.id, version, isDocx, isXlsx, isPdf, isPaginated]);
 
+  // Signal readiness once pages are actually built (or once content_html is available)
+  useEffect(() => {
+    if (isPaginated) {
+      onReadyChange?.(!loading && !error && pages.length > 0);
+    } else if (!isPdf && version?.content_html) {
+      onReadyChange?.(true);
+    } else if (isPdf) {
+      // PDF downloads go through the stamped-PDF backend route, not html2pdf
+      onReadyChange?.(false);
+    }
+  }, [isPaginated, loading, error, pages.length, isPdf, version?.content_html]);
+
   if (!version) {
     return (
       <div className="rounded-xl bg-white p-12 text-center text-gray-500 shadow-sm border border-gray-200">
@@ -825,7 +1096,6 @@ export default function PolicyDocumentViewer({ policy }: PolicyDocumentViewerPro
   if (isPaginated) {
     return (
       <div className="w-full bg-slate-800 rounded-xl p-4 shadow-inner">
-        {/* Hidden measuring container — never visible, used only to compute block heights */}
         <div
           ref={measureRef}
           className="prose max-w-none"
@@ -852,7 +1122,7 @@ export default function PolicyDocumentViewer({ policy }: PolicyDocumentViewerPro
         )}
 
         {!loading && !error && pages.length > 0 && (
-          <div className="flex flex-col items-center gap-6">
+          <div id="policy-document-content" className="flex flex-col items-center gap-6">
             {pages.map((pageHtml, i) => {
               const isLastPage = i === pages.length - 1;
               return (
@@ -893,7 +1163,10 @@ export default function PolicyDocumentViewer({ policy }: PolicyDocumentViewerPro
 
   if (version.content_html) {
     return (
-      <div className="rounded-xl bg-white p-8 shadow-sm border border-gray-200 min-h-[500px] prose max-w-none">
+      <div
+        id="policy-document-content"
+        className="rounded-xl bg-white p-8 shadow-sm border border-gray-200 min-h-[500px] prose max-w-none"
+      >
         <div dangerouslySetInnerHTML={{ __html: version.content_html }} />
       </div>
     );
