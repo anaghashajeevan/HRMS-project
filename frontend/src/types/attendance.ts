@@ -270,6 +270,12 @@ export interface DayEntry {
   is_late: boolean;
   is_early_exit: boolean;
   leave_info: LeaveInfo | null; 
+
+  manual_reason?: string;
+  is_manual_override?: boolean;
+  is_manual?: boolean;
+  manual_status?: string;
+ 
 }
 
 export interface MonthlyStats {

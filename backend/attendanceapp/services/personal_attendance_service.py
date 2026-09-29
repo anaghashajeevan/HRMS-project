@@ -1511,6 +1511,10 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
             'is_late': row.is_late if row else False,
             'is_early_exit': row.is_early_exit if row else False,
             'leave_info': leave_info,
+            
+            'is_manual': row.is_manual_override if row else False,
+            'manual_status': row.manual_status if row else None,
+            'manual_reason': row.manual_reason if row else None,
         })
 
         current += timedelta(days=1)

@@ -244,6 +244,16 @@ export const personalAttendanceApi = {
     const { data } = await api.post(`${BASE}/self-attendance/`, payload);
     return data;
   },
+    // Add to personalAttendanceApi object:
+  deleteSelfAttendance: async (date: string) => {
+    const res = await api.delete('/attendance/self-attendance/', { data: { date } });
+    return res.data;
+  },
+
+  deleteManualEntry: async (employee_id: string, date: string) => {
+    const res = await api.delete('/attendance/manual-entry/', { data: { employee_id, date } });
+    return res.data;
+  },
 };
 
 
