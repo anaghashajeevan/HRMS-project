@@ -40,7 +40,7 @@ class Role(models.Model):
         ordering = ['-level']
 
     def __str__(self):
-        return self.get_role_name_display()
+        return self.role_name
 
 
 # ==============================================================================
