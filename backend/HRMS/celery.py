@@ -22,6 +22,10 @@ app.conf.beat_schedule = {
         'task': 'attendanceapp.tasks.sync_live_attendance_task',
         'schedule': crontab(minute='*/5'),  # Runs every 5 minutes
     },
+    'monthly-attendance-report-hourly': {
+        'task': 'attendanceapp.tasks.run_monthly_attendance_check',
+        'schedule': crontab(minute=0),   # every hour, on the hour
+    },
 }
 
 @app.task(bind=True)

@@ -22,7 +22,7 @@ from datetime import date
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-
+import calendar
 from attendanceapp.models import AutomationSettings, MonthlyReportLog
 from attendanceapp.services.monthly_report_service import send_monthly_report
 
@@ -40,13 +40,18 @@ def _target_month(settings_obj, today):
     return _previous_month(today)
 
 
+# def _is_send_day(settings_obj, today):
+#     """Check if today is the configured send day of month."""
+#     try:
+#         send_day = int(settings_obj.monthly_send_day or 1)
+#     except (TypeError, ValueError):
+#         send_day = 1
+#     return today.day == send_day
+
 def _is_send_day(settings_obj, today):
-    """Check if today is the configured send day of month."""
-    try:
-        send_day = int(settings_obj.monthly_send_day or 1)
-    except (TypeError, ValueError):
-        send_day = 1
-    return today.day == send_day
+    """True only on the last day of the month."""
+    last_day = calendar.monthrange(today.year, today.month)[1]
+    return today.day == last_day
 
 
 class Command(BaseCommand):
