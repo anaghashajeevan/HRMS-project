@@ -36,6 +36,7 @@ from .views import (
     RoleViewSet,
     CompanyStructureViewSet,
     JobPositionViewSet,
+    ProbationPolicyViewSet,
     EmployeeIdSettingViewSet,
     # Employee Module
     EmployeeViewSet,
@@ -75,6 +76,7 @@ router = DefaultRouter()
 router.register(r'roles', RoleViewSet, basename='roles')
 router.register(r'company-structures', CompanyStructureViewSet, basename='company-structures')
 router.register(r'job-positions', JobPositionViewSet, basename='job-positions')
+router.register(r'probation-policies', ProbationPolicyViewSet, basename='probation-policies')
 router.register(r'employee-id-settings', EmployeeIdSettingViewSet, basename='employee-id-settings')
 router.register(r'employees', EmployeeViewSet, basename='employee')
 router.register(r'employee-documents', EmployeeDocumentViewSet, basename='employee-documents')

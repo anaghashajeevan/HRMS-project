@@ -1066,7 +1066,12 @@ def _validate_device_payload(role, is_active, exclude_id=None):
 
 
 class EsslDeviceListCreateView(APIView):
-    permission_classes = [IsAuthenticated, IsSystemAdmin]
+    def get_permissions(self):
+        # HR admins need to see the configured devices on Attendance Settings,
+        # while all device changes remain restricted to system admins.
+        if self.request.method == "GET":
+            return [IsAuthenticated(), IsHRAdmin()]
+        return [IsAuthenticated(), IsSystemAdmin()]
 
     def get(self, request):
         devices = EsslDevice.objects.all()

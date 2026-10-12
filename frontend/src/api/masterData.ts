@@ -3,6 +3,7 @@ import api from './axios';
 import type {
   Role, CompanyStructure, JobPosition, EmployeeIdSetting,
   PaginatedResponse,
+  ProbationPolicy,
 } from '../types/masterData';
 
 // ---------- ROLES ----------
@@ -79,5 +80,23 @@ export const employeeIdSettingsApi = {
   }): Promise<{ preview: string }> => {
     const { data } = await api.post<{ preview: string }>('/employee-id-settings/preview/', payload);
     return data;
+  },
+};
+
+export const probationPoliciesApi = {
+  list: async (): Promise<PaginatedResponse<ProbationPolicy>> => {
+    const { data } = await api.get<PaginatedResponse<ProbationPolicy>>('/probation-policies/');
+    return data;
+  },
+  create: async (payload: { department: string; position: string; probation_months: number; reminder_days_before: number }): Promise<ProbationPolicy> => {
+    const { data } = await api.post<ProbationPolicy>('/probation-policies/', payload);
+    return data;
+  },
+  update: async (id: string, payload: Partial<Pick<ProbationPolicy, 'department' | 'position' | 'probation_months' | 'reminder_days_before'>>): Promise<ProbationPolicy> => {
+    const { data } = await api.patch<ProbationPolicy>(`/probation-policies/${id}/`, payload);
+    return data;
+  },
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/probation-policies/${id}/`);
   },
 };

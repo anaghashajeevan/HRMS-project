@@ -12,6 +12,7 @@ interface ListParams {
 }
 
 export interface EmployeeCreatePayload {
+  employee_id?: string;
   first_name: string;
   last_name: string;
   official_email: string;

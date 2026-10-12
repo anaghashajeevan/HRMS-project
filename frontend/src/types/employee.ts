@@ -84,7 +84,7 @@ export interface PaginatedEmployees {
 }
 
 export interface CareerHistoryEntry {
-  id: number;
+  id: number | string;
   event_type: string;
   field_name: string;
   from_value: string | null;

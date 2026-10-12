@@ -21,6 +21,9 @@ const templateTypeColors: Record<LetterTemplateType, string> = {
   PIP_LETTER: 'bg-red-100 text-red-700',
   ASSET_ALLOCATION: 'bg-orange-100 text-orange-700',
   ASSET_RETURN: 'bg-stone-100 text-stone-700',
+  PROBATION_REMINDER: 'bg-amber-100 text-amber-800',
+  PROBATION_PERIOD_CHANGED: 'bg-orange-100 text-orange-800',
+  EMPLOYMENT_STATUS_CHANGED: 'bg-cyan-100 text-cyan-800',
 };
 
 const templateTypeLabels: Record<LetterTemplateType, string> = {
@@ -34,6 +37,9 @@ const templateTypeLabels: Record<LetterTemplateType, string> = {
   PIP_LETTER: 'PIP',
   ASSET_ALLOCATION: 'Asset Allocation', 
   ASSET_RETURN: 'Asset Return',
+  PROBATION_REMINDER: 'Probation Review Reminder',
+  PROBATION_PERIOD_CHANGED: 'Probation Period Changed',
+  EMPLOYMENT_STATUS_CHANGED: 'Employment Status Changed',
 };
 
 export default function LetterTemplatesPage() {
@@ -139,6 +145,13 @@ export default function LetterTemplatesPage() {
    <optgroup label="📦 Assets">
     <option value="ASSET_ALLOCATION">Asset Allocation</option>
     <option value="ASSET_RETURN">Asset Return</option>
+  </optgroup>
+  <optgroup label="Probation">
+    <option value="PROBATION_REMINDER">Probation Review Reminder</option>
+    <option value="PROBATION_PERIOD_CHANGED">Probation Period Changed</option>
+  </optgroup>
+  <optgroup label="Employment Notifications">
+    <option value="EMPLOYMENT_STATUS_CHANGED">Employment Status Changed</option>
   </optgroup>
             </select>
           </div>

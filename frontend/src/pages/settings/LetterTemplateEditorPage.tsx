@@ -33,6 +33,17 @@ const AVAILABLE_VARIABLES = [
   { key: 'company_name', desc: 'Company name', group: 'Common' },
   { key: 'current_date', desc: "Today's date", group: 'Common' },
   { key: 'reporting_manager', desc: "Manager's name", group: 'Common' },
+  { key: 'notification_message', desc: 'Probation reminder or updated probation date message', group: 'Probation' },
+  { key: 'days_remaining', desc: 'Days until the last day of probation', group: 'Probation' },
+  { key: 'last_probation_date', desc: 'Last day of the probation period', group: 'Probation' },
+  { key: 'previous_probation_department', desc: 'Department before the change', group: 'Probation' },
+  { key: 'new_probation_department', desc: 'Department after the change', group: 'Probation' },
+  { key: 'previous_probation_position', desc: 'Position before the change', group: 'Probation' },
+  { key: 'new_probation_position', desc: 'Position after the change', group: 'Probation' },
+  { key: 'previous_status', desc: 'Employee status before the change', group: 'Employment Status' },
+  { key: 'new_status', desc: 'Employee status after the change', group: 'Employment Status' },
+  { key: 'status_change_date', desc: 'Date the status changed', group: 'Employment Status' },
+  { key: 'status_change_message', desc: 'Summary of the status change', group: 'Employment Status' },
 
   // ===== LIFECYCLE (promotion, transfer, etc.) =====
   { key: 'current_position', desc: 'Current job title', group: 'Lifecycle' },
@@ -97,6 +108,17 @@ const PREVIEW_DATA: Record<string, string> = {
   company_name: 'Your Company Ltd',
   current_date: '20 July 2026',
   reporting_manager: 'John Doe',
+  notification_message: 'The probation period will complete in 7 days. Please discuss and finalize the employee status.',
+  days_remaining: '7',
+  last_probation_date: '27 July 2026',
+  previous_probation_department: 'Operations',
+  new_probation_department: 'Engineering',
+  previous_probation_position: 'Coordinator',
+  new_probation_position: 'Software Engineer',
+  previous_status: 'Probation',
+  new_status: 'Active',
+  status_change_date: '9 October 2026',
+  status_change_message: 'Your employment status changed from Probation to Active on 9 October 2026.',
 
   // Lifecycle
   current_position: 'Software Engineer',
@@ -398,6 +420,18 @@ export default function LetterTemplateEditorPage() {
       setAiPrompt(
         'Write an asset return confirmation letter acknowledging that {{asset_name}} (Tag: {{asset_tag}}) was returned on {{returned_date}}. The condition was marked as {{return_status}} with notes: {{return_notes}}. Recovery cost if any: ₹{{recovery_cost}}.'
       );
+    } else if (next === 'PROBATION_REMINDER' && !aiPrompt.trim()) {
+      setAiPrompt(
+        'Create a probation review reminder email to {{employee_name}}. State {{notification_message}} and clearly show {{last_probation_date}}.'
+      );
+    } else if (next === 'PROBATION_PERIOD_CHANGED' && !aiPrompt.trim()) {
+      setAiPrompt(
+        'Create a probation period change email to {{employee_name}}. Explain {{notification_message}}, show the department change from {{previous_probation_department}} to {{new_probation_department}}, the position change from {{previous_probation_position}} to {{new_probation_position}}, and clearly state the new last day {{last_probation_date}}.'
+      );
+    } else if (next === 'EMPLOYMENT_STATUS_CHANGED' && !aiPrompt.trim()) {
+      setAiPrompt(
+        'Write an employment status change email to {{employee_name}}. Clearly state {{status_change_message}}, including the previous status {{previous_status}}, new status {{new_status}}, and date {{status_change_date}}.'
+      );
     }
   }}
   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -421,6 +455,13 @@ export default function LetterTemplateEditorPage() {
   <optgroup label="📦 Asset Letters">
     <option value="ASSET_ALLOCATION">Asset Allocation Letter</option>
     <option value="ASSET_RETURN">Asset Return Confirmation</option>
+  </optgroup>
+  <optgroup label="Probation Notifications">
+    <option value="PROBATION_REMINDER">Probation Review Reminder</option>
+    <option value="PROBATION_PERIOD_CHANGED">Probation Period Changed</option>
+  </optgroup>
+  <optgroup label="Employment Notifications">
+    <option value="EMPLOYMENT_STATUS_CHANGED">Employment Status Changed</option>
   </optgroup>
 </select>
 </div>
@@ -597,7 +638,7 @@ export default function LetterTemplateEditorPage() {
   </div>
 
   {/* Group by category */}
- {['Common', 'Lifecycle', 'Performance', 'Leave', 'Asset'].map((group) => {
+ {['Common', 'Lifecycle', 'Performance', 'Leave', 'Asset', 'Probation', 'Employment Status'].map((group) => {
   const groupVars = AVAILABLE_VARIABLES.filter((v) => {
     if (v.group !== group) return false;
     
@@ -607,11 +648,15 @@ export default function LetterTemplateEditorPage() {
     ].includes(templateType);
     const isLeaveTemplate = ['LEAVE_APPLICATION', 'LEAVE_APPROVAL'].includes(templateType);
     const isAssetTemplate = templateType === 'ASSET_ALLOCATION';
+    const isProbationTemplate = ['PROBATION_REMINDER', 'PROBATION_PERIOD_CHANGED'].includes(templateType);
+    const isEmploymentStatusTemplate = templateType === 'EMPLOYMENT_STATUS_CHANGED';
     
     if (group === 'Lifecycle' && !isLifecycleTemplate) return false;
     if (group === 'Performance' && !isPerformanceTemplate) return false;
     if (group === 'Leave' && !isLeaveTemplate) return false;
     if (group === 'Asset' && !isAssetTemplate) return false;
+    if (group === 'Probation' && !isProbationTemplate) return false;
+    if (group === 'Employment Status' && !isEmploymentStatusTemplate) return false;
     
     return true;
   });
@@ -626,6 +671,12 @@ export default function LetterTemplateEditorPage() {
     ? 'text-purple-600'
     : group === 'Leave'
     ? 'text-green-600'
+    : group === 'Employment Status'
+    ? 'Employment Status Notification'
+    : group === 'Probation'
+    ? 'text-amber-700'
+    : group === 'Employment Status'
+    ? 'text-cyan-700'
     : 'text-orange-600';
 
   const groupBadge =
@@ -637,6 +688,8 @@ export default function LetterTemplateEditorPage() {
     ? '🎯 Rating/PIP'
     : group === 'Leave'
     ? '🏖️ Leave Letters'
+    : group === 'Probation'
+    ? 'Probation Notification'
     : '📦 Asset Allocation';
 
   return (

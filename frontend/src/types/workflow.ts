@@ -69,7 +69,10 @@ export type LetterTemplateType =
   | 'APPRAISAL_LETTER'
   | 'PIP_LETTER'
   | 'ASSET_ALLOCATION'
-  | 'ASSET_RETURN';
+  | 'ASSET_RETURN'
+  | 'PROBATION_REMINDER'
+  | 'PROBATION_PERIOD_CHANGED'
+  | 'EMPLOYMENT_STATUS_CHANGED';
 
 export type CreationMethod = 'AI' | 'MANUAL' | 'AI_EDITED';
 

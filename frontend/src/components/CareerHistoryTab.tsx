@@ -17,6 +17,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   reporting_manager_id: User,
   structure_location_id: Building2,
   status: Activity,
+  probation_cycle: Calendar,
   joined: Rocket,
 };
 
@@ -26,6 +27,7 @@ const colorMap: Record<string, { bg: string; text: string; icon: string }> = {
   reporting_manager_id: { bg: 'bg-blue-100', text: 'text-blue-700', icon: 'text-blue-600' },
   structure_location_id: { bg: 'bg-teal-100', text: 'text-teal-700', icon: 'text-teal-600' },
   status: { bg: 'bg-amber-100', text: 'text-amber-700', icon: 'text-amber-600' },
+  probation_cycle: { bg: 'bg-blue-100', text: 'text-blue-700', icon: 'text-blue-600' },
   joined: { bg: 'bg-green-100', text: 'text-green-700', icon: 'text-green-600' },
 };
 

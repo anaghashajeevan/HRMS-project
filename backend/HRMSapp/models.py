@@ -176,6 +176,60 @@ class JobPosition(models.Model):
     @property
     def is_full(self):
         return self.actual_count >= self.budgeted_count
+
+
+class ProbationPolicy(models.Model):
+    """Probation duration and reminder timing for a department/position pair."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    department = models.ForeignKey(
+        CompanyStructure, on_delete=models.CASCADE, related_name='probation_policies',
+        limit_choices_to={'type__in': ['DEPARTMENT', 'TEAM']},
+    )
+    position = models.ForeignKey(
+        JobPosition, on_delete=models.CASCADE, related_name='probation_policies'
+    )
+    probation_months = models.PositiveSmallIntegerField(default=6)
+    reminder_days_before = models.PositiveSmallIntegerField(default=7)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'probation_policies'
+        ordering = ['department__name', 'position__title']
+        constraints = [
+            models.UniqueConstraint(fields=['department', 'position'], name='uniq_probation_policy_dept_position'),
+        ]
+
+    def __str__(self):
+        return f"{self.department.name} / {self.position.title}: {self.probation_months} months"
+
+
+class ProbationCycle(models.Model):
+    """A single probation period, retained when an employee starts another."""
+    EVENT_CHOICES = [
+        ('STARTED', 'Probation Started'),
+        ('RESTARTED', 'Probation Restarted'),
+        ('POLICY_UPDATED', 'Probation Policy Updated'),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    employee = models.ForeignKey('Employee', on_delete=models.CASCADE, related_name='probation_cycles')
+    policy = models.ForeignKey(ProbationPolicy, null=True, blank=True, on_delete=models.SET_NULL)
+    event_type = models.CharField(max_length=20, choices=EVENT_CHOICES, default='STARTED')
+    is_current = models.BooleanField(default=True)
+    start_date = models.DateField()
+    end_date = models.DateField(null=True, blank=True)
+    probation_months = models.PositiveSmallIntegerField(null=True, blank=True)
+    reminder_days_before = models.PositiveSmallIntegerField(default=7)
+    reminder_sent_at = models.DateTimeField(null=True, blank=True)
+    delivered_recipient_emails = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'employee_probation_cycles'
+        ordering = ['-start_date', '-created_at']
+        indexes = [models.Index(fields=['employee', '-start_date'])]
+
+    def __str__(self):
+        return f"{self.employee.employee_id}: {self.start_date} - {self.end_date or 'No policy'}"
 # ==============================================================================
 # EMPLOYEE MASTER
 # ==============================================================================
@@ -758,6 +812,9 @@ class LetterTemplate(models.Model):
         ('LEAVE_APPROVAL', 'Leave Approval Letter'), 
         ('ASSET_ALLOCATION', 'Asset Allocation Letter'),
         ('ASSET_RETURN', 'Asset Return Letter'),
+        ('PROBATION_REMINDER', 'Probation Review Reminder'),
+        ('PROBATION_PERIOD_CHANGED', 'Probation Period Changed'),
+        ('EMPLOYMENT_STATUS_CHANGED', 'Employment Status Changed'),
     ]
     CREATION_METHOD_CHOICES = [
         ('AI', 'AI Generated'),

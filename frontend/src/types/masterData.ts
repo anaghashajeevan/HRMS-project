@@ -61,3 +61,14 @@ export interface PaginatedResponse<T> {
   previous: string | null;
   results: T[];
 }
+
+export interface ProbationPolicy {
+  id: string;
+  position: string;
+  position_name: string;
+  department: string;
+  department_name: string;
+  probation_months: number;
+  reminder_days_before: number;
+  updated_at: string;
+}

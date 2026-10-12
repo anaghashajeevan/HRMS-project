@@ -235,74 +235,29 @@ WSGI_APPLICATION = 'HRMS.wsgi.application'
 # DATABASE CONFIGURATION
 # ==============================================================================
 
-# import socket
+import socket
 
-# def is_postgres_reachable(host, port, timeout=1.5):
-#     """Quick TCP probe — avoids Django's long connection timeout."""
-#     try:
-#         with socket.create_connection((host, int(port)), timeout=timeout):
-#             return True
-#     except (OSError, ValueError):
-#         return False
+def is_postgres_reachable(host, port, timeout=1.5):
+    """Quick TCP probe — avoids Django's long connection timeout."""
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
 
-# DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "django.db.backends.postgresql")
+DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "django.db.backends.postgresql")
 
-# database_host = os.getenv("DATABASE_HOST", "postgres")
-# if not RUNNING_IN_DOCKER and database_host == "postgres":
-#     database_host = "127.0.0.1"
+database_host = os.getenv("DATABASE_HOST", "postgres")
+if not RUNNING_IN_DOCKER and database_host == "postgres":
+    database_host = "127.0.0.1"
 
-# database_port = os.getenv("DATABASE_PORT", "5432")
+database_port = os.getenv("DATABASE_PORT", "5432")
 
-# postgres_configured = DATABASE_ENGINE == "django.db.backends.postgresql"
-# postgres_available = postgres_configured and is_postgres_reachable(database_host, database_port)
+postgres_configured = DATABASE_ENGINE == "django.db.backends.postgresql"
+postgres_available = postgres_configured and is_postgres_reachable(database_host, database_port)
 
-# if postgres_available:
-#     # ---------------- PostgreSQL (Production) ----------------
-#     DATABASES = {
-#         "default": {
-#             "ENGINE": DATABASE_ENGINE,
-#             "NAME": os.getenv("DATABASE_NAME", "hrms_prod"),
-#             "USER": os.getenv("DATABASE_USER", "postgres"),
-#             "PASSWORD": os.getenv("DATABASE_PASSWORD", ""),
-#             "HOST": database_host,
-#             "PORT": database_port,
-#         }
-#     }
-#     print(f"[HRMS Settings] Database: PostgreSQL (Production) - Host: {database_host}")
-
-# else:
-#     # ---------------- SQLite (Local Dev Fallback) ----------------
-#     DATABASES = {
-#         "default": {
-#             "ENGINE": "django.db.backends.sqlite3",
-#             "NAME": BASE_DIR / os.getenv("SQLITE_NAME", "db.sqlite3"),
-#         }
-#     }
-#     if postgres_configured:
-#         print(f"[HRMS Settings] PostgreSQL unreachable at {database_host}:{database_port} → falling back to SQLite (Local Dev)")
-#     else:
-#         print("[HRMS Settings] Database: SQLite (Local Dev)")
-
-DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "django.db.backends.sqlite3")
-
-if DATABASE_ENGINE == "django.db.backends.sqlite3":
-    # ---------------- SQLite (Development) ----------------
-    DATABASES = {
-        "default": {
-            "ENGINE": DATABASE_ENGINE,
-            "NAME": BASE_DIR / os.getenv("DATABASE_NAME", "db.sqlite3"),
-        }
-    }
-    print("[HRMS Settings] Database: SQLite (Development)")
-
-else:
+if postgres_available:
     # ---------------- PostgreSQL (Production) ----------------
-    database_host = os.getenv("DATABASE_HOST", "postgres")
-    
-    # If not running in Docker, use localhost instead of 'postgres'
-    if not RUNNING_IN_DOCKER and database_host == "postgres":
-        database_host = "127.0.0.1"
-
     DATABASES = {
         "default": {
             "ENGINE": DATABASE_ENGINE,
@@ -310,10 +265,55 @@ else:
             "USER": os.getenv("DATABASE_USER", "postgres"),
             "PASSWORD": os.getenv("DATABASE_PASSWORD", ""),
             "HOST": database_host,
-            "PORT": os.getenv("DATABASE_PORT", "5432"),
+            "PORT": database_port,
         }
     }
     print(f"[HRMS Settings] Database: PostgreSQL (Production) - Host: {database_host}")
+
+else:
+    # ---------------- SQLite (Local Dev Fallback) ----------------
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / os.getenv("SQLITE_NAME", "db.sqlite3"),
+        }
+    }
+    if postgres_configured:
+        print(f"[HRMS Settings] PostgreSQL unreachable at {database_host}:{database_port} → falling back to SQLite (Local Dev)")
+    else:
+        print("[HRMS Settings] Database: SQLite (Local Dev)")
+
+# DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "django.db.backends.sqlite3")
+
+# if DATABASE_ENGINE == "django.db.backends.sqlite3":
+#     # ---------------- SQLite (Development) ----------------
+#     DATABASES = {
+#         "default": {
+#             "ENGINE": DATABASE_ENGINE,
+#             "NAME": BASE_DIR / os.getenv("DATABASE_NAME", "db.sqlite3"),
+#         }
+#     }
+#     print("[HRMS Settings] Database: SQLite (Development)")
+
+# else:
+#     # ---------------- PostgreSQL (Production) ----------------
+#     database_host = os.getenv("DATABASE_HOST", "postgres")
+    
+#     # If not running in Docker, use localhost instead of 'postgres'
+#     if not RUNNING_IN_DOCKER and database_host == "postgres":
+#         database_host = "127.0.0.1"
+
+#     DATABASES = {
+#         "default": {
+#             "ENGINE": DATABASE_ENGINE,
+#             "NAME": os.getenv("DATABASE_NAME", "hrms_prod"),
+#             "USER": os.getenv("DATABASE_USER", "postgres"),
+#             "PASSWORD": os.getenv("DATABASE_PASSWORD", ""),
+#             "HOST": database_host,
+#             "PORT": os.getenv("DATABASE_PORT", "5432"),
+#         }
+#     }
+#     print(f"[HRMS Settings] Database: PostgreSQL (Production) - Host: {database_host}")
 
 # ==============================================================================
 # CORS / CSRF SETTINGS
@@ -580,6 +580,18 @@ CELERY_BEAT_SCHEDULE = {
     'daily-compoff-scan': {
         'task': 'leaveapp.tasks.scan_and_credit_compoff',
         'schedule': crontab(hour=23, minute=0),
+    },
+    'daily-probation-reminders': {
+        'task': 'HRMSapp.tasks.scan_probation_reminders',
+        'schedule': crontab(hour=8, minute=0),
+    },
+    'sync-live-attendance-every-5-mins': {
+        'task': 'attendanceapp.tasks.sync_live_attendance_task',
+        'schedule': crontab(minute='*/5'),
+    },
+    'monthly-attendance-report-hourly': {
+        'task': 'attendanceapp.tasks.run_monthly_attendance_check',
+        'schedule': crontab(minute=0),
     },
 }
 

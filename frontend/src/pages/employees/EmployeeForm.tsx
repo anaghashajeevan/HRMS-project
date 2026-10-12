@@ -1207,13 +1207,14 @@ import {
 import Sidebar from '../../components/Sidebar';
 import Topbar from '../../components/Topbar';
 import { employeesApi, type EmployeeCreatePayload } from '../../api/employees';
-import { structuresApi, positionsApi, rolesApi } from '../../api/masterData';
-import type { CompanyStructure, JobPosition, Role } from '../../types/masterData';
+import { structuresApi, positionsApi, rolesApi, probationPoliciesApi } from '../../api/masterData';
+import type { CompanyStructure, JobPosition, Role, ProbationPolicy } from '../../types/masterData';
 import type { ManagerOption } from '../../api/employees';
 import toast from 'react-hot-toast';
 import { AxiosError } from 'axios';
 
 const initialForm: EmployeeCreatePayload = {
+  employee_id: '',
   first_name: '',
   last_name: '',
   official_email: '',
@@ -1257,6 +1258,7 @@ export default function EmployeeForm() {
   const [positions, setPositions] = useState<JobPosition[]>([]);
   const [managers, setManagers] = useState<ManagerOption[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [probationPolicies, setProbationPolicies] = useState<ProbationPolicy[]>([]);
 
   const departments = allStructures.filter((s) =>
     ['DEPARTMENT', 'TEAM'].includes(s.type) && s.is_active
@@ -1272,11 +1274,12 @@ export default function EmployeeForm() {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [structData, posData, mgrData, roleData] = await Promise.all([
+        const [structData, posData, mgrData, roleData, probationData] = await Promise.all([
           structuresApi.list(),
           positionsApi.list(),
           employeesApi.getManagers('', 'REPORTING_MANAGER'),
           rolesApi.list(),
+          probationPoliciesApi.list(),
         ]);
 
         const structures = structData.results || structData;
@@ -1284,10 +1287,12 @@ export default function EmployeeForm() {
         setPositions(posData.results || []);
         setManagers(mgrData);
         setRoles(roleData.results || []);
+        setProbationPolicies(probationData.results || []);
 
         if (isEditMode && id) {
           const emp = await employeesApi.getById(id);
           setForm({
+            employee_id: emp.employee_id,
             first_name: emp.first_name,
             last_name: emp.last_name,
             official_email: emp.official_email,
@@ -1344,6 +1349,7 @@ export default function EmployeeForm() {
 
   const validate = () => {
     const errs: Record<string, string> = {};
+    if (isEditMode && !form.employee_id?.trim()) errs.employee_id = 'Required';
     if (!form.first_name.trim()) errs.first_name = 'Required';
     if (!form.last_name.trim()) errs.last_name = 'Required';
     if (!form.official_email.trim()) errs.official_email = 'Required';
@@ -1379,6 +1385,9 @@ export default function EmployeeForm() {
         cost_center: selectedCostCenter || null,
       };
 
+      // Employee IDs are generated for new records and editable only later.
+      if (!isEditMode) delete payload.employee_id;
+
       if (!form.create_user_account) {
         delete payload.password;
         delete payload.role_ids;
@@ -1412,8 +1421,14 @@ export default function EmployeeForm() {
           newErrors[key] = Array.isArray(val) ? val[0] : String(val);
         });
         setErrors(newErrors);
+        const firstMessage = Object.values(data).flatMap((value) =>
+          Array.isArray(value) ? value : [value]
+        ).find((value) => typeof value === 'string' && value.trim());
+        toast.error(firstMessage ? String(firstMessage) : 'Failed to save employee');
+      } else {
+        toast.error('Failed to save employee');
       }
-      toast.error('Failed to save employee');
+
     } finally {
       setSaving(false);
     }
@@ -1424,6 +1439,10 @@ export default function EmployeeForm() {
     const dept = allStructures.find((s) => s.id === selectedDepartment);
     return dept?.path || '';
   };
+
+  const selectedProbationPolicy = probationPolicies.find((policy) =>
+    policy.position === form.position && policy.department === selectedDepartment
+  );
 
   if (loading) {
     return (
@@ -1466,6 +1485,17 @@ export default function EmployeeForm() {
             {/* Personal Info */}
             <SectionCard icon={User} title="Personal Information">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {isEditMode && (
+                  <Field label="Employee ID *" error={errors.employee_id}>
+                    <input
+                      type="text"
+                      maxLength={20}
+                      value={form.employee_id || ''}
+                      onChange={(e) => update('employee_id', e.target.value)}
+                      className={inputCls(errors.employee_id)}
+                    />
+                  </Field>
+                )}
                 <Field label="First Name *" error={errors.first_name}>
                   <input type="text" value={form.first_name}
                     onChange={(e) => update('first_name', e.target.value)}
@@ -1518,19 +1548,23 @@ export default function EmployeeForm() {
                     className={inputCls(errors.date_of_joining)} />
                 </Field>
                 <Field label="Status">
-                  <select value={form.status || 'PROBATION'}
-                    onChange={(e) => update('status', e.target.value)}
-                    className={inputCls()}>
-                    <option value="PROBATION">Probation</option>
-                    <option value="ACTIVE">Active</option>
-                    <option value="SUSPENDED">Suspended</option>
-                    <option value="TERMINATED">Terminated</option>
-                  </select>
+                  {!isEditMode ? (
+                    <div className={`${inputCls()} flex items-center bg-gray-100 font-medium text-gray-700`} aria-label="Employee status: Probation">Probation</div>
+                  ) : (
+                    <select value={form.status || 'PROBATION'}
+                      onChange={(e) => update('status', e.target.value)}
+                      className={inputCls()}>
+                      <option value="PROBATION">Probation</option>
+                      <option value="ACTIVE">Active</option>
+                      <option value="SUSPENDED">Suspended</option>
+                      <option value="TERMINATED">Terminated</option>
+                    </select>
+                  )}
                 </Field>
-                <Field label="Position">
+                <Field label="Position" error={errors.position}>
                   <select value={form.position || ''}
                     onChange={(e) => update('position', e.target.value || null)}
-                    className={inputCls()}>
+                    className={inputCls(errors.position)}>
                     <option value="">— None —</option>
                     {positions.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -1551,6 +1585,16 @@ export default function EmployeeForm() {
                     ))}
                   </select>
                 </Field>
+                {!isEditMode && selectedDepartment && form.position && !selectedProbationPolicy && (
+                  <div className="md:col-span-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="alert">
+                    No probation period is configured for this department and position. Please ask an HR admin or system admin to set the probation period for this department/position.
+                  </div>
+                )}
+                {!isEditMode && selectedDepartment && form.position && selectedProbationPolicy && (
+                  <div className="md:col-span-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                    Probation: {selectedProbationPolicy.probation_months} months. A reminder will be sent {selectedProbationPolicy.reminder_days_before} days before the last day.
+                  </div>
+                )}
                 {isEditMode && (
                   <Field label="Date of Exit">
                     <input type="date" value={form.date_of_exit || ''}

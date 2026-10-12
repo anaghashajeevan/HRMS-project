@@ -10,10 +10,11 @@ from rest_framework import status, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework.decorators import action
 from decimal import Decimal
-from .models import  CommonKPIMaster, CompanyLogo, UserAccount, UserActiveSession, AuthAuditLog, Role,EmployeeAuditLog
+from .models import  CommonKPIMaster, CompanyLogo, UserAccount, UserActiveSession, AuthAuditLog, Role,EmployeeAuditLog, ProbationPolicy
 # from .models import KRAPeerNomination, PeerRating
 from .serializers import (
     CommonKPIMasterSerializer,
@@ -28,6 +29,7 @@ from .serializers import (
     AuthAuditLogSerializer,
     RoleSerializer,
     CustomTokenRefreshSerializer,
+    ProbationPolicySerializer,
 )
 from .permissions import IsHRAdmin, IsHRAdminOrDepartmentHead, IsHRAdminOrReadOnly, IsSystemAdmin, ReadHROnlyWriteSystemAdmin
 
@@ -523,21 +525,75 @@ class EmployeeViewSet(ModelViewSet):
 
     def perform_create(self, serializer):
         """Auto-generate employee_id + increment position headcount."""
-        employee_id = generate_employee_id()
-        instance = serializer.save(employee_id=employee_id)
+        from .models import JobPosition
 
-        if instance.department and not instance.structure_location:
-            instance.structure_location = instance.department
-            instance.save(update_fields=['structure_location'])
-        # Increment position actual_count
-        if instance.position:
-            instance.position.actual_count = instance.position.employees.filter(is_deleted=False).count()
-            instance.position.save(update_fields=['actual_count'])
+        with transaction.atomic():
+            position = serializer.validated_data.get('position')
+            locked_position = None
+            if position:
+                locked_position = JobPosition.objects.select_for_update().get(pk=position.pk)
+                filled = Employee.objects.filter(position=locked_position, is_deleted=False).count()
+                if filled >= locked_position.budgeted_count:
+                    raise ValidationError({
+                        'position': (
+                            f'This position has reached its approved headcount limit '
+                            f'({filled}/{locked_position.budgeted_count}). Increase the position budget '
+                            'or select another position.'
+                        )
+                    })
 
+            employee_id = generate_employee_id()
+            instance = serializer.save(employee_id=employee_id)
+
+            if instance.department and not instance.structure_location:
+                instance.structure_location = instance.department
+                instance.save(update_fields=['structure_location'])
+            if locked_position:
+                locked_position.actual_count = Employee.objects.filter(
+                    position=locked_position, is_deleted=False
+                ).count()
+                locked_position.save(update_fields=['actual_count'])
+
+            if instance.status == 'PROBATION':
+                from .services.probation_service import start_probation_cycle
+                start_probation_cycle(instance)
+
+    @transaction.atomic
     def perform_update(self, serializer):
         """Log field changes to audit trail + update position headcount."""
+        from .models import JobPosition
+
         old_instance = self.get_object()
         old_position_id = old_instance.position_id
+        new_position = serializer.validated_data.get('position', old_instance.position)
+        new_position_id = getattr(new_position, 'pk', None)
+
+        # Serialize concurrent transfers into the same position and reject a
+        # full destination before saving the employee record.
+        locked_positions = {}
+        if old_position_id != new_position_id:
+            position_ids = sorted(
+                {pk for pk in (old_position_id, new_position_id) if pk is not None},
+                key=str,
+            )
+            locked_positions = {
+                position.pk: position
+                for position in JobPosition.objects.select_for_update()
+                .filter(pk__in=position_ids).order_by('pk')
+            }
+            if new_position_id:
+                destination = locked_positions[new_position_id]
+                filled = Employee.objects.filter(
+                    position_id=new_position_id, is_deleted=False
+                ).exclude(pk=old_instance.pk).count()
+                if filled >= destination.budgeted_count:
+                    raise ValidationError({
+                        'position': (
+                            f'This position has reached its approved headcount limit '
+                            f'({filled}/{destination.budgeted_count}). Increase the position budget '
+                            'or select another position.'
+                        )
+                    })
 
         # ✅ Attach the user BEFORE saving so signal can log correctly
         user = self.request.user
@@ -555,18 +611,59 @@ class EmployeeViewSet(ModelViewSet):
             instance.save(update_fields=['structure_location'])
         # Update position counts if position changed
         if old_position_id != instance.position_id:
-            if old_instance.position:
-                old_instance.position.actual_count = old_instance.position.employees.filter(is_deleted=False).count()
-                old_instance.position.save(update_fields=['actual_count'])
-            if instance.position:
-                instance.position.actual_count = instance.position.employees.filter(is_deleted=False).count()
-                instance.position.save(update_fields=['actual_count'])
+            for position_id in (old_position_id, instance.position_id):
+                position = locked_positions.get(position_id)
+                if position:
+                    filled = Employee.objects.filter(
+                        position_id=position_id, is_deleted=False
+                    ).count()
+                    # Legacy/imported data can already exceed a position's
+                    # budget. Keep the constrained counter valid so an
+                    # employee transfer does not fail after saving the move.
+                    position.actual_count = min(filled, position.budgeted_count)
+                    position.save(update_fields=['actual_count'])
+
+        if instance.status == 'PROBATION':
+            from .services.probation_service import refresh_current_probation_cycle, start_probation_cycle
+            if old_instance.status != 'PROBATION':
+                event = 'RESTARTED' if instance.probation_cycles.exists() else 'STARTED'
+                start_probation_cycle(instance, event_type=event, start_date=django_timezone.localdate())
+            elif (
+                old_instance.department_id != instance.department_id
+                or old_instance.position_id != instance.position_id
+                or old_instance.date_of_joining != instance.date_of_joining
+            ):
+                updated_cycle = refresh_current_probation_cycle(instance)
+                if updated_cycle.end_date:
+                    from .tasks import email_probation_date_changed
+                    reasons = []
+                    if old_instance.department_id != instance.department_id:
+                        reasons.append('your department changed')
+                    if old_instance.position_id != instance.position_id:
+                        reasons.append('your position changed')
+                    if old_instance.date_of_joining != instance.date_of_joining:
+                        reasons.append('your joining date changed')
+                    reason_text = ' and '.join(reasons) or 'your employment details changed'
+                    email_args = (
+                        str(instance.id),
+                        updated_cycle.end_date.isoformat(),
+                        f"Your probation period was recalculated from your joining date because {reason_text}. "
+                        f"Your updated last day of probation is {updated_cycle.end_date:%d %B %Y}.",
+                        old_instance.department.name if old_instance.department else '',
+                        instance.department.name if instance.department else '',
+                        old_instance.position.title if old_instance.position else '',
+                        instance.position.title if instance.position else '',
+                    )
+                    transaction.on_commit(lambda args=email_args: email_probation_date_changed.delay(*args))
+        elif old_instance.status == 'PROBATION':
+            instance.probation_cycles.filter(is_current=True).update(is_current=False)
 
     def perform_destroy(self, instance):
         """Soft delete — mark as TERMINATED instead of removing."""
         instance.is_deleted = True
         instance.status = 'TERMINATED'
         instance.save(update_fields=['is_deleted', 'status'])
+        instance.probation_cycles.filter(is_current=True).update(is_current=False)
 
         # Decrement position count
         if instance.position:
@@ -699,7 +796,7 @@ class EmployeeViewSet(ModelViewSet):
         Returns human-readable timeline entries.
         """
         from .models import (
-            EmployeeAuditLog, JobPosition, Employee as EmpModel, CompanyStructure
+            EmployeeAuditLog, JobPosition, Employee as EmpModel, CompanyStructure, ProbationCycle
         )
 
         employee = self.get_object()
@@ -805,6 +902,26 @@ class EmployeeViewSet(ModelViewSet):
                 'changed_by_id': log.modified_by.employee_id if log.modified_by else None,
             })
 
+        cycle_labels = {
+            'STARTED': 'Probation Started',
+            'RESTARTED': 'Probation Restarted',
+            'POLICY_UPDATED': 'Probation Period Updated',
+        }
+        for cycle in ProbationCycle.objects.filter(employee=employee).order_by('-created_at'):
+            period = f"{cycle.probation_months} month(s)" if cycle.probation_months else 'No matching probation policy'
+            if cycle.end_date:
+                period += f" · Last day: {cycle.end_date:%d %b %Y}"
+            entries.append({
+                'id': str(cycle.id),
+                'event_type': cycle_labels.get(cycle.event_type, 'Probation'),
+                'field_name': 'probation_cycle',
+                'from_value': None,
+                'to_value': period,
+                'changed_at': cycle.created_at,
+                'changed_by': 'System',
+                'changed_by_id': None,
+            })
+
         # ---------- Add "joined the company" as final entry ----------
         entries.append({
             'id': 0,
@@ -818,6 +935,8 @@ class EmployeeViewSet(ModelViewSet):
             'changed_by': 'System',
             'changed_by_id': None,
         })
+
+        entries.sort(key=lambda entry: str(entry['changed_at']), reverse=True)
 
         return Response({
             'count': len(entries),
@@ -904,13 +1023,14 @@ class EmployeeViewSet(ModelViewSet):
 
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.decorators import action
-from .models import CompanyStructure, JobPosition, SystemSetting, Role
+from .models import CompanyStructure, JobPosition, SystemSetting, Role, ProbationPolicy
 from .serializers import (
     RoleFullSerializer,
     CompanyStructureSerializer,
     JobPositionSerializer,
     EmployeeIdSettingSerializer,
     EmployeeIdPreviewSerializer,
+    ProbationPolicySerializer,
 )
 from .permissions import IsHRAdmin, IsSystemAdmin
 
@@ -980,7 +1100,12 @@ class CompanyStructureViewSet(ModelViewSet):
 
 class JobPositionViewSet(ModelViewSet):
     """Full CRUD for job positions with headcount tracking."""
-    queryset = JobPosition.objects.select_related('department').order_by('title')
+    queryset = JobPosition.objects.select_related('department').annotate(
+        _filled_employee_count=models.Count(
+            'employees',
+            filter=models.Q(employees__is_deleted=False),
+        ),
+    ).order_by('title')
     serializer_class = JobPositionSerializer
     permission_classes = [IsAuthenticated, IsHRAdmin]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -996,6 +1121,44 @@ class JobPositionViewSet(ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return super().destroy(request, *args, **kwargs)
+
+
+class ProbationPolicyViewSet(ModelViewSet):
+    """HR and system admins configure probation and reminder periods by position."""
+    queryset = ProbationPolicy.objects.select_related(
+        'department', 'position'
+    ).order_by('department__name', 'position__title')
+    serializer_class = ProbationPolicySerializer
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+    http_method_names = ['get', 'post', 'patch', 'delete']
+
+    def perform_create(self, serializer):
+        policy = serializer.save()
+        employees = Employee.objects.filter(
+            department_id=policy.department_id,
+            position_id=policy.position_id,
+            status='PROBATION',
+            is_deleted=False,
+        )
+        from .services.probation_service import refresh_current_probation_cycle
+        from .tasks import email_probation_date_changed
+
+        for employee in employees:
+            cycle = employee.probation_cycles.filter(is_current=True).order_by('-created_at').first()
+            if cycle and cycle.end_date is None:
+                updated_cycle = refresh_current_probation_cycle(employee)
+                if updated_cycle.end_date:
+                    email_probation_date_changed.delay(
+                        str(employee.id),
+                        updated_cycle.end_date.isoformat(),
+                        f"A probation policy was configured for your department and position. "
+                        f"Your probation period has been calculated from your joining date. "
+                        f"Your last day of probation is {updated_cycle.end_date:%d %B %Y}.",
+                        policy.department.name,
+                        policy.department.name,
+                        policy.position.title,
+                        policy.position.title,
+                    )
 
 
 # ------------------------------------------------------------------------------

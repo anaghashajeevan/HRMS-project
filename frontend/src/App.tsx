@@ -265,6 +265,7 @@ import RolesPage from './pages/settings/Roles';
 import DepartmentsPage from './pages/settings/Departments';
 import PositionsPage from './pages/settings/Positions';
 import EmployeeCodeSettingsPage from './pages/settings/EmployeeCode';
+import ProbationSettingsPage from './pages/settings/ProbationSettingsPage';
 import ProfilePage from './pages/Profile';
 
 // ⬇️ NEW imports for workflow feature
@@ -440,6 +441,15 @@ export default function App() {
             element={
               <ProtectedRoute requiredRoles={['SYSTEM_ADMIN']}>
                 <EmployeeCodeSettingsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/settings/probation"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+                <ProbationSettingsPage />
               </ProtectedRoute>
             }
           />

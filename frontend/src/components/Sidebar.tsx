@@ -2134,6 +2134,12 @@ const settingsNav: NavItem[] = [
     allowedRoles: ['SYSTEM_ADMIN'],
   },
   {
+    label: 'Probation Settings',
+    icon: Clock,
+    to: '/settings/probation',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  },
+  {
     label: 'Approval Workflows',
     icon: Workflow,
     to: '/settings/approval-workflows',

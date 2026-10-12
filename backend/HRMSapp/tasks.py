@@ -2,9 +2,13 @@
 Celery tasks for HRMS.
 """
 import logging
+from datetime import date, timedelta
+from html import unescape
 from celery import shared_task
 from django.core.mail import EmailMultiAlternatives, send_mail
 from django.template.loader import render_to_string
+from django.template import Context, Template
+from django.utils.html import strip_tags
 from django.conf import settings
 from django.utils import timezone
 
@@ -279,6 +283,208 @@ def test_email(recipient_email):
     )
     logger.info(f"📧 Test email sent to {recipient_email}")
     return f'Test email sent to {recipient_email}'
+
+
+@shared_task
+def scan_probation_reminders():
+    """Send each probation cycle's advance reminder once per recipient."""
+    from .models import ProbationCycle, UserAccount, LetterTemplate
+
+    today = timezone.localdate()
+    cycles = ProbationCycle.objects.filter(
+        end_date__isnull=False,
+        is_current=True,
+        employee__status='PROBATION',
+    ).select_related('employee', 'employee__reporting_manager', 'policy__position')
+    sent = 0
+    for cycle in cycles:
+        reminder_date = cycle.end_date - timedelta(days=cycle.reminder_days_before)
+        if reminder_date > today:
+            continue
+
+        employee = cycle.employee
+        recipients = []
+        if employee.official_email:
+            recipients.append(employee.official_email)
+        manager = employee.reporting_manager
+        if manager and manager.official_email:
+            recipients.append(manager.official_email)
+
+        admins = UserAccount.objects.filter(
+            is_active=True,
+            roles__role_name__in=['HR_ADMIN', 'SYSTEM_ADMIN'],
+        ).select_related('employee').distinct()
+        for user in admins:
+            linked_employee = getattr(user, 'employee', None)
+            address = (linked_employee.official_email if linked_employee else None) or user.email
+            if address:
+                recipients.append(address)
+
+        delivered = set(cycle.delivered_recipient_emails or [])
+        letter_template = _get_notification_template(LetterTemplate, 'PROBATION_REMINDER')
+        if not letter_template:
+            logger.error('No active PROBATION_REMINDER letter template is configured.')
+            continue
+        days_remaining = max((cycle.end_date - today).days, 0)
+        context = {
+            'employee_name': employee.full_name,
+            'employee_id': employee.employee_id,
+            'last_probation_date': cycle.end_date.strftime('%d %B %Y'),
+            'days_remaining': days_remaining,
+            'notification_message': (
+                f"The probation period will complete in {days_remaining} day(s). "
+                f"The last day of probation is {cycle.end_date:%d %B %Y}. "
+                'Please discuss and finalize the employee status before this date.'
+            ),
+        }
+        subject, html_body, text_body = _render_notification_template(letter_template, context)
+        for address in dict.fromkeys(recipients):
+            if address in delivered:
+                continue
+            try:
+                email = EmailMultiAlternatives(
+                    subject=subject,
+                    body=text_body,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    to=[address],
+                )
+                email.attach_alternative(html_body, 'text/html')
+                email.send(fail_silently=False)
+                delivered.add(address)
+                sent += 1
+            except Exception:
+                logger.exception('Probation reminder failed for cycle=%s recipient=%s', cycle.id, address)
+
+        cycle.delivered_recipient_emails = sorted(delivered)
+        update_fields = ['delivered_recipient_emails']
+        unique_recipients = set(dict.fromkeys(recipients))
+        if unique_recipients and unique_recipients.issubset(delivered):
+            cycle.reminder_sent_at = timezone.now()
+            update_fields.append('reminder_sent_at')
+        cycle.save(update_fields=update_fields)
+
+    return {'sent': sent}
+
+
+@shared_task
+def email_probation_date_changed(
+    employee_id, last_probation_date, notification_message,
+    previous_department='', department='', previous_position='', position='',
+):
+    """Tell the employee that a department/position or policy changed their probation period."""
+    from .models import Employee, LetterTemplate
+
+    employee = Employee.objects.filter(pk=employee_id, is_deleted=False).first()
+    if not employee or not employee.official_email:
+        return {'sent': False, 'reason': 'Employee email unavailable'}
+    if isinstance(last_probation_date, str):
+        last_probation_date = date.fromisoformat(last_probation_date)
+    days_remaining = max((last_probation_date - timezone.localdate()).days, 0)
+    context = {
+        'employee_name': employee.full_name,
+        'employee_id': employee.employee_id,
+        'last_probation_date': last_probation_date.strftime('%d %B %Y'),
+        'days_remaining': days_remaining,
+        'notification_message': notification_message,
+        'previous_probation_department': previous_department or '—',
+        'new_probation_department': department or '—',
+        'previous_probation_position': previous_position or '—',
+        'new_probation_position': position or '—',
+    }
+    letter_template = _get_notification_template(LetterTemplate, 'PROBATION_PERIOD_CHANGED')
+    if not letter_template:
+        logger.error('No active PROBATION_PERIOD_CHANGED letter template is configured.')
+        return {'sent': False, 'reason': 'Probation notification template unavailable'}
+    subject, html_body, text_body = _render_notification_template(letter_template, context)
+    email = EmailMultiAlternatives(
+        subject=subject,
+        body=text_body,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[employee.official_email],
+    )
+    email.attach_alternative(html_body, 'text/html')
+    email.send(fail_silently=False)
+    return {'sent': True}
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def email_employment_status_changed(self, employee_id, previous_status, new_status, changed_on):
+    """Email the employee whenever their employment status is updated."""
+    from .models import Employee, LetterTemplate
+
+    employee = Employee.objects.filter(pk=employee_id).first()
+    if not employee:
+        logger.warning('Status change email skipped: employee %s is unavailable.', employee_id)
+        return {'sent': False, 'reason': 'Employee unavailable'}
+    if not employee.official_email:
+        logger.warning('Status change email skipped: employee %s has no email.', employee_id)
+        return {'sent': False, 'reason': 'Employee email unavailable'}
+
+    status_labels = dict(Employee.STATUS_CHOICES)
+    previous_label = status_labels.get(previous_status, previous_status)
+    new_label = status_labels.get(new_status, new_status)
+    changed_date = date.fromisoformat(changed_on)
+    context = {
+        'employee_name': employee.full_name,
+        'employee_id': employee.employee_id,
+        'employee_position': employee.position.title if employee.position else '',
+        'employee_department': employee.department.name if employee.department else '',
+        'previous_status': previous_label,
+        'new_status': new_label,
+        'status_change_date': changed_date.strftime('%d %B %Y'),
+        'status_change_message': (
+            f"Your employment status changed from {previous_label} to {new_label} "
+            f"on {changed_date:%d %B %Y}."
+        ),
+        'company_name': getattr(settings, 'COMPANY_NAME', 'HRMS'),
+    }
+    letter_template = _get_notification_template(
+        LetterTemplate, 'EMPLOYMENT_STATUS_CHANGED'
+    )
+    if not letter_template:
+        logger.error('No active EMPLOYMENT_STATUS_CHANGED letter template is configured.')
+        return {'sent': False, 'reason': 'Employment status email template unavailable'}
+
+    subject, html_body, text_body = _render_notification_template(letter_template, context)
+    try:
+        email = EmailMultiAlternatives(
+            subject=subject,
+            body=text_body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[employee.official_email],
+        )
+        email.attach_alternative(html_body, 'text/html')
+        email.send(fail_silently=False)
+    except Exception as exc:
+        logger.exception(
+            'Employment status email failed for employee=%s recipient=%s',
+            employee_id, employee.official_email,
+        )
+        raise self.retry(exc=exc)
+
+    logger.info(
+        'Employment status email sent to %s for employee=%s (%s -> %s)',
+        employee.official_email, employee_id, previous_label, new_label,
+    )
+    return {'sent': True, 'recipient': employee.official_email}
+
+
+def _get_notification_template(template_model, template_type):
+    return (
+        template_model.objects.filter(
+            template_type=template_type, is_active=True, is_default=True
+        ).first()
+        or template_model.objects.filter(
+            template_type=template_type, is_active=True
+        ).order_by('-updated_at').first()
+    )
+
+
+def _render_notification_template(letter_template, context):
+    subject = Template(letter_template.subject).render(Context(context))
+    html_body = Template(letter_template.body_html).render(Context(context))
+    text_body = unescape(strip_tags(html_body))
+    return subject, html_body, text_body
 
 
 

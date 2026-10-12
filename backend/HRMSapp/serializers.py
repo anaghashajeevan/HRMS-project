@@ -756,7 +756,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
 # MASTER DATA SERIALIZERS
 # ==============================================================================
 
-from .models import CompanyStructure, JobPosition, SystemSetting
+from .models import CompanyStructure, JobPosition, SystemSetting, ProbationPolicy
 
 
 # ------------------------------------------------------------------------------
@@ -817,8 +817,9 @@ class CompanyStructureSerializer(serializers.ModelSerializer):
 
 class JobPositionSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(source='department.name', read_only=True)
-    vacancy_count = serializers.IntegerField(read_only=True)
-    is_full = serializers.BooleanField(read_only=True)
+    actual_count = serializers.SerializerMethodField()
+    vacancy_count = serializers.SerializerMethodField()
+    is_full = serializers.SerializerMethodField()
 
     class Meta:
         model = JobPosition
@@ -831,6 +832,24 @@ class JobPositionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'actual_count', 'vacancy_count', 'is_full', 'created_at', 'updated_at']
 
+    def _filled_employee_count(self, obj):
+        # The stored actual_count may be stale (bulk imports and legacy updates
+        # can bypass the regular position counter updates). Employee assignment
+        # rows are the source of truth for displaying headcount.
+        annotated_count = getattr(obj, '_filled_employee_count', None)
+        if annotated_count is not None:
+            return annotated_count
+        return obj.employees.filter(is_deleted=False).count()
+
+    def get_actual_count(self, obj):
+        return self._filled_employee_count(obj)
+
+    def get_vacancy_count(self, obj):
+        return max(0, obj.budgeted_count - self._filled_employee_count(obj))
+
+    def get_is_full(self, obj):
+        return self._filled_employee_count(obj) >= obj.budgeted_count
+
     def validate(self, attrs):
         salary_min = attrs.get('salary_min')
         salary_max = attrs.get('salary_max')
@@ -839,6 +858,32 @@ class JobPositionSerializer(serializers.ModelSerializer):
                 'salary_max': 'Maximum salary must be greater than minimum salary.'
             })
         return attrs
+
+
+class ProbationPolicySerializer(serializers.ModelSerializer):
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=CompanyStructure.objects.filter(type__in=['DEPARTMENT', 'TEAM'])
+    )
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    position_name = serializers.CharField(source='position.title', read_only=True)
+
+    class Meta:
+        model = ProbationPolicy
+        fields = [
+            'id', 'position', 'position_name', 'department', 'department_name',
+            'probation_months', 'reminder_days_before', 'updated_at',
+        ]
+        read_only_fields = ['id', 'department_name', 'position_name', 'updated_at']
+
+    def validate_probation_months(self, value):
+        if value < 1 or value > 60:
+            raise serializers.ValidationError('Probation duration must be between 1 and 60 months.')
+        return value
+
+    def validate_reminder_days_before(self, value):
+        if value < 1 or value > 365:
+            raise serializers.ValidationError('Reminder lead time must be between 1 and 365 days.')
+        return value
 
 
 # ------------------------------------------------------------------------------
@@ -890,11 +935,12 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         child=serializers.UUIDField(),
         write_only=True, required=False, allow_empty=True
     )
+    employee_id = serializers.CharField(required=False, max_length=20, trim_whitespace=True)
 
     class Meta:
         model = Employee
         fields = [
-            'first_name', 'last_name', 'official_email', 'personal_email',
+            'employee_id', 'first_name', 'last_name', 'official_email', 'personal_email',
             'phone_number', 'date_of_birth', 'gender',
             'status', 'position', 'reporting_manager', 'structure_location',
             'department', 'location', 'cost_center',
@@ -903,6 +949,17 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
             'pan_number_encrypted', 'aadhaar_number_encrypted', 'uan_number_encrypted',
             'create_user_account', 'password', 'role_ids',
         ]
+
+    def validate_employee_id(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('Employee ID cannot be blank.')
+        employees = Employee.objects.filter(employee_id__iexact=value)
+        if self.instance:
+            employees = employees.exclude(pk=self.instance.pk)
+        if employees.exists():
+            raise serializers.ValidationError('This employee ID is already in use.')
+        return value
 
     def validate_official_email(self, value):
         qs = Employee.objects.filter(official_email__iexact=value, is_deleted=False)
@@ -966,6 +1023,10 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         create_account = validated_data.pop('create_user_account', False)
         password = validated_data.pop('password', None)
         role_ids = validated_data.pop('role_ids', [])
+
+        # The Add Employee workflow always begins in probation; bulk imports
+        # use their own importer and retain the status supplied in the file.
+        validated_data['status'] = 'PROBATION'
 
         employee = Employee.objects.create(**validated_data)
 
