@@ -42,7 +42,6 @@ from .services.email_service import (
 from .services.essl_service import test_connection
 from .services.live_presence_service import (
     build_live_presence_map,
-    sync_live_raw_punches,
 )
 from .services.monthly_report_service import (
     collect_monthly_attendance,
@@ -295,17 +294,6 @@ class LivePresenceView(APIView):
     def get(self, request):
         report_date = timezone.localdate()
         settings_obj = AutomationSettings.get_solo()
-        sync_warning = ""
-
-        try:
-            saved_count = sync_live_raw_punches(settings_obj, report_date)
-            logger.info(
-                "Live presence sync: date=%s raw_punches_saved=%s",
-                report_date, saved_count,
-            )
-        except Exception as exc:
-            logger.warning("Live presence device sync failed: %s", exc)
-            sync_warning = "Live device sync failed. Showing latest saved data."
 
         attendance_by_code = {
             row.employee_code: row
@@ -343,8 +331,6 @@ class LivePresenceView(APIView):
             "summary": summary,
             "employees": employees,
         }
-        if sync_warning:
-            payload["warning"] = sync_warning
         return Response(payload)
 
 
