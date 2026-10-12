@@ -24,7 +24,6 @@ from .models import (
     AutomationSettings,
     DailyAttendance,
     EmailReportLog,
-    normalize_employee_code,
     MonthlyReportLog,
     RawPunchLog,
 )
@@ -43,6 +42,7 @@ from .services.email_service import (
 from .services.essl_service import test_connection
 from .services.live_presence_service import (
     build_live_presence_map,
+    sync_live_raw_punches,
 )
 from .services.monthly_report_service import (
     collect_monthly_attendance,
@@ -80,7 +80,7 @@ def _get_hrms_active_employees():
 
 
 def _build_employee_lookup(hrms_employees):
-    return {normalize_employee_code(emp.employee_id): emp for emp in hrms_employees}
+    return {emp.employee_id: emp for emp in hrms_employees}
 
 
 def _attendance_row_payload(row, hrms_employee, presence):
@@ -98,7 +98,7 @@ def _attendance_row_payload(row, hrms_employee, presence):
         if row
         else (hrms_employee.full_name if hrms_employee else "Unknown Employee")
     )
-    employee_code = hrms_employee.employee_id if hrms_employee else (row.employee_code if row else "")
+    employee_code = row.employee_code if row else (hrms_employee.employee_id if hrms_employee else "")
     status_display = row.get_status_display() if row else presence["current_presence_display"]
 
     return {
@@ -130,7 +130,7 @@ def _live_status_from_presence(row, presence):
 
 
 def _live_presence_employee_payload(row, hrms_employee, presence):
-    employee_code = hrms_employee.employee_id if hrms_employee else (row.employee_code if row else "")
+    employee_code = row.employee_code if row else (hrms_employee.employee_id if hrms_employee else "")
     employee_name = (
         row.employee_name
         if row
@@ -295,6 +295,17 @@ class LivePresenceView(APIView):
     def get(self, request):
         report_date = timezone.localdate()
         settings_obj = AutomationSettings.get_solo()
+        sync_warning = ""
+
+        try:
+            saved_count = sync_live_raw_punches(settings_obj, report_date)
+            logger.info(
+                "Live presence sync: date=%s raw_punches_saved=%s",
+                report_date, saved_count,
+            )
+        except Exception as exc:
+            logger.warning("Live presence device sync failed: %s", exc)
+            sync_warning = "Live device sync failed. Showing latest saved data."
 
         attendance_by_code = {
             row.employee_code: row
@@ -332,6 +343,8 @@ class LivePresenceView(APIView):
             "summary": summary,
             "employees": employees,
         }
+        if sync_warning:
+            payload["warning"] = sync_warning
         return Response(payload)
 
 

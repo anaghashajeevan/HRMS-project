@@ -9,7 +9,7 @@ import logging
 
 from django.utils import timezone
 
-from attendanceapp.models import DailyAttendance, EsslDevice, RawPunchLog, normalize_employee_code
+from attendanceapp.models import DailyAttendance, RawPunchLog, normalize_employee_code
 from .employee_matcher import find_hrms_employee_by_code, get_employee_display_name
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ def _calculate_lunch_overlap(punch_in, punch_out, settings_obj):
         return 0
     local_in = timezone.localtime(punch_in)
     local_out = timezone.localtime(punch_out)
-    
+
     lunch_start_t = _setting_time(getattr(settings_obj, 'lunch_start_time', '13:00'))
     lunch_end_t = _setting_time(getattr(settings_obj, 'lunch_end_time', '14:00'))
 
@@ -151,9 +151,7 @@ def _calculate_lunch_overlap(punch_in, punch_out, settings_obj):
 #     )
 #     return attendance
 
-def _build_attendance_row(
-    employee_code, attendance_date, punch_entries, settings_obj, configured_device_roles=None
-):
+def _build_attendance_row(employee_code, attendance_date, punch_entries, settings_obj):
     """
     Build/update a DailyAttendance row for one employee on one date.
     Correctly separates IN punches from OUT punches so IN punches never appear in Punch Out.
@@ -168,23 +166,14 @@ def _build_attendance_row(
     if not punch_entries:
         return None
 
-    # Keep the source-device role when available. With separate IN and OUT
-    # terminals, the combined timeline cannot be interpreted by odd/even count.
+    # Detect if punch_entries contains device_role (dicts) or just datetimes
     is_dict = isinstance(punch_entries[0], dict)
 
     if is_dict:
-        in_punches = sorted(
-            e["punch_time"] for e in punch_entries
-            if e.get("device_role") in ("PUNCH_IN", "BOTH")
-        )
-        out_punches = sorted(
-            e["punch_time"] for e in punch_entries
-            if e.get("device_role") in ("PUNCH_OUT", "BOTH")
-        )
-        all_times = remove_duplicate_punches(
-            [e["punch_time"] for e in punch_entries],
-            settings_obj.duplicate_punch_ignore_seconds,
-        )
+        # Separate punches by device role
+        in_punches = sorted([e["punch_time"] for e in punch_entries if e.get("device_role") in ("PUNCH_IN", "BOTH")])
+        out_punches = sorted([e["punch_time"] for e in punch_entries if e.get("device_role") in ("PUNCH_OUT", "BOTH")])
+        all_times = sorted([e["punch_time"] for e in punch_entries])
     else:
         all_times = remove_duplicate_punches(punch_entries, settings_obj.duplicate_punch_ignore_seconds)
         in_punches = all_times
@@ -193,27 +182,17 @@ def _build_attendance_row(
     if not all_times:
         return None
 
-    configured_device_roles = configured_device_roles or set()
-    has_dedicated_in_device = (
-        "PUNCH_IN" in configured_device_roles
-        or (is_dict and any(e.get("device_role") == "PUNCH_IN" for e in punch_entries))
-    )
-    has_dedicated_out_device = (
-        "PUNCH_OUT" in configured_device_roles
-        or (is_dict and any(e.get("device_role") == "PUNCH_OUT" for e in punch_entries))
-    )
-
-    # For a dedicated IN terminal, an OUT scan must never be used as fallback IN.
-    punch_in = in_punches[0] if in_punches else (None if has_dedicated_in_device else all_times[0])
+    # 1. PUNCH IN: Always the earliest punch of the day
+    punch_in = in_punches[0] if in_punches else all_times[0]
 
     # 2. PUNCH OUT: Must be an EXIT punch (PUNCH_OUT device or EVEN-numbered punch)
     punch_out = None
-    if has_dedicated_out_device:
+    if is_dict and any(e.get("device_role") == "PUNCH_OUT" for e in punch_entries):
         # Dedicated device setup: Take latest punch from PUNCH_OUT device
         out_device_punches = sorted([e["punch_time"] for e in punch_entries if e.get("device_role") == "PUNCH_OUT"])
         if out_device_punches:
             punch_out = out_device_punches[-1]
-    elif not has_dedicated_out_device:
+    else:
         # BOTH devices / Single device setup: Take latest EVEN-numbered punch
         total_count = len(all_times)
         if total_count >= 2:
@@ -292,9 +271,6 @@ def _build_attendance_row(
 def persist_raw_logs(logs):
     """Save raw punches to DB. Preserves device_serial in raw_line for live presence tracking."""
     saved = 0
-    active_device_serials = set(
-        EsslDevice.objects.filter(is_active=True).values_list("serial_number", flat=True)
-    )
     for log in logs:
         employee_code = normalize_employee_code(log["employee_code"])
         if not employee_code:
@@ -309,7 +285,7 @@ def persist_raw_logs(logs):
         if device_serial and f"| {device_serial}" not in raw_line:
             raw_line = f"{raw_line} | {device_serial}"
 
-        raw_log, created = RawPunchLog.objects.get_or_create(
+        _, created = RawPunchLog.objects.get_or_create(
             employee_code=employee_code,
             punch_time=punch_time,
             defaults={
@@ -318,10 +294,6 @@ def persist_raw_logs(logs):
                 "employee": hrms_employee,
             },
         )
-        stored_serial = (raw_log.raw_line or "").rsplit(" | ", 1)[-1].strip()
-        if not created and device_serial and stored_serial not in active_device_serials:
-            raw_log.raw_line = raw_line
-            raw_log.save(update_fields=["raw_line"])
         if created:
             saved += 1
     return saved
@@ -329,47 +301,33 @@ def persist_raw_logs(logs):
 def process_attendance_period(logs, settings_obj, start_date, end_date):
     persist_raw_logs(logs)
 
-    # Rebuild from the complete saved range, so a failed device fetch cannot
-    # erase or overwrite punches previously received from the other terminal.
-    raw_logs = RawPunchLog.objects.filter(
-        punch_date__gte=start_date,
-        punch_date__lte=end_date,
-    ).values("employee_code", "punch_time", "raw_line")
-    devices_by_serial = {
-        device.serial_number: device
-        for device in EsslDevice.objects.filter(is_active=True)
-    }
-    configured_device_roles = {device.role for device in devices_by_serial.values()}
-
-    # Preserve the device role when merging the saved IN/OUT timelines.
+    # Group ALL punches by (employee, date) — merge across all devices
     grouped_logs = defaultdict(list)
-    for log in raw_logs:
+    for log in logs:
         employee_code = normalize_employee_code(log["employee_code"])
         if not employee_code:
             continue
         punch_time = _make_aware(log["punch_time"])
         attendance_date = timezone.localtime(punch_time).date()
         if start_date <= attendance_date <= end_date:
-            raw_line = log.get("raw_line") or ""
-            device_serial = raw_line.split(" | ")[-1].strip() if " | " in raw_line else ""
-            device = devices_by_serial.get(device_serial)
-            grouped_logs[(employee_code, attendance_date)].append({
-                "punch_time": punch_time,
-                "device_role": device.role if device else "BOTH",
-                "device_serial": device_serial,
-            })
+            grouped_logs[(employee_code, attendance_date)].append(punch_time)
 
     attendance_rows = []
+    codes_by_date = defaultdict(list)
     for (employee_code, attendance_date), punch_times in grouped_logs.items():
         attendance = _build_attendance_row(
-            employee_code,
-            attendance_date,
-            punch_times,
-            settings_obj,
-            configured_device_roles=configured_device_roles,
+            employee_code, attendance_date, punch_times, settings_obj
         )
         if attendance:
             attendance_rows.append(attendance)
+            codes_by_date[attendance_date].append(employee_code)
+
+    current_date = start_date
+    while current_date <= end_date:
+        DailyAttendance.objects.filter(attendance_date=current_date).exclude(
+            employee_code__in=codes_by_date.get(current_date, [])
+        ).exclude(is_manual_override=True).delete()
+        current_date += timedelta(days=1)
 
     return sorted(attendance_rows, key=lambda row: (row.attendance_date, row.employee_code))
 

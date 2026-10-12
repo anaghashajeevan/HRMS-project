@@ -585,14 +585,6 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'HRMSapp.tasks.scan_probation_reminders',
         'schedule': crontab(hour=8, minute=0),
     },
-    'sync-live-attendance-every-5-mins': {
-        'task': 'attendanceapp.tasks.sync_live_attendance_task',
-        'schedule': crontab(minute='*/5'),
-    },
-    'monthly-attendance-report-hourly': {
-        'task': 'attendanceapp.tasks.run_monthly_attendance_check',
-        'schedule': crontab(minute=0),
-    },
 }
 
 
