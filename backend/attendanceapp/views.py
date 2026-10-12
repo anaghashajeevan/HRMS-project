@@ -24,6 +24,7 @@ from .models import (
     AutomationSettings,
     DailyAttendance,
     EmailReportLog,
+    normalize_employee_code,
     MonthlyReportLog,
     RawPunchLog,
 )
@@ -79,7 +80,7 @@ def _get_hrms_active_employees():
 
 
 def _build_employee_lookup(hrms_employees):
-    return {emp.employee_id: emp for emp in hrms_employees}
+    return {normalize_employee_code(emp.employee_id): emp for emp in hrms_employees}
 
 
 def _attendance_row_payload(row, hrms_employee, presence):
@@ -97,7 +98,7 @@ def _attendance_row_payload(row, hrms_employee, presence):
         if row
         else (hrms_employee.full_name if hrms_employee else "Unknown Employee")
     )
-    employee_code = row.employee_code if row else (hrms_employee.employee_id if hrms_employee else "")
+    employee_code = hrms_employee.employee_id if hrms_employee else (row.employee_code if row else "")
     status_display = row.get_status_display() if row else presence["current_presence_display"]
 
     return {
@@ -129,7 +130,7 @@ def _live_status_from_presence(row, presence):
 
 
 def _live_presence_employee_payload(row, hrms_employee, presence):
-    employee_code = row.employee_code if row else (hrms_employee.employee_id if hrms_employee else "")
+    employee_code = hrms_employee.employee_id if hrms_employee else (row.employee_code if row else "")
     employee_name = (
         row.employee_name
         if row

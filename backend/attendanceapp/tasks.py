@@ -15,6 +15,7 @@ def sync_live_attendance_task():
         logger.info("Celery: Sync live attendance task completed successfully.")
     except Exception as exc:
         logger.exception(f"Celery: Sync live attendance task failed: {exc}")
+        raise
 
 
 @shared_task

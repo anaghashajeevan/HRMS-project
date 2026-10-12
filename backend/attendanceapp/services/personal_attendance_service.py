@@ -1332,16 +1332,29 @@ def _ensure_attendance_processed_for_period(
     if not raw_rows:
         return
 
+    from ..models import EsslDevice
+
+    role_by_serial = dict(
+        EsslDevice.objects.filter(is_active=True).values_list("serial_number", "role")
+    )
     logs = [
-        {
-            "employee_code": row["employee_code"],
-            "punch_time": row["punch_time"],
-            "raw_line": row.get("raw_line") or "",
-        }
+        _saved_punch_for_processing(row, role_by_serial)
         for row in raw_rows
     ]
 
     process_attendance_period(logs, settings_obj, start_date, effective_end)
+
+
+def _saved_punch_for_processing(row, role_by_serial):
+    raw_line = row.get("raw_line") or ""
+    device_serial = raw_line.split(" | ")[-1].strip() if " | " in raw_line else ""
+    return {
+        "employee_code": row["employee_code"],
+        "punch_time": row["punch_time"],
+        "raw_line": raw_line,
+        "device_serial": device_serial,
+        "device_role": role_by_serial.get(device_serial, "BOTH"),
+    }
 
 
 def _ensure_month_attendance_for_all(year: int, month: int):

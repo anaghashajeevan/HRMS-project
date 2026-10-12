@@ -226,8 +226,8 @@ def call_essl_api_with_serial(api_url, username, password, serial_number, from_d
 def fetch_logs_for_range(from_datetime, to_datetime):
     """
     Fetches punches from ALL active devices simultaneously.
-    Each punch is tagged with device_serial for audit.
-    Role is stored but NOT used for pairing — timeline pairing handles that.
+    Each punch retains its device_serial and role so the attendance processor
+    can handle dedicated IN and OUT terminals correctly.
     """
     from .device_service import get_fetch_plan, DeviceConfigError
 
@@ -256,8 +256,12 @@ def fetch_logs_for_range(from_datetime, to_datetime):
             logs = parse_punch_logs(str_data or "")
             for log in logs:
                 log["device_serial"] = item["serial"]
-                log["device_role"] = item["role"]  # kept for audit only
+                log["device_role"] = item["role"]
             all_logs.extend(logs)
+            logger.info(
+                "eSSL fetch succeeded serial=%s role=%s punches=%d",
+                item.get("serial"), item.get("role"), len(logs),
+            )
         except Exception as exc:
             logger.warning(
                 "eSSL fetch failed serial=%s role=%s err=%s",
@@ -268,6 +272,10 @@ def fetch_logs_for_range(from_datetime, to_datetime):
     if not all_logs and errors:
         raise EsslServiceError(errors[0])
 
+    logger.info(
+        "eSSL fetch complete mode=%s devices=%d punches=%d failed_devices=%d",
+        mode, len(plan), len(all_logs), len(errors),
+    )
     return mode, all_logs
 
 

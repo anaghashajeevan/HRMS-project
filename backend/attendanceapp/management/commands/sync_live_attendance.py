@@ -6,7 +6,7 @@ Run every 5 minutes automatically via Celery Beat or Cron.
 from datetime import datetime, time, timedelta
 import logging
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from attendanceapp.models import AutomationSettings
@@ -42,7 +42,7 @@ class Command(BaseCommand):
             )
         except Exception as exc:
             self.stdout.write(self.style.ERROR(f"eSSL fetch failed: {exc}"))
-            return
+            raise CommandError(f"Could not fetch attendance logs: {exc}") from exc
 
         if not logs:
             self.stdout.write(self.style.WARNING("No logs returned from eSSL."))
@@ -53,6 +53,6 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             self.style.SUCCESS(
-                f"OK: mode={mode} raw_logs={len(logs)} daily_rows={len(rows)}"
+                f"OK: mode={mode} fetched_logs={len(logs)} daily_rows={len(rows)}"
             )
         )
