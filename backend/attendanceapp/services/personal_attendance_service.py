@@ -1268,15 +1268,18 @@ def _day_status(attendance_row, day, holiday_dates, leaves_by_date, is_future, t
     return 'present'
 
 # ==============================================================================
-# ON-DEMAND ATTENDANCE SYNC & PROCESSING (NO DAILY AUTOMATION NEEDED)
+# SAVED-PUNCH ATTENDANCE PROCESSING
 # ==============================================================================
 
-def _ensure_attendance_processed_for_period(start_date: date, end_date: date, employee=None):
+def _ensure_attendance_processed_for_period(
+    start_date: date,
+    end_date: date,
+    employee=None,
+    sync_from_device: bool = True,
+):
     """
-    Syncs live punches from eSSL device into RawPunchLog, then processes
-    RawPunchLog -> DailyAttendance for [start_date, end_date].
-    
-    Ensures pages load live attendance even if daily automation is disabled.
+    Optionally sync punches from eSSL, then process saved RawPunchLog records
+    into DailyAttendance for [start_date, end_date].
     """
     today = timezone.localdate()
     effective_end = min(end_date, today)
@@ -1285,34 +1288,33 @@ def _ensure_attendance_processed_for_period(start_date: date, end_date: date, em
 
     settings_obj = AutomationSettings.get_solo()
 
-    # 1) Sync from eSSL (best effort — if device is down, uses cached DB punches)
-    try:
-        from datetime import datetime, time as dtime
-        from .essl_service import fetch_logs_for_range
-        from .attendance_processor import persist_raw_logs
-        from ..models import normalize_employee_code
+    # Device I/O belongs in the periodic Celery sync, not a page request.
+    if sync_from_device:
+        try:
+            from datetime import datetime, time as dtime
+            from .essl_service import fetch_logs_for_range
+            from .attendance_processor import persist_raw_logs
+            from ..models import normalize_employee_code
 
-        mode, logs = fetch_logs_for_range(
-            datetime.combine(start_date, dtime.min),
-            datetime.combine(effective_end, dtime(23, 59, 59)),
-        )
-        if logs and employee is not None:
-            target = normalize_employee_code(employee.employee_id)
-            logs = [
-                log
-                for log in logs
-                if normalize_employee_code(log.get("employee_code")) == target
-            ]
-        if logs:
-            persist_raw_logs(logs)
-            # also process below from raw or from logs
-    except Exception as exc:
-        logger.warning(
-            "eSSL sync skipped for personal attendance (%s to %s): %s",
-            start_date,
-            effective_end,
-            exc,
-        )
+            _mode, logs = fetch_logs_for_range(
+                datetime.combine(start_date, dtime.min),
+                datetime.combine(effective_end, dtime(23, 59, 59)),
+            )
+            if logs and employee is not None:
+                target = normalize_employee_code(employee.employee_id)
+                logs = [
+                    log for log in logs
+                    if normalize_employee_code(log.get("employee_code")) == target
+                ]
+            if logs:
+                persist_raw_logs(logs)
+        except Exception as exc:
+            logger.warning(
+                "eSSL sync skipped for personal attendance (%s to %s): %s",
+                start_date,
+                effective_end,
+                exc,
+            )
 
     # 2) Build DailyAttendance rows from RawPunchLog
     from .attendance_processor import process_attendance_period
@@ -1344,14 +1346,16 @@ def _ensure_attendance_processed_for_period(start_date: date, end_date: date, em
 
 def _ensure_month_attendance_for_all(year: int, month: int):
     """
-    Runs ONE bulk eSSL sync + attendance processing pass for the whole company
-    for the requested month. Called by Team & All Employees views.
+    Rebuild attendance for the requested month from saved punches.
+    Device polling is handled by the periodic Celery sync.
     """
     start_date = date(year, month, 1)
     _, last_day = calendar.monthrange(year, month)
     end_date = date(year, month, last_day)
 
-    _ensure_attendance_processed_for_period(start_date, end_date, employee=None)
+    _ensure_attendance_processed_for_period(
+        start_date, end_date, employee=None, sync_from_device=False
+    )
 
 
 # ==============================================================================
