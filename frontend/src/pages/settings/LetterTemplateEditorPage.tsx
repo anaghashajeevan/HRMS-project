@@ -44,6 +44,10 @@ const AVAILABLE_VARIABLES = [
   { key: 'new_status', desc: 'Employee status after the change', group: 'Employment Status' },
   { key: 'status_change_date', desc: 'Date the status changed', group: 'Employment Status' },
   { key: 'status_change_message', desc: 'Summary of the status change', group: 'Employment Status' },
+  { key: 'previous_employee_id', desc: 'Employee ID before the change', group: 'Employee ID' },
+  { key: 'new_employee_id', desc: 'Employee ID after the change', group: 'Employee ID' },
+  { key: 'employee_id_change_date', desc: 'Date the employee ID changed', group: 'Employee ID' },
+  { key: 'employee_id_change_message', desc: 'Summary of the employee ID change', group: 'Employee ID' },
 
   // ===== LIFECYCLE (promotion, transfer, etc.) =====
   { key: 'current_position', desc: 'Current job title', group: 'Lifecycle' },
@@ -119,6 +123,10 @@ const PREVIEW_DATA: Record<string, string> = {
   new_status: 'Active',
   status_change_date: '9 October 2026',
   status_change_message: 'Your employment status changed from Probation to Active on 9 October 2026.',
+  previous_employee_id: 'EMP-2026-012',
+  new_employee_id: 'EMP-2026-120',
+  employee_id_change_date: '9 October 2026',
+  employee_id_change_message: 'Your employee ID has been updated from EMP-2026-012 to EMP-2026-120 on 9 October 2026.',
 
   // Lifecycle
   current_position: 'Software Engineer',
@@ -432,6 +440,10 @@ export default function LetterTemplateEditorPage() {
       setAiPrompt(
         'Write an employment status change email to {{employee_name}}. Clearly state {{status_change_message}}, including the previous status {{previous_status}}, new status {{new_status}}, and date {{status_change_date}}.'
       );
+    } else if (next === 'EMPLOYEE_ID_CHANGED' && !aiPrompt.trim()) {
+      setAiPrompt(
+        'Write an email to {{employee_name}} informing them that their employee ID changed from {{previous_employee_id}} to {{new_employee_id}} on {{employee_id_change_date}}. Include {{employee_id_change_message}}.'
+      );
     }
   }}
   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -462,6 +474,7 @@ export default function LetterTemplateEditorPage() {
   </optgroup>
   <optgroup label="Employment Notifications">
     <option value="EMPLOYMENT_STATUS_CHANGED">Employment Status Changed</option>
+    <option value="EMPLOYEE_ID_CHANGED">Employee ID Changed</option>
   </optgroup>
 </select>
 </div>
@@ -638,7 +651,7 @@ export default function LetterTemplateEditorPage() {
   </div>
 
   {/* Group by category */}
- {['Common', 'Lifecycle', 'Performance', 'Leave', 'Asset', 'Probation', 'Employment Status'].map((group) => {
+ {['Common', 'Lifecycle', 'Performance', 'Leave', 'Asset', 'Probation', 'Employment Status', 'Employee ID'].map((group) => {
   const groupVars = AVAILABLE_VARIABLES.filter((v) => {
     if (v.group !== group) return false;
     
@@ -650,6 +663,7 @@ export default function LetterTemplateEditorPage() {
     const isAssetTemplate = templateType === 'ASSET_ALLOCATION';
     const isProbationTemplate = ['PROBATION_REMINDER', 'PROBATION_PERIOD_CHANGED'].includes(templateType);
     const isEmploymentStatusTemplate = templateType === 'EMPLOYMENT_STATUS_CHANGED';
+    const isEmployeeIdTemplate = templateType === 'EMPLOYEE_ID_CHANGED';
     
     if (group === 'Lifecycle' && !isLifecycleTemplate) return false;
     if (group === 'Performance' && !isPerformanceTemplate) return false;
@@ -657,6 +671,7 @@ export default function LetterTemplateEditorPage() {
     if (group === 'Asset' && !isAssetTemplate) return false;
     if (group === 'Probation' && !isProbationTemplate) return false;
     if (group === 'Employment Status' && !isEmploymentStatusTemplate) return false;
+    if (group === 'Employee ID' && !isEmployeeIdTemplate) return false;
     
     return true;
   });
@@ -671,12 +686,12 @@ export default function LetterTemplateEditorPage() {
     ? 'text-purple-600'
     : group === 'Leave'
     ? 'text-green-600'
-    : group === 'Employment Status'
-    ? 'Employment Status Notification'
     : group === 'Probation'
     ? 'text-amber-700'
     : group === 'Employment Status'
     ? 'text-cyan-700'
+    : group === 'Employee ID'
+    ? 'text-sky-700'
     : 'text-orange-600';
 
   const groupBadge =
@@ -690,6 +705,10 @@ export default function LetterTemplateEditorPage() {
     ? '🏖️ Leave Letters'
     : group === 'Probation'
     ? 'Probation Notification'
+    : group === 'Employment Status'
+    ? 'Employment Status Notification'
+    : group === 'Employee ID'
+    ? 'Employee ID Notification'
     : '📦 Asset Allocation';
 
   return (

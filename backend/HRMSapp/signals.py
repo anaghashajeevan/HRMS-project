@@ -31,15 +31,18 @@ def log_employee_changes(sender, instance, **kwargs):
         return
 
     update_fields = kwargs.get('update_fields')
-    if (
-        old_instance.status != instance.status
-        and (update_fields is None or 'status' in update_fields)
+    employee_change = {}
+    if old_instance.status != instance.status and (update_fields is None or 'status' in update_fields):
+        employee_change['status'] = (old_instance.status, instance.status)
+    if old_instance.employee_id != instance.employee_id and (
+        update_fields is None or 'employee_id' in update_fields
     ):
-        instance._employment_status_email_change = (
-            old_instance.status,
-            instance.status,
-            timezone.localdate().isoformat(),
-        )
+        employee_change['employee_id'] = (old_instance.employee_id, instance.employee_id)
+    if employee_change:
+        instance._employee_notification_changes = {
+            'changes': employee_change,
+            'changed_on': timezone.localdate().isoformat(),
+        }
 
     # Get the user making the change from the instance
     # Views MUST set this before calling save()
@@ -65,19 +68,59 @@ def log_employee_changes(sender, instance, **kwargs):
 
 @receiver(post_save, sender=Employee)
 def queue_employment_status_email(sender, instance, created, **kwargs):
-    """Notify the employee after a persisted status change (never on create)."""
-    change = getattr(instance, '_employment_status_email_change', None)
+    """Create in-app notifications and queue emails for employee ID/status changes."""
+    change = getattr(instance, '_employee_notification_changes', None)
     if created or not change:
         return
 
-    del instance._employment_status_email_change
+    del instance._employee_notification_changes
     employee_id = str(instance.pk)
-    previous_status, new_status, changed_on = change
+    changed_on = change['changed_on']
+    from .models import Notification
 
-    def enqueue_status_email():
-        from .tasks import email_employment_status_changed
-        email_employment_status_changed.delay(
-            employee_id, previous_status, new_status, changed_on
+    status_labels = dict(Employee.STATUS_CHOICES)
+    if 'status' in change['changes']:
+        previous_status, new_status = change['changes']['status']
+        previous_label = status_labels.get(previous_status, previous_status)
+        new_label = status_labels.get(new_status, new_status)
+        Notification.objects.create(
+            recipient=instance,
+            notification_type='EMPLOYMENT_STATUS_CHANGED',
+            title='Employment status updated',
+            message=f'Your employment status changed from {previous_label} to {new_label}.',
+            link='/profile',
+            metadata={
+                'previous_status': previous_status,
+                'new_status': new_status,
+            },
         )
 
-    transaction.on_commit(enqueue_status_email, robust=True)
+        def enqueue_status_email():
+            from .tasks import email_employment_status_changed
+            email_employment_status_changed.delay(
+                employee_id, previous_status, new_status, changed_on
+            )
+
+        transaction.on_commit(enqueue_status_email, robust=True)
+
+    if 'employee_id' in change['changes']:
+        previous_employee_id, new_employee_id = change['changes']['employee_id']
+        Notification.objects.create(
+            recipient=instance,
+            notification_type='EMPLOYEE_ID_CHANGED',
+            title='Employee ID updated',
+            message=f'Your employee ID changed from {previous_employee_id} to {new_employee_id}.',
+            link='/profile',
+            metadata={
+                'previous_employee_id': previous_employee_id,
+                'new_employee_id': new_employee_id,
+            },
+        )
+
+        def enqueue_employee_id_email():
+            from .tasks import email_employee_id_changed
+            email_employee_id_changed.delay(
+                employee_id, previous_employee_id, new_employee_id, changed_on
+            )
+
+        transaction.on_commit(enqueue_employee_id_email, robust=True)

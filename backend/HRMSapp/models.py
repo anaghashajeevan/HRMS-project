@@ -815,6 +815,7 @@ class LetterTemplate(models.Model):
         ('PROBATION_REMINDER', 'Probation Review Reminder'),
         ('PROBATION_PERIOD_CHANGED', 'Probation Period Changed'),
         ('EMPLOYMENT_STATUS_CHANGED', 'Employment Status Changed'),
+        ('EMPLOYEE_ID_CHANGED', 'Employee ID Changed'),
     ]
     CREATION_METHOD_CHOICES = [
         ('AI', 'AI Generated'),
@@ -984,6 +985,8 @@ class Notification(models.Model):
         ('SYSTEM', 'System Notification'),
         ('ASSET_ALLOCATED', 'Asset Allocated'),
         ('ASSET_RETURNED', 'Asset Returned'),
+        ('EMPLOYEE_ID_CHANGED', 'Employee ID Changed'),
+        ('EMPLOYMENT_STATUS_CHANGED', 'Employment Status Changed'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

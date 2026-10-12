@@ -469,6 +469,61 @@ def email_employment_status_changed(self, employee_id, previous_status, new_stat
     return {'sent': True, 'recipient': employee.official_email}
 
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def email_employee_id_changed(self, employee_id, previous_employee_id, new_employee_id, changed_on):
+    """Email an employee when HR changes their employee ID."""
+    from .models import Employee, LetterTemplate
+
+    employee = Employee.objects.filter(pk=employee_id).first()
+    if not employee:
+        logger.warning('Employee ID change email skipped: employee %s is unavailable.', employee_id)
+        return {'sent': False, 'reason': 'Employee unavailable'}
+    if not employee.official_email:
+        logger.warning('Employee ID change email skipped: employee %s has no email.', employee_id)
+        return {'sent': False, 'reason': 'Employee email unavailable'}
+
+    changed_date = date.fromisoformat(changed_on)
+    context = {
+        'employee_name': employee.full_name,
+        'employee_id': new_employee_id,
+        'previous_employee_id': previous_employee_id,
+        'new_employee_id': new_employee_id,
+        'employee_id_change_date': changed_date.strftime('%d %B %Y'),
+        'employee_id_change_message': (
+            f"Your employee ID has been updated from {previous_employee_id} "
+            f"to {new_employee_id} on {changed_date:%d %B %Y}."
+        ),
+        'company_name': getattr(settings, 'COMPANY_NAME', 'HRMS'),
+    }
+    letter_template = _get_notification_template(LetterTemplate, 'EMPLOYEE_ID_CHANGED')
+    if not letter_template:
+        logger.error('No active EMPLOYEE_ID_CHANGED letter template is configured.')
+        return {'sent': False, 'reason': 'Employee ID email template unavailable'}
+
+    subject, html_body, text_body = _render_notification_template(letter_template, context)
+    try:
+        email = EmailMultiAlternatives(
+            subject=subject,
+            body=text_body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[employee.official_email],
+        )
+        email.attach_alternative(html_body, 'text/html')
+        email.send(fail_silently=False)
+    except Exception as exc:
+        logger.exception(
+            'Employee ID change email failed for employee=%s recipient=%s',
+            employee_id, employee.official_email,
+        )
+        raise self.retry(exc=exc)
+
+    logger.info(
+        'Employee ID change email sent to %s for employee=%s (%s -> %s)',
+        employee.official_email, employee_id, previous_employee_id, new_employee_id,
+    )
+    return {'sent': True, 'recipient': employee.official_email}
+
+
 def _get_notification_template(template_model, template_type):
     return (
         template_model.objects.filter(

@@ -24,6 +24,7 @@ const templateTypeColors: Record<LetterTemplateType, string> = {
   PROBATION_REMINDER: 'bg-amber-100 text-amber-800',
   PROBATION_PERIOD_CHANGED: 'bg-orange-100 text-orange-800',
   EMPLOYMENT_STATUS_CHANGED: 'bg-cyan-100 text-cyan-800',
+  EMPLOYEE_ID_CHANGED: 'bg-sky-100 text-sky-800',
 };
 
 const templateTypeLabels: Record<LetterTemplateType, string> = {
@@ -40,6 +41,7 @@ const templateTypeLabels: Record<LetterTemplateType, string> = {
   PROBATION_REMINDER: 'Probation Review Reminder',
   PROBATION_PERIOD_CHANGED: 'Probation Period Changed',
   EMPLOYMENT_STATUS_CHANGED: 'Employment Status Changed',
+  EMPLOYEE_ID_CHANGED: 'Employee ID Changed',
 };
 
 export default function LetterTemplatesPage() {
@@ -152,6 +154,7 @@ export default function LetterTemplatesPage() {
   </optgroup>
   <optgroup label="Employment Notifications">
     <option value="EMPLOYMENT_STATUS_CHANGED">Employment Status Changed</option>
+    <option value="EMPLOYEE_ID_CHANGED">Employee ID Changed</option>
   </optgroup>
             </select>
           </div>

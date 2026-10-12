@@ -72,7 +72,8 @@ export type LetterTemplateType =
   | 'ASSET_RETURN'
   | 'PROBATION_REMINDER'
   | 'PROBATION_PERIOD_CHANGED'
-  | 'EMPLOYMENT_STATUS_CHANGED';
+  | 'EMPLOYMENT_STATUS_CHANGED'
+  | 'EMPLOYEE_ID_CHANGED';
 
 export type CreationMethod = 'AI' | 'MANUAL' | 'AI_EDITED';
 
@@ -234,7 +235,9 @@ export type NotificationType =
   | 'APPROVAL_APPROVED'
   | 'APPROVAL_REJECTED'
   | 'LETTER_GENERATED'
-  | 'SYSTEM';
+  | 'SYSTEM'
+  | 'EMPLOYEE_ID_CHANGED'
+  | 'EMPLOYMENT_STATUS_CHANGED';
 
 export interface Notification {
   id: string;

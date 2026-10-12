@@ -231,6 +231,10 @@ export default function Topbar() {
         return <AlertCircle className="h-4 w-4 text-rose-500" />;
       case 'LETTER_GENERATED':
         return <FileText className="h-4 w-4 text-blue-500" />;
+      case 'EMPLOYEE_ID_CHANGED':
+        return <FileText className="h-4 w-4 text-sky-600" />;
+      case 'EMPLOYMENT_STATUS_CHANGED':
+        return <CheckCircle2 className="h-4 w-4 text-cyan-600" />;
       case 'ASSET_ALLOCATED':
       case 'ASSET_RETURNED':
         return <Inbox className="h-4 w-4 text-indigo-500" />;
