@@ -318,6 +318,8 @@ class Employee(models.Model):
 
 
     # Encrypted PII fields (AES-256 at rest via django-cryptography)
+    bank_name = models.CharField(max_length=200, blank=True, null=True)
+    bank_account_holder_name = models.CharField(max_length=200, blank=True, null=True)
     bank_account_encrypted = encrypt(models.TextField(blank=True, null=True))
     bank_ifsc_code = models.CharField(max_length=20, blank=True, null=True)  # Not sensitive — plain text OK
     pan_number_encrypted = encrypt(models.TextField(blank=True, null=True))
@@ -726,7 +728,7 @@ class PasswordResetOTP(models.Model):
 class ApprovalWorkflow(models.Model):
     """
     Configurable approval workflow.
-    Currently supports LIFECYCLE module.
+    Supports configured approval workflows by module.
     Only ONE active workflow per module at a time.
     """
     MODULE_CHOICES = [
@@ -734,6 +736,8 @@ class ApprovalWorkflow(models.Model):
          ('LEAVE', 'Leave Application'),
          ('POLICY', 'Policy Approval'),
          ('CALENDAR', 'Annual Calendar'),
+         ('PAYROLL', 'Payroll Run'),
+         ('PAYSLIP', 'Payslip Request'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

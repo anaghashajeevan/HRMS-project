@@ -349,6 +349,18 @@ import CommonKRAMasterPage from './pages/settings/CommonKRAMasterPage';
 
 import CompanyLogoPage from './pages/settings/CompanyLogoPage';
 
+import PayrollLayout from './pages/payroll/PayrollLayout';
+import SalaryComponentsPage from './pages/payroll/components/SalaryComponentsPage';
+import SalaryStructuresPage from './pages/payroll/structures/SalaryStructuresPage';
+import StatutoryRulesPage from './pages/payroll/statutory/StatutoryRulesPage';
+import PayCalendarPage from './pages/payroll/calendar/PayCalendarPage';
+import AssignmentsPage from './pages/payroll/assignments/AssignmentsPage';
+import PayrollProfilesPage from './pages/payroll/profiles/PayrollProfilesPage';
+import PayRunsPage from './pages/payroll/runs/PayRunsPage';
+import PayRunDetailPage from './pages/payroll/runs/PayRunDetailPage';
+import CalculatePreviewPage from './pages/payroll/preview/CalculatePreviewPage';
+import PayrollSettingsPage from './pages/payroll/settings/PayrollSettingsPage';
+import PayslipsPage from './pages/payroll/payslips/PayslipsPage';
 
 export default function App() {
   return (
@@ -383,6 +395,11 @@ export default function App() {
                 <ProfilePage />
               </ProtectedRoute>
             }
+          />
+
+          <Route
+            path="/payslips"
+            element={<ProtectedRoute><PayslipsPage /></ProtectedRoute>}
           />
 
           {/* ==================== EMPLOYEES ==================== */}
@@ -1107,6 +1124,19 @@ export default function App() {
     </ProtectedRoute>
   }
 />
+<Route path="/payroll" element={<PayrollLayout />}>
+  <Route index element={<Navigate to="/payroll/components" replace />} />
+  <Route path="components" element={<SalaryComponentsPage />} />
+  <Route path="structures" element={<SalaryStructuresPage />} />
+  <Route path="statutory" element={<StatutoryRulesPage />} />
+  <Route path="calendar" element={<PayCalendarPage />} />
+  <Route path="assignments" element={<AssignmentsPage />} />
+  <Route path="profiles" element={<PayrollProfilesPage />} />
+  <Route path="runs" element={<PayRunsPage />} />
+  <Route path="runs/:id" element={<PayRunDetailPage />} />
+  <Route path="preview" element={<CalculatePreviewPage />} />
+  <Route path="settings" element={<PayrollSettingsPage />} />
+</Route>
           {/* ==================== FALLBACKS ==================== */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -657,7 +657,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
             'department_detail', 'location_detail', 'cost_center_detail',
 
             # Bank / Statutory (masked)
-            'bank_account', 'bank_ifsc_code',
+            'bank_name', 'bank_account_holder_name', 'bank_account', 'bank_ifsc_code',
             'pan_number', 'aadhaar_number', 'uan_number',
 
             # User account info
@@ -945,7 +945,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
             'status', 'position', 'reporting_manager', 'structure_location',
             'department', 'location', 'cost_center',
             'date_of_joining', 'date_of_exit','work_mode', 'can_self_attend',
-            'bank_account_encrypted', 'bank_ifsc_code',
+            'bank_name', 'bank_account_holder_name', 'bank_account_encrypted', 'bank_ifsc_code',
             'pan_number_encrypted', 'aadhaar_number_encrypted', 'uan_number_encrypted',
             'create_user_account', 'password', 'role_ids',
         ]
@@ -1029,6 +1029,9 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         validated_data['status'] = 'PROBATION'
 
         employee = Employee.objects.create(**validated_data)
+        from payrollapp.services.employee_profile_sync_service import sync_employee_profile
+        actor = getattr(self.context.get('request').user, 'employee', None) if self.context.get('request') else None
+        sync_employee_profile(employee, created_by=actor)
 
         if create_account and password:
             self._create_user_account(employee, password, role_ids)
@@ -1045,6 +1048,9 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
+        from payrollapp.services.employee_profile_sync_service import sync_employee_profile
+        actor = getattr(self.context.get('request').user, 'employee', None) if self.context.get('request') else None
+        sync_employee_profile(instance, created_by=actor, include_statutory=False)
 
         # ----------------------------------------------------------------------
         # 🚀 FIX: Sync linked UserAccount email if official_email was updated

@@ -495,11 +495,22 @@ def _recalculate_batch_totals(batch: MonthlyReimbursementBatch) -> None:
 
 
 def recalculate_claim_and_batch_totals(claim: ReimbursementClaim) -> ReimbursementClaim:
-    approved_totals = claim.expense_items.filter(status=ExpenseItem.Status.APPROVED).aggregate(
+    items = claim.expense_items.all()
+    approved_items = items.filter(status=ExpenseItem.Status.APPROVED)
+    approved_totals = approved_items.aggregate(
         total_approved=Sum("approved_amount")
     )
     claim.total_approved_amount = approved_totals["total_approved"] or Decimal("0.00")
-    claim.save(update_fields=["total_approved_amount", "updated_at"])
+    item_count = items.count()
+    approved_count = approved_items.count()
+    rejected_count = items.filter(status=ExpenseItem.Status.REJECTED).count()
+    if item_count and approved_count == item_count:
+        claim.status = ReimbursementClaim.Status.APPROVED
+    elif approved_count:
+        claim.status = ReimbursementClaim.Status.PARTIALLY_APPROVED
+    elif item_count and rejected_count == item_count:
+        claim.status = ReimbursementClaim.Status.REJECTED
+    claim.save(update_fields=["status", "total_approved_amount", "updated_at"])
     _recalculate_batch_totals(claim.batch)
     return claim
 

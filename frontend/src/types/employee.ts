@@ -64,6 +64,8 @@ export interface EmployeeDetail {
   date_of_exit: string | null;
 
   bank_account: string | null;
+  bank_name?: string | null;
+  bank_account_holder_name?: string | null;
   bank_ifsc_code: string | null;
   pan_number: string | null;
   aadhaar_number: string | null;

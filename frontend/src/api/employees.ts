@@ -32,6 +32,8 @@ export interface EmployeeCreatePayload {
 
   // Bank / statutory
   bank_account_encrypted?: string;
+  bank_name?: string;
+  bank_account_holder_name?: string;
   bank_ifsc_code?: string;
   pan_number_encrypted?: string;
   aadhaar_number_encrypted?: string;

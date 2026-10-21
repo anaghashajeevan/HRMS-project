@@ -1233,6 +1233,8 @@ const initialForm: EmployeeCreatePayload = {
   can_self_attend: false,
   // === END NEW ===
   bank_account_encrypted: '',
+  bank_name: '',
+  bank_account_holder_name: '',
   bank_ifsc_code: '',
   pan_number_encrypted: '',
   aadhaar_number_encrypted: '',
@@ -1311,6 +1313,9 @@ export default function EmployeeForm() {
             can_self_attend: (emp as any).can_self_attend ?? false,
             // === END NEW ===
             bank_ifsc_code: emp.bank_ifsc_code || '',
+            bank_account_encrypted: (emp as any).bank_account || '',
+            bank_name: emp.bank_name || '',
+            bank_account_holder_name: emp.bank_account_holder_name || '',
           });
 
           const empData = emp as any;
@@ -1728,6 +1733,16 @@ export default function EmployeeForm() {
             {/* Bank & Statutory */}
             <SectionCard icon={Landmark} title="Bank & Statutory (Optional)">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field label="Bank Name">
+                  <input type="text" value={form.bank_name || ''}
+                    onChange={(e) => update('bank_name', e.target.value)}
+                    className={inputCls()} />
+                </Field>
+                <Field label="Account Holder Name">
+                  <input type="text" value={form.bank_account_holder_name || ''}
+                    onChange={(e) => update('bank_account_holder_name', e.target.value)}
+                    className={inputCls()} />
+                </Field>
                 <Field label="Bank Account Number">
                   <input type="text" value={form.bank_account_encrypted || ''}
                     onChange={(e) => update('bank_account_encrypted', e.target.value)}

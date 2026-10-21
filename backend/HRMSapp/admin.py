@@ -40,7 +40,8 @@ class EmployeeAdmin(admin.ModelAdmin):
         }),
         ('Statutory / Bank (Encrypted)', {
             'classes': ('collapse',),
-            'fields': ('bank_account_encrypted', 'bank_ifsc_code',
+            'fields': ('bank_name', 'bank_account_holder_name',
+                       'bank_account_encrypted', 'bank_ifsc_code',
                        'pan_number_encrypted', 'aadhaar_number_encrypted',
                        'uan_number_encrypted'),
         }),

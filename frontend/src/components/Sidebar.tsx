@@ -2095,6 +2095,12 @@ const mainNav: NavEntry[] = [
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
   },
   {
+    label: 'My Payslips',
+    icon: FileText,
+    to: '/payslips',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE', 'REPORTING_MANAGER', 'HOD'],
+  },
+  {
     label: 'Reports',
     icon: BarChart3,
     to: '/reports',

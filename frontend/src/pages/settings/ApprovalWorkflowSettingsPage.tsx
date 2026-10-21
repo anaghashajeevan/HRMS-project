@@ -636,6 +636,18 @@ const MODULE_CONFIG: Record<ModuleType, {
     defaultName: 'Standard Calendar Approval',
     helpText: 'When HR submits the annual calendar for review, it flows through these steps. Approvers review the year\'s holidays and can approve/reject/return.',
   },
+  PAYROLL: {
+    label: 'Payroll Runs',
+    description: 'For calculated monthly pay runs before finalization',
+    defaultName: 'Standard Payroll Approval',
+    helpText: 'Calculated pay runs move through these approval steps in order. Every assigned approver at a step must approve. Any current approver can return the run with a reason; HR can then correct and resubmit it.',
+  },
+  PAYSLIP: {
+    label: 'Payslip Requests',
+    description: 'For employee requests to download paid payroll months',
+    defaultName: 'Standard Payslip Request Approval',
+    helpText: 'Employee requests for paid payroll months move through these steps in order. Every assigned approver at a step must approve. The employee can download the payslip after all steps approve; a rejection must include a reason.',
+  },
 };
 
 export default function ApprovalWorkflowSettingsPage() {
@@ -901,6 +913,11 @@ export default function ApprovalWorkflowSettingsPage() {
             <div>
               <p className="font-medium">How it works — {currentConfig.label}</p>
               <p className="mt-1 text-blue-700">{currentConfig.helpText}</p>
+              {selectedModule === 'PAYROLL' && (
+                <p className="mt-2 text-blue-800">
+                  Payroll control: the person who prepares a pay run cannot approve it. Make sure each approval step has at least one other eligible approver; a step assigned only to the preparer will block submission.
+                </p>
+              )}
             </div>
           </div>
 
