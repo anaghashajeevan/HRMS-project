@@ -365,6 +365,10 @@ class EmployeePayrollProfile(models.Model):
     tax_regime = models.CharField(
         max_length=10, choices=TAX_REGIME_CHOICES, default='NEW',
     )
+    tax_resident = models.BooleanField(
+        null=True, blank=True, default=None,
+        help_text='Indian tax residency status for rebate eligibility. Unknown status does not apply resident-only rebate.',
+    )
 
     # Versioning
     effective_from = models.DateField(db_index=True)

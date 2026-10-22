@@ -30,6 +30,7 @@ export default function ProfileFormModal({ initial, employeeId, employeeLabel, o
     pf_number: initial?.pf_number || '',
     esi_number: initial?.esi_number || '',
     tax_regime: initial?.tax_regime || 'NEW',
+    tax_resident: initial?.tax_resident === true ? 'true' : initial?.tax_resident === false ? 'false' : '',
     effective_from: today(),
     is_active: initial?.is_active ?? true,
   });
@@ -48,9 +49,11 @@ export default function ProfileFormModal({ initial, employeeId, employeeLabel, o
       getProfile(initial.id).then(({ data }) => {
         setForm((current) => ({
           ...current,
+          tax_regime: data.tax_regime || initial.tax_regime || 'NEW',
           bank_name: data.bank_name || initial.bank_name || '',
           ifsc_code: (data.ifsc_code || initial.ifsc_code || '').trim().toUpperCase(),
           account_holder_name: data.account_holder_name || initial.account_holder_name || '',
+          tax_resident: data.tax_resident === true ? 'true' : data.tax_resident === false ? 'false' : '',
         }));
       }).catch((err: any) => {
         const data = err?.response?.data;
@@ -79,6 +82,7 @@ export default function ProfileFormModal({ initial, employeeId, employeeLabel, o
     setError('');
     try {
       const payload: any = { ...form, ifsc_code: normalizedIfsc };
+      payload.tax_resident = form.tax_resident === '' ? null : form.tax_resident === 'true';
       // Don't send empty encrypted fields on update (avoids overwriting)
       if (initial) {
         for (const field of ['bank_account', 'pan', 'uan', 'pf_number', 'esi_number']) {
@@ -106,17 +110,17 @@ export default function ProfileFormModal({ initial, employeeId, employeeLabel, o
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-gray-100">
-        <div className="mb-5 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">{initial ? 'Edit Profile' : 'New Profile'}</h3>
+      <div className="flex w-full max-w-lg max-h-[90vh] flex-col overflow-hidden rounded-2xl bg-white p-6 shadow-xl ring-1 ring-gray-100">
+        <div className="sticky top-0 z-10 -mx-6 -mt-6 mb-4 flex shrink-0 items-center justify-between bg-white px-6 pb-3 pt-6">
+          <h3 className="text-lg font-semibold text-gray-900">{initial ? 'Edit Employee Tax & Bank Profile' : 'New Employee Tax & Bank Profile'}</h3>
           <button onClick={onClose} className="rounded-lg p-1 hover:bg-gray-100 transition">
             <XMarkIcon className="h-5 w-5 text-gray-400" />
           </button>
         </div>
 
-        {error && <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+        {error && <div className="mb-4 shrink-0 whitespace-pre-line rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
           {!initial && employeeId && (
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-600">Employee</label>
@@ -134,6 +138,29 @@ export default function ProfileFormModal({ initial, employeeId, employeeLabel, o
               </select>
             </div>
           )}
+
+          <section className="rounded-xl border border-purple-100 bg-purple-50/60 p-4">
+            <h4 className="text-sm font-semibold text-purple-900">Income tax settings</h4>
+            <p className="mt-1 text-xs text-purple-800">Payroll uses the selected regime to find the matching effective TDS rule. Resident status controls resident-only tax rebates. Set Effective From below to a date on or before the payroll month you want this profile to apply to.</p>
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-600">Tax regime *</label>
+                <select required className={inputCls} value={form.tax_regime} onChange={(e) => set('tax_regime', e.target.value)}>
+                  <option value="NEW">New Regime</option>
+                  <option value="OLD">Old Regime</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-600">Indian tax resident status</label>
+                <select className={inputCls} value={form.tax_resident} onChange={(e) => set('tax_resident', e.target.value)}>
+                  <option value="">Not confirmed</option>
+                  <option value="true">Resident</option>
+                  <option value="false">Non-resident</option>
+                </select>
+                <p className="mt-1 text-xs text-gray-500">If a rule grants a resident-only rebate, it is not applied until Resident is confirmed.</p>
+              </div>
+            </div>
+          </section>
 
           {loadingProfile && <p className="text-sm text-gray-500">Loading saved bank details…</p>}
 
@@ -186,17 +213,11 @@ export default function ProfileFormModal({ initial, employeeId, employeeLabel, o
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600">Tax Regime</label>
-              <select className={inputCls} value={form.tax_regime} onChange={(e) => set('tax_regime', e.target.value)}>
-                <option value="NEW">New</option>
-                <option value="OLD">Old</option>
-              </select>
-            </div>
+          <div className="grid grid-cols-1 gap-4">
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-600">Effective From</label>
               <input type="date" className={inputCls} value={form.effective_from} onChange={(e) => set('effective_from', e.target.value)} />
+              <p className="mt-1 text-xs text-gray-500">The profile and tax regime are selected as of the payroll period end date.</p>
             </div>
           </div>
 
@@ -205,7 +226,7 @@ export default function ProfileFormModal({ initial, employeeId, employeeLabel, o
             Active
           </label>
 
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="sticky bottom-0 -mx-1 flex justify-end gap-3 bg-white py-3">
             <button type="button" onClick={onClose} className="rounded-xl px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 transition">Cancel</button>
             <button type="submit" disabled={saving || loadingProfile} className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 transition">
               {saving ? 'Saving…' : initial ? 'Update' : 'Create'}

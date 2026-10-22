@@ -32,8 +32,10 @@ logger = logging.getLogger(__name__)
 # ---------- valid transitions ----------
 VALID_TRANSITIONS = {
     'lock':           ('OPEN',         'LOCKED'),
+    'reopen':         ('LOCKED',       'OPEN'),
     'calculate':      ('LOCKED',       'CALCULATED'),
     'recalculate':    ('CALCULATED',   'CALCULATED'),
+    'refresh-calculation': ('CALCULATED', 'CALCULATED'),
     'submit-review':  ('CALCULATED',   'UNDER_REVIEW'),
     'approve':        ('UNDER_REVIEW', 'APPROVED'),
     'return':         ('UNDER_REVIEW', 'CALCULATED'),
@@ -268,6 +270,57 @@ class RunLifecycleService:
         logger.info(f'Run {run.id}: locked with {len(bulk)} employees')
 
     @classmethod
+    def _handle_reopen(cls, run, user, reason):
+        """Reopen only an untouched LOCKED run, discard its frozen inputs, and audit the change."""
+        if not reason or not reason.strip():
+            raise RunLifecycleError('A reason is required to reopen payroll inputs.')
+
+        employee_rows = PayrollRunEmployee.objects.select_for_update().filter(run=run)
+        row_count = employee_rows.count()
+        if employee_rows.exclude(status__in=('PENDING', 'EXCLUDED')).exists():
+            raise RunLifecycleError(
+                'This run contains calculated or failed employee rows. Only a locked, uncalculated run can be reopened.'
+            )
+        if PayrollRunComponentDetail.objects.filter(run_employee__run=run).exists():
+            raise RunLifecycleError(
+                'This run already has payroll calculation details and cannot be reopened. Return it for correction instead.'
+            )
+        if run.payment_batches.exists():
+            raise RunLifecycleError('A run with a payment batch cannot be reopened.')
+        if run.pay_calendar.status == 'CLOSED':
+            raise RunLifecycleError('This pay calendar is closed and cannot be reopened.')
+
+        # Keep run adjustments (for example, manually entered variable pay) intact.
+        # The employee rows contain only locked snapshots and are rebuilt on the
+        # next lock, allowing attendance, leave, and eligibility to be refreshed.
+        employee_rows.delete()
+
+        if run.pay_calendar.status == 'LOCKED':
+            another_locked_run = PayrollRun.objects.filter(
+                pay_calendar=run.pay_calendar,
+                status__in=('LOCKED', 'CALCULATED', 'UNDER_REVIEW', 'APPROVED', 'FINALIZED', 'PAID'),
+            ).exclude(id=run.id).exists()
+            if not another_locked_run:
+                run.pay_calendar.status = 'OPEN'
+                run.pay_calendar.input_locked_at = None
+                run.pay_calendar.save(update_fields=['status', 'input_locked_at', 'updated_at'])
+
+        run.input_locked_at = None
+        run.total_employees = 0
+        run.total_gross = Decimal('0')
+        run.total_deductions = Decimal('0')
+        run.total_reimbursements = Decimal('0')
+        run.total_net = Decimal('0')
+        run.total_employer_cost = Decimal('0')
+        run.total_ctc = Decimal('0')
+        cls._audit(
+            run, user, 'RUN_INPUTS_REOPENED', 'LOCKED', 'OPEN',
+            reason=reason.strip(),
+            old_values={'locked_employee_rows_discarded': row_count},
+            new_values={'employee_rows': 0, 'run_adjustments_preserved': True},
+        )
+
+    @classmethod
     def _handle_calculate(cls, run, user, reason):
         """
         LOCKED → CALCULATED
@@ -412,9 +465,19 @@ class RunLifecycleService:
 
     @classmethod
     def _handle_recalculate(cls, run, user, reason):
-        """Refresh corrected attendance/leave inputs and recalculate a returned run."""
+        """Retry failed calculations or refresh inputs for a returned run."""
         if not run.returned_by_id:
-            raise RunLifecycleError('Only a returned run can be recalculated.')
+            has_errors = PayrollRunEmployee.objects.filter(
+                run=run, status='ERROR',
+            ).exists()
+            if not has_errors:
+                raise RunLifecycleError(
+                    'Recalculation is available for a returned run or a run with failed employee calculations.'
+                )
+            # Keep the frozen attendance and leave inputs. This path is for
+            # retrying after a calculation fix, such as corrected CTC balancing.
+            cls._handle_calculate(run, user, reason)
+            return
 
         refreshed = 0
         employees = PayrollRunEmployee.objects.filter(
@@ -463,11 +526,23 @@ class RunLifecycleService:
         cls._handle_calculate(run, user, reason)
         run.returned_by = None
         run.return_reason = ''
+        run.save(update_fields=['returned_by', 'return_reason', 'updated_at'])
         cls._audit(
             run, user, 'RECONCILIATION_INPUTS_REFRESHED', 'CALCULATED', 'CALCULATED',
             reason=reason or 'Refreshed attendance and leave inputs for returned run.',
             new_values={'employees_refreshed': refreshed},
         )
+
+    @classmethod
+    def _handle_refresh_calculation(cls, run, user, reason):
+        """Refresh a calculated run using current payroll data, preserving locked day inputs."""
+        if not reason or not reason.strip():
+            raise RunLifecycleError('A reason is required to refresh a calculated payroll run.')
+        if run.returned_by_id:
+            raise RunLifecycleError('Use Recalculate for a returned run so refreshed attendance is recorded in its history.')
+        if PayrollRunEmployee.objects.filter(run=run, status='ERROR').exists():
+            raise RunLifecycleError('Use Retry Calculation while employee calculation errors remain.')
+        cls._handle_calculate(run, user, reason.strip())
 
     @classmethod
     def _handle_submit_review(cls, run, user, reason):

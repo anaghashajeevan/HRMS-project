@@ -231,6 +231,41 @@ class StatutoryRuleSerializer(serializers.ModelSerializer):
     def validate_slabs(self, value):
         return value if value is not None else []
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        statutory_type = attrs.get('statutory_type', getattr(self.instance, 'statutory_type', None))
+        tax_regime = attrs.get('tax_regime', getattr(self.instance, 'tax_regime', 'ALL'))
+        slabs = attrs.get('slabs', getattr(self.instance, 'slabs', []))
+        if statutory_type == 'TDS':
+            if tax_regime not in ('OLD', 'NEW'):
+                raise serializers.ValidationError({'tax_regime': 'TDS rules must target OLD or NEW tax regime.'})
+            if not isinstance(slabs, dict) or not isinstance(slabs.get('slabs'), list) or not slabs['slabs']:
+                raise serializers.ValidationError({'slabs': 'TDS slabs must be an object with a non-empty slabs array.'})
+            if any(not isinstance(slab, dict) for slab in slabs['slabs']):
+                raise serializers.ValidationError({'slabs': 'Every TDS slab must be a JSON object.'})
+            previous_max = None
+            for index, slab in enumerate(sorted(slabs['slabs'], key=lambda item: item.get('min', 0))):
+                if not isinstance(slab, dict) or 'min' not in slab or 'rate' not in slab:
+                    raise serializers.ValidationError({'slabs': f'Slab {index + 1} needs min and rate.'})
+                try:
+                    lower = Decimal(str(slab['min']))
+                    rate = Decimal(str(slab['rate']))
+                    upper = Decimal(str(slab['max'])) if slab.get('max') is not None else None
+                except Exception:
+                    raise serializers.ValidationError({'slabs': f'Slab {index + 1} has invalid numeric values.'})
+                if lower < 0 or rate < 0 or rate > 100 or (upper is not None and upper <= lower):
+                    raise serializers.ValidationError({'slabs': f'Slab {index + 1} has an invalid range or rate.'})
+                if previous_max is not None and lower < previous_max:
+                    raise serializers.ValidationError({'slabs': 'TDS slabs cannot overlap.'})
+                previous_max = upper
+            for field in ('standard_deduction', 'cess_rate'):
+                try:
+                    if Decimal(str(slabs.get(field, 0))) < 0:
+                        raise ValueError
+                except Exception:
+                    raise serializers.ValidationError({'slabs': f'{field} must be a non-negative number.'})
+        return attrs
+
 
 # ==============================================================================
 # 4. PAY CALENDAR
@@ -382,7 +417,7 @@ class EmployeePayrollProfileSerializer(serializers.ModelSerializer):
             'bank_name', 'account_holder_name',
             'bank_account', 'masked_account', 'ifsc_code',
             'uan', 'pf_number', 'esi_number', 'pan',
-            'tax_regime',
+            'tax_regime', 'tax_resident',
             'effective_from', 'effective_to',
             'is_current', 'is_active',
             'created_by', 'created_at', 'updated_at',
@@ -552,7 +587,7 @@ class EmployeePayrollProfileListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'employee', 'employee_name', 'employee_code',
             'bank_name', 'account_holder_name', 'masked_account', 'ifsc_code',
-            'tax_regime', 'effective_from', 'effective_to',
+            'tax_regime', 'tax_resident', 'effective_from', 'effective_to',
             'is_active', 'is_current', 'created_at',
         ]
 
@@ -785,11 +820,12 @@ class PayrollRunDetailSerializer(serializers.ModelSerializer):
 class RunComponentDetailSerializer(serializers.ModelSerializer):
     component_name = serializers.SerializerMethodField()
     component_code = serializers.SerializerMethodField()
+    component_is_taxable = serializers.SerializerMethodField()
 
     class Meta:
         model = PayrollRunComponentDetail
         fields = [
-            'id', 'component', 'component_name', 'component_code',
+            'id', 'component', 'component_name', 'component_code', 'component_is_taxable',
             'amount', 'is_earning', 'is_employer_cost',
             'is_reimbursement', 'formula_used', 'rule_reference',
         ]
@@ -799,6 +835,9 @@ class RunComponentDetailSerializer(serializers.ModelSerializer):
 
     def get_component_code(self, obj):
         return obj.component.code if obj.component_id else None
+
+    def get_component_is_taxable(self, obj):
+        return obj.component.is_taxable if obj.component_id else False
 
 
 class PayrollRunEmployeeListSerializer(serializers.ModelSerializer):

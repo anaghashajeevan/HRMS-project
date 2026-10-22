@@ -299,6 +299,7 @@ class AssignmentService:
             total = Decimal('0')
             for employer_component in employer_components:
                 code = employer_component.component.code
+                calculation_details = {}
                 if code == 'PF_ER' and split_pf:
                     continue
                 if code in ('PF_ER', 'EPS_ER', 'EPF_ER'):
@@ -324,9 +325,17 @@ class AssignmentService:
                         employer_component.percentage_of_basic
                         if employer_component.percentage_of_basic > 0 else None
                     )
-                    amount = StatutoryService.calculate_esi(
+                    esi = StatutoryService.calculate_esi(
                         gross, as_of_date, employer_rate=configured_rate,
-                    )['employer']
+                    )
+                    amount = esi['employer']
+                    calculation_details = {
+                        'applicable': esi['applicable'],
+                        'rate': str(esi['employer_rate']),
+                        'wage_base': str(esi['wage_used']),
+                        'threshold': str(esi['threshold']) if esi.get('threshold') is not None else None,
+                        'reason': esi.get('reason', ''),
+                    }
                 else:
                     amount = component_amount(employer_component, context)
                 rows.append({
@@ -334,6 +343,7 @@ class AssignmentService:
                     'name': employer_component.component.name,
                     'amount': str(amount),
                     'is_taxable': employer_component.component.is_taxable,
+                    **calculation_details,
                 })
                 total += amount
             return rows, total
@@ -365,6 +375,7 @@ class AssignmentService:
         # Evaluate deductions only after final gross fixed earnings is known.
         deduction_context = {'basic': basic_amount, 'ctc': ctc_monthly, 'gross': total_earnings}
         for sc in deduction_components:
+            calculation_details = {}
             if sc.component.code == 'PF_EMP':
                 configured_rate = sc.percentage_of_basic if sc.percentage_of_basic > 0 else None
                 amount = StatutoryService.calculate_pf(
@@ -372,16 +383,34 @@ class AssignmentService:
                 )['employee']
             elif sc.component.code == 'ESI_EMP':
                 configured_rate = sc.percentage_of_basic if sc.percentage_of_basic > 0 else None
-                amount = StatutoryService.calculate_esi(
+                esi = StatutoryService.calculate_esi(
                     total_earnings, as_of_date, employee_rate=configured_rate,
-                )['employee']
+                )
+                amount = esi['employee']
+                calculation_details = {
+                    'applicable': esi['applicable'],
+                    'rate': str(esi['employee_rate']),
+                    'wage_base': str(esi['wage_used']),
+                    'threshold': str(esi['threshold']) if esi.get('threshold') is not None else None,
+                    'reason': esi.get('reason', ''),
+                }
+            elif sc.component.code == 'TDS':
+                # A structure preview has no employee tax profile, tax regime,
+                # declarations, or payroll-period history. Do not present a
+                # zero placeholder as an actual TDS calculation.
+                amount = Decimal('0')
+                calculation_details = {
+                    'calculated_in_employee_payroll': True,
+                    'reason': 'TDS is calculated in employee payroll using the employee tax profile and effective rule.',
+                }
             else:
                 amount = component_amount(sc, deduction_context)
             deductions.append({
                 'code': sc.component.code,
                 'name': sc.component.name,
-                'amount': str(amount),
+                'amount': None if sc.component.code == 'TDS' else str(amount),
                 'is_taxable': sc.component.is_taxable,
+                **calculation_details,
             })
             total_deductions += amount
 
@@ -399,6 +428,7 @@ class AssignmentService:
             'total_deductions': str(total_deductions),
             'net': str(net),
             'net_monthly': str(net),
+            'net_excludes_tds': any(sc.component.code == 'TDS' for sc in deduction_components),
             'total_employer_cost': str(total_employer),
             'total_ctc': str(total_earnings + total_employer),
             'total_reimbursements': '0.00',

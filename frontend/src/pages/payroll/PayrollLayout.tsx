@@ -9,6 +9,7 @@ import {
   BanknotesIcon,
   PlayCircleIcon,
   CalculatorIcon,
+  DocumentTextIcon,
 } from '@heroicons/react/24/outline';
 
 const tabs = [
@@ -17,8 +18,9 @@ const tabs = [
   { to: '/payroll/statutory', label: 'Statutory Rules', icon: BanknotesIcon },
   { to: '/payroll/calendar', label: 'Pay Calendar', icon: CalendarDaysIcon },
   { to: '/payroll/assignments', label: 'Assignments', icon: UserGroupIcon },
-  { to: '/payroll/profiles', label: 'Bank Profiles', icon: CurrencyRupeeIcon },
+  { to: '/payroll/profiles', label: 'Tax & Bank Profiles', icon: CurrencyRupeeIcon },
   { to: '/payroll/runs', label: 'Pay Runs', icon: PlayCircleIcon },
+  { to: '/payroll/statutory-exports', label: 'PF & ESI Exports', icon: DocumentTextIcon },
 ];
 
 export default function PayrollLayout() {

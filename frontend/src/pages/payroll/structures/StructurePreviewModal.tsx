@@ -94,9 +94,14 @@ export default function StructurePreviewModal({ structureId, onClose }: Props) {
                 <h4 className="mb-2 text-xs font-semibold uppercase text-gray-500">Deductions</h4>
                 <div className="space-y-1">
                   {data.deductions.map((d: any) => (
-                    <div key={d.code} className="flex justify-between rounded-lg bg-red-50/50 px-3 py-2 text-sm">
-                      <span className="text-gray-700">{d.name}</span>
-                      <span className="font-medium text-red-700">₹{fmt(d.amount)}</span>
+                    <div key={d.code} className="flex justify-between gap-3 rounded-lg bg-red-50/50 px-3 py-2 text-sm">
+                      <span className="text-gray-700">
+                        {d.name}
+                        {d.calculated_in_employee_payroll && <span className="mt-0.5 block text-xs font-medium text-blue-700">Set the employee's regime in Payroll &gt; Tax &amp; Bank Profiles; the employee-specific TDS appears in the pay run.</span>}
+                        {d.code === 'ESI_EMP' && <span className="mt-0.5 block text-xs text-gray-500">{d.rate}% of fixed salary ₹{fmt(d.wage_base)}{d.threshold != null ? ` · coverage ceiling ₹${fmt(d.threshold)}` : ''}</span>}
+                        {d.reason && <span className="mt-0.5 block text-xs text-amber-700">{d.reason}</span>}
+                      </span>
+                      <span className="shrink-0 text-right text-sm font-medium text-red-700">{d.calculated_in_employee_payroll ? 'Profile based' : `₹${fmt(d.amount)}`}</span>
                     </div>
                   ))}
                 </div>
@@ -108,9 +113,13 @@ export default function StructurePreviewModal({ structureId, onClose }: Props) {
                 <h4 className="mb-2 text-xs font-semibold uppercase text-gray-500">Employer Costs</h4>
                 <div className="space-y-1">
                   {data.employer_costs.map((ec: any) => (
-                    <div key={ec.code} className="flex justify-between rounded-lg bg-purple-50/50 px-3 py-2 text-sm">
-                      <span className="text-gray-700">{ec.name}</span>
-                      <span className="font-medium text-purple-700">₹{fmt(ec.amount)}</span>
+                    <div key={ec.code} className="flex justify-between gap-3 rounded-lg bg-purple-50/50 px-3 py-2 text-sm">
+                      <span className="text-gray-700">
+                        {ec.name}
+                        {ec.code === 'ESI_ER' && <span className="mt-0.5 block text-xs text-gray-500">{ec.rate}% of fixed salary ₹{fmt(ec.wage_base)}{ec.threshold != null ? ` · coverage ceiling ₹${fmt(ec.threshold)}` : ''}</span>}
+                        {ec.reason && <span className="mt-0.5 block text-xs text-amber-700">{ec.reason}</span>}
+                      </span>
+                      <span className="shrink-0 font-medium text-purple-700">₹{fmt(ec.amount)}</span>
                     </div>
                   ))}
                 </div>
@@ -120,8 +129,9 @@ export default function StructurePreviewModal({ structureId, onClose }: Props) {
             <div className="rounded-xl bg-blue-50 p-4 ring-1 ring-blue-100">
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div><span className="text-gray-500">Gross Pay:</span> <span className="font-semibold">₹{fmt(data.gross ?? data.gross_monthly)}</span></div>
-                <div><span className="text-gray-500">Net Pay:</span> <span className="font-semibold text-blue-700">₹{fmt(data.net ?? data.net_monthly)}</span></div>
+                <div><span className="text-gray-500">{data.net_excludes_tds ? 'Estimated Net (before TDS):' : 'Net Pay:'}</span> <span className="font-semibold text-blue-700">₹{fmt(data.net ?? data.net_monthly)}</span></div>
               </div>
+              {data.net_excludes_tds && <p className="mt-2 text-xs text-blue-700">Set the employee's regime and residency in Payroll &gt; Tax &amp; Bank Profiles. A pay run then estimates TDS using that profile, available pay history, and the effective TDS rule.</p>}
             </div>
           </div>
         )}

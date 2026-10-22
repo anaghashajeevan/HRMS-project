@@ -30,6 +30,43 @@ export default function RunEmployeeTable({ employees, runId, runStatus, canAdjus
   const [adjustmentReason, setAdjustmentReason] = useState('');
   const [adjustmentSaving, setAdjustmentSaving] = useState(false);
   const lockedDayData = detail?.input_snapshot?.locked_inputs?.day_data;
+  const tds = detail?.input_snapshot?.tds;
+  const runComponents = detail?.component_details || [];
+  const employeePfDeduction = runComponents
+    .filter((component: any) => component.component_code === 'PF_EMP')
+    .reduce((sum: number, component: any) => sum + Number(component.amount || 0), 0);
+  const employeeEsiDeduction = runComponents
+    .filter((component: any) => component.component_code === 'ESI_EMP')
+    .reduce((sum: number, component: any) => sum + Number(component.amount || 0), 0);
+  const lopDeduction = runComponents
+    .filter((component: any) => !component.component_code && String(component.component_name || '').startsWith('Leave / LOP Deduction'))
+    .reduce((sum: number, component: any) => sum + Number(component.amount || 0), 0);
+  const tdsMonthlyTaxableFromDetails = (detail?.component_details || []).reduce((sum: number, component: any) => (
+    component.is_earning && component.component_is_taxable && !component.is_reimbursement
+      ? sum + Number(component.amount || 0)
+      : sum
+  ), 0);
+  const tdsPayableDays = Math.max(Number(detail?.eligible_calendar_days || 0) - Number(detail?.lop_days || 0), 0)
+    + Number(lockedDayData?.summary?.off_day_worked || 0);
+  const tdsDivisor = Number(detail?.salary_divisor_days || detail?.days_in_month || 0);
+  const tdsCurrentPeriodTaxable = tds?.current_period_taxable_salary != null
+    ? Number(tds.current_period_taxable_salary)
+    : tdsDivisor > 0 ? tdsMonthlyTaxableFromDetails * tdsPayableDays / tdsDivisor : null;
+  const tdsPriorTaxable = tds?.prior_taxable_salary != null ? Number(tds.prior_taxable_salary) : null;
+  const tdsFutureProjected = tds?.future_projected_salary != null
+    ? Number(tds.future_projected_salary)
+    : tds?.projected_salary != null && tdsPriorTaxable != null && tdsCurrentPeriodTaxable != null
+      ? Number(tds.projected_salary) - tdsPriorTaxable - tdsCurrentPeriodTaxable
+      : null;
+  const tdsFuturePeriods = tds?.future_periods != null
+    ? Number(tds.future_periods)
+    : Math.max(Number(tds?.remaining_periods || 0) - 1, 0);
+  const tdsMonthlyProjection = tds?.monthly_taxable_projection != null
+    ? Number(tds.monthly_taxable_projection)
+    : tdsFutureProjected != null && tdsFuturePeriods > 0
+      ? tdsFutureProjected / tdsFuturePeriods
+      : detail?.component_details?.length ? tdsMonthlyTaxableFromDetails : null;
+  const hasStoredMonthlyProjection = tds?.monthly_taxable_projection != null;
   const reconciledDays = Object.entries(lockedDayData?.day_map || {}) as [string, string][];
   const leaveBreakdown = lockedDayData?.leave_breakdown || [];
 
@@ -191,7 +228,7 @@ export default function RunEmployeeTable({ employees, runId, runStatus, canAdjus
                     <div><span className="text-gray-500">Calendar Days:</span> <span className="font-medium">{detail.days_in_month}</span></div>
                     <div><span className="text-gray-500">Salary Divisor:</span> <span className="font-medium">{detail.salary_divisor_days || detail.days_in_month} calendar days</span></div>
                     <div><span className="text-gray-500">Eligible:</span> <span className="font-medium">{detail.eligible_calendar_days}</span></div>
-                    <div><span className="text-gray-500">Payable:</span> <span className="font-medium">{detail.payable_days}</span></div>
+                    <div><span className="text-gray-500">Attendance/leave payable days:</span> <span className="font-medium">{detail.payable_days}</span></div>
                     <div><span className="text-gray-500">LOP:</span> <span className="font-medium text-red-600">{detail.lop_days}</span></div>
                     <div><span className="text-gray-500">Paid leave:</span> <span className="font-medium">{detail.input_snapshot?.locked_inputs?.day_data?.summary?.paid_leave || '0'}</span></div>
                   </div>
@@ -201,6 +238,94 @@ export default function RunEmployeeTable({ employees, runId, runStatus, canAdjus
                     </p>
                   )}
                 </div>
+
+                {tds && (
+                  <div className="rounded-xl bg-purple-50 p-4 ring-1 ring-purple-100">
+                    <h4 className="mb-2 text-xs font-semibold uppercase text-purple-700">TDS Estimate</h4>
+                    {tds.reason ? (
+                      <p className="text-sm text-purple-900">{tds.reason}</p>
+                    ) : (
+                      <>
+                        <div className="text-sm">
+                          <div><span className="text-gray-600">Tax regime:</span> <span className="font-medium">{tds.tax_regime}</span></div>
+                          {tdsFutureProjected != null && tdsPriorTaxable != null && tdsCurrentPeriodTaxable != null ? (
+                            <div className="mt-3 rounded-lg bg-white/80 p-3 ring-1 ring-purple-100">
+                              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-purple-800">How projected taxable income is built</p>
+                              <p className="mb-2 text-xs text-gray-500">Financial year: {tds.financial_year_start} to {tds.financial_year_end}</p>
+                              <div className="space-y-1.5">
+                                <div className="flex justify-between gap-3"><span className="text-gray-600">Taxable earnings from earlier finalized/paid months</span><span className="shrink-0 font-medium">₹{fmt(tdsPriorTaxable)}</span></div>
+                                <div className="flex justify-between gap-3"><span className="text-gray-600">Taxable earnings for this pay period</span><span className="shrink-0 font-medium">₹{fmt(tdsCurrentPeriodTaxable)}</span></div>
+                                {tds.current_period_basis && (
+                                  <div className="my-2 rounded-md bg-purple-50/70 p-2.5 text-xs text-gray-700">
+                                    <p className="mb-1 font-semibold text-purple-900">How this pay period’s taxable salary was derived</p>
+                                    <p>Full-month taxable salary: ₹{fmt(tds.current_period_basis.full_month_taxable_salary)}</p>
+                                    <p>Eligible calendar days {tds.current_period_basis.eligible_calendar_days} − LOP days {tds.current_period_basis.lop_days} + off-day work {tds.current_period_basis.off_day_worked} = {tds.current_period_basis.salary_calendar_day_equivalent} salary calendar-day equivalent(s).</p>
+                                    <p>₹{fmt(tds.current_period_basis.full_month_taxable_salary)} × {tds.current_period_basis.salary_calendar_day_equivalent} ÷ {tds.current_period_basis.calendar_day_divisor} calendar days = ₹{fmt(tdsCurrentPeriodTaxable)} taxable salary.</p>
+                                    <p>Attendance/leave payable days recorded: {tds.current_period_basis.attendance_payable_days}.</p>
+                                    <p className="mt-1 text-gray-500">Salary calendar-day equivalents are not days recorded as worked or paid leave. Under the current policy, only scheduled absent workdays count as LOP; weekends are not LOP and remain in the monthly salary balance.</p>
+                                  </div>
+                                )}
+                                {Number(tds.current_month_other_settled_taxable_salary || 0) !== 0 && <div className="flex justify-between gap-3"><span className="text-gray-600">Other finalized/paid taxable payroll in this month</span><span className="shrink-0 font-medium">₹{fmt(tds.current_month_other_settled_taxable_salary)}</span></div>}
+                                <div className="flex justify-between gap-3"><span className="text-gray-600">Taxable earnings for later months ({tdsFuturePeriods} months; actual payroll where finalized/paid, otherwise forecast)</span><span className="shrink-0 font-medium">₹{fmt(tdsFutureProjected)}</span></div>
+                                <div className="flex justify-between gap-3 border-t border-purple-100 pt-1.5 font-semibold"><span>Projected salary before standard deduction</span><span className="shrink-0">₹{fmt(tds.projected_salary)}</span></div>
+                                <div className="flex justify-between gap-3 text-gray-700"><span>Standard deduction</span><span className="shrink-0">− ₹{fmt(tds.standard_deduction)}</span></div>
+                                <div className="flex justify-between gap-3 border-t border-purple-100 pt-1.5 font-bold text-purple-900"><span>Projected taxable income</span><span className="shrink-0">₹{fmt(tds.taxable_income)}</span></div>
+                              </div>
+                              {Array.isArray(tds.future_projection_details) ? (
+                                <div className="mt-3 overflow-hidden rounded-lg ring-1 ring-purple-100">
+                                  <div className="bg-purple-50 px-3 py-2 text-xs font-semibold text-purple-800">Later month actuals and salary forecasts</div>
+                                  <div className="divide-y divide-purple-100 bg-white/70">
+                                    {tds.future_projection_details.map((month: any) => (
+                                      <div key={month.month_start} className="grid grid-cols-[minmax(5.5rem,0.8fr)_minmax(0,2fr)_auto] gap-3 px-3 py-2 text-xs">
+                                        <span className="font-medium text-gray-700">{month.period}</span>
+                                        <div className="text-gray-600">
+                                          {month.settled_payroll?.map((payroll: any, index: number) => (
+                                            <div key={`actual-${index}`} className="text-green-800">
+                                              Actual {payroll.run_type} payroll ({payroll.status}): taxable ₹{fmt(payroll.taxable_salary)}
+                                            </div>
+                                          ))}
+                                          {month.assignments?.map((assignment: any, index: number) => (
+                                            <div key={`${assignment.effective_from}-${index}`}>
+                                              Forecast · {assignment.structure_name}: ₹{fmt(assignment.full_month_taxable_salary)} × {assignment.covered_days}/{assignment.calendar_days} days = ₹{fmt(assignment.projected_taxable_salary)}
+                                            </div>
+                                          ))}
+                                          {!month.settled_payroll?.length && !month.assignments?.length && <span className="italic text-gray-500">No finalized/paid payroll or active assignment; ₹0 included</span>}
+                                        </div>
+                                        <span className="whitespace-nowrap font-medium text-purple-900">₹{fmt(month.projected_taxable_salary)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="mt-2 text-xs text-gray-500">
+                                  {hasStoredMonthlyProjection
+                                    ? `This saved estimate used ₹${fmt(tdsMonthlyProjection)} of taxable salary per future period. It predates the month-by-month assignment forecast.`
+                                    : `This saved run did not store the month-by-month assignment forecast. The future total implies an average of ₹${fmt(tdsMonthlyProjection)} per period (${fmt(tdsFutureProjected)} ÷ ${tdsFuturePeriods}).`}
+                                  {' '}This is a tax projection, not annual CTC.
+                                </p>
+                              )}
+                              <p className="mt-2 text-xs text-gray-500">Finalized/paid payroll months use their saved taxable payroll amount. Months without a completed regular payroll use the effective salary assignment, prorated by covered calendar days; that is a forecast and assumes the assigned full-month salary before unknown future attendance or leave. Months without an assignment add ₹0. Tax declarations, other income, and previous-employer data are not included.</p>
+                            </div>
+                          ) : (
+                            <div className="mt-2 rounded-lg bg-white/80 p-3 text-xs text-amber-800 ring-1 ring-amber-100">
+                              The saved payroll data does not contain enough detail to split this projection into its source values.
+                            </div>
+                          )}
+                          <div className="mt-3 grid grid-cols-2 gap-3">
+                            <div><span className="text-gray-600">Projected annual tax (using this regime's effective rule):</span> <span className="font-medium">₹{fmt(tds.annual_tax)}</span></div>
+                            <div><span className="text-gray-600">TDS already deducted in other finalized/paid payrolls this financial year:</span> <span className="font-medium">₹{fmt(tds.prior_tds)}</span></div>
+                            <div><span className="text-gray-600">Periods left, including current:</span> <span className="font-medium">{tds.remaining_periods}</span></div>
+                            <div className="col-span-2 border-t border-purple-100 pt-2"><span className="text-gray-600">TDS for this run = max(projected annual tax − TDS already deducted in finalized/paid payrolls, 0) ÷ remaining unpaid payroll periods (including this run):</span> <span className="font-semibold">₹{fmt(tds.amount)}</span></div>
+                          </div>
+                        </div>
+                        <p className="mt-2 text-xs text-purple-900">
+                          The estimate uses finalized/paid payroll records, this run’s calculated taxable salary, and effective salary assignments for regular payroll months not yet finalized/paid. It does not use assigned annual CTC directly; employee declarations, other income, and previous-employer data are not included.
+                        </p>
+                        {tds.rebate_not_applied_reason && <p className="mt-1 text-xs font-medium text-amber-800">{tds.rebate_not_applied_reason}</p>}
+                      </>
+                    )}
+                  </div>
+                )}
 
                 {reconciledDays.length > 0 && (
                   <div className="rounded-xl bg-white p-4 ring-1 ring-gray-200">
@@ -283,6 +408,23 @@ export default function RunEmployeeTable({ employees, runId, runStatus, canAdjus
                   <div><span className="text-gray-500">Employer Cost:</span> <span className="font-semibold text-purple-700">₹{fmt(detail.total_employer_cost)}</span></div>
                   <div><span className="text-gray-500">CTC:</span> <span className="font-semibold text-purple-700">₹{fmt(detail.total_ctc)}</span></div>
                 </div>
+
+                <section className="rounded-xl border border-gray-200 bg-white p-4">
+                  <h4 className="text-sm font-semibold text-gray-900">Wage and deduction reconciliation</h4>
+                  <p className="mt-1 text-xs leading-5 text-gray-600">
+                    Gross Pay is the full assigned earning components shown above, before deductions. ESI wages payable are prorated wages before employee PF/ESI deductions, so the two values can differ. LOP is deducted separately.
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-sm md:grid-cols-3">
+                    <div><span className="text-gray-500">Gross Pay before deductions:</span> <span className="font-medium">₹{fmt(detail.gross_pay)}</span></div>
+                    <div><span className="text-gray-500">ESI wages payable:</span> <span className="font-medium">{detail.input_snapshot?.fixed_gross_pay_prorated != null ? `₹${fmt(detail.input_snapshot.fixed_gross_pay_prorated)}` : 'Not recorded'}</span></div>
+                    <div><span className="text-gray-500">Fixed monthly ESI base:</span> <span className="font-medium">{detail.input_snapshot?.esi_wage_base != null ? `₹${fmt(detail.input_snapshot.esi_wage_base)}` : 'Not recorded'}</span></div>
+                    <div><span className="text-gray-500">LOP deduction:</span> <span className="font-medium">₹{fmt(lopDeduction)}</span></div>
+                    <div><span className="text-gray-500">Employee PF:</span> <span className="font-medium">₹{fmt(employeePfDeduction)}</span></div>
+                    <div><span className="text-gray-500">Employee ESI:</span> <span className="font-medium">₹{fmt(employeeEsiDeduction)}</span></div>
+                    <div><span className="text-gray-500">Net pay:</span> <span className="font-semibold text-green-700">₹{fmt(detail.net_pay)}</span></div>
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500">Net Pay = Gross Pay + Reimbursements − Total Deductions.</p>
+                </section>
 
                 {detail.error_message && (
                   <div className="rounded-xl bg-red-50 p-4 ring-1 ring-red-100 text-sm text-red-700">

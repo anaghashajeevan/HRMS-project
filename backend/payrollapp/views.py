@@ -13,7 +13,7 @@ import re
 from io import BytesIO
 import logging
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from uuid import uuid4
 
 from django.db.models import OuterRef, Subquery, Q, F
@@ -34,7 +34,8 @@ from .models import (
     PayrollRun, SalaryComponent, SalaryStructure, SalaryStructureComponent,
     StatutoryRule, PayCalendar, EmployeeSalaryAssignment,
     EmployeePayrollProfile, PayrollRunAdjustment, PayrollRunEmployee,
-    PayslipRequest, PayslipRequestApprovalAction, PaymentBatch, PaymentBatchLine, PayrollRunApprovalAction,
+    PayrollRunComponentDetail, PayslipRequest, PayslipRequestApprovalAction,
+    PaymentBatch, PaymentBatchLine, PayrollRunApprovalAction,
 )
 from .serializers import (
     SalaryComponentSerializer, SalaryComponentMiniSerializer,
@@ -486,6 +487,7 @@ class PayrollProfilesOverviewView(APIView):
                 'masked_account': masked_account,
                 'ifsc_code': employee.bank_ifsc_code or (latest.ifsc_code if latest else ''),
                 'tax_regime': (current or latest).tax_regime if latest else 'NEW',
+                'tax_resident': (current or latest).tax_resident if latest else None,
                 'effective_from': (current or latest).effective_from if latest else None,
                 'effective_to': (current or latest).effective_to if latest else None,
                 'history': history_by_employee.get(key, []),
@@ -520,10 +522,10 @@ class SeedDefaultsView(APIView):
              'is_taxable': True, 'is_fixed': False, 'formula': 'basic * 0.40',
              'display_order': 2},
             {'code': 'CONVEYANCE', 'name': 'Conveyance Allowance', 'component_type': 'EARNING',
-             'is_taxable': False, 'is_fixed': True, 'formula': '',
+             'is_taxable': True, 'is_fixed': True, 'formula': '',
              'display_order': 3},
             {'code': 'MEDICAL', 'name': 'Medical Allowance', 'component_type': 'EARNING',
-             'is_taxable': False, 'is_fixed': True, 'formula': '',
+             'is_taxable': True, 'is_fixed': True, 'formula': '',
              'display_order': 4},
             {'code': 'LTA', 'name': 'Leave Travel Allowance', 'component_type': 'EARNING',
              'is_taxable': True, 'is_fixed': True, 'formula': '',
@@ -624,6 +626,73 @@ class SeedDefaultsView(APIView):
                     {'min': 20001, 'max': None, 'amount': 200},
                 ],
                 'effective_from': date(2026, 1, 1),
+            },
+            {
+                'statutory_type': 'TDS',
+                'name': 'TDS New Regime TY2026-27',
+                'jurisdiction': 'ALL',
+                'tax_regime': 'NEW',
+                'effective_from': date(2026, 4, 1),
+                'effective_to': date(2027, 3, 31),
+                'slabs': {
+                    'slabs': [
+                        {'min': 0, 'max': 400000, 'rate': 0},
+                        {'min': 400000, 'max': 800000, 'rate': 5},
+                        {'min': 800000, 'max': 1200000, 'rate': 10},
+                        {'min': 1200000, 'max': 1600000, 'rate': 15},
+                        {'min': 1600000, 'max': 2000000, 'rate': 20},
+                        {'min': 2000000, 'max': 2400000, 'rate': 25},
+                        {'min': 2400000, 'max': None, 'rate': 30},
+                    ],
+                    'standard_deduction': 75000,
+                    'rebate': {'threshold': 1200000, 'max_amount': 60000, 'resident_only': True, 'marginal_relief': True},
+                    'surcharge': [
+                        {'min': 5000000, 'max': 10000000, 'rate': 10},
+                        {'min': 10000000, 'max': 20000000, 'rate': 15},
+                        {'min': 20000000, 'max': 50000000, 'rate': 25},
+                        {'min': 50000000, 'max': None, 'rate': 25},
+                    ],
+                    'surcharge_cap_rate': 25,
+                    'cess_rate': 4,
+                },
+            },
+            {
+                'statutory_type': 'TDS',
+                'name': 'TDS Old Regime TY2026-27',
+                'jurisdiction': 'ALL',
+                'tax_regime': 'OLD',
+                'effective_from': date(2026, 4, 1),
+                'effective_to': date(2027, 3, 31),
+                'slabs': {
+                    'slabs': [
+                        {'min': 0, 'max': 250000, 'rate': 0},
+                        {'min': 250000, 'max': 500000, 'rate': 5},
+                        {'min': 500000, 'max': 1000000, 'rate': 20},
+                        {'min': 1000000, 'max': None, 'rate': 30},
+                    ],
+                    'age_slabs': {
+                        'senior': [
+                            {'min': 0, 'max': 300000, 'rate': 0},
+                            {'min': 300000, 'max': 500000, 'rate': 5},
+                            {'min': 500000, 'max': 1000000, 'rate': 20},
+                            {'min': 1000000, 'max': None, 'rate': 30},
+                        ],
+                        'super_senior': [
+                            {'min': 0, 'max': 500000, 'rate': 0},
+                            {'min': 500000, 'max': 1000000, 'rate': 20},
+                            {'min': 1000000, 'max': None, 'rate': 30},
+                        ],
+                    },
+                    'standard_deduction': 50000,
+                    'rebate': {'threshold': 500000, 'max_amount': 12500, 'resident_only': True},
+                    'surcharge': [
+                        {'min': 5000000, 'max': 10000000, 'rate': 10},
+                        {'min': 10000000, 'max': 20000000, 'rate': 15},
+                        {'min': 20000000, 'max': 50000000, 'rate': 25},
+                        {'min': 50000000, 'max': None, 'rate': 37},
+                    ],
+                    'cess_rate': 4,
+                },
             },
         ]
 
@@ -833,7 +902,7 @@ class PayRunDetailView(APIView):
 
 class PayRunTransitionView(APIView):
     """POST /runs/<id>/<action>/
-       Actions: lock, calculate, submit-review, approve, return, finalize, mark-paid, reverse
+       Actions: lock, reopen, calculate, submit-review, approve, return, finalize, mark-paid, reverse
     """
     permission_classes = [IsAuthenticated]
 
@@ -1199,6 +1268,486 @@ class PaymentBatchExportView(APIView):
             return response
 
         return Response({'detail': 'Format must be csv or pdf.'}, status=400)
+
+
+def _whole_rupees(value):
+    return int(Decimal(str(value or 0)).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+
+
+def _statutory_profiles_for_run(run_employees, period_end):
+    employee_ids = [row.employee_id for row in run_employees]
+    profiles = EmployeePayrollProfile.objects.filter(
+        employee_id__in=employee_ids,
+    ).order_by(
+        'employee_id', '-effective_from', '-created_at',
+    )
+    result = {}
+    for profile in profiles:
+        employee_profiles = result.setdefault(profile.employee_id, {
+            'effective': None,
+            'latest_uan': '',
+            'latest_esi_number': '',
+        })
+        # Statutory membership IDs are normally stable. Prefer the historical
+        # version for the wage month, but backfill a missing value from the
+        # latest profile that has one. This lets HR enter a newly discovered
+        # UAN/IP number today and still prepare a return for a prior month.
+        if not employee_profiles['latest_uan'] and (profile.uan or '').strip():
+            employee_profiles['latest_uan'] = profile.uan
+        if not employee_profiles['latest_esi_number'] and (profile.esi_number or '').strip():
+            employee_profiles['latest_esi_number'] = profile.esi_number
+        if (
+            employee_profiles['effective'] is None
+            and profile.effective_from <= period_end
+            and (profile.effective_to is None or profile.effective_to >= period_end)
+        ):
+            employee_profiles['effective'] = profile
+    return result
+
+
+class StatutoryReturnExportView(APIView):
+    """PF ECR and ESI payroll review exports from finalized monthly run snapshots."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, run_id, export_type):
+        if not _can_manage_payment_batches(request.user):
+            return Response({'detail': 'Finance or payroll admin access is required.'}, status=403)
+        if export_type not in {'pf', 'esi'}:
+            return Response({'detail': 'Export type must be pf or esi.'}, status=400)
+        try:
+            run = PayrollRun.objects.select_related('pay_calendar').get(id=run_id)
+        except PayrollRun.DoesNotExist:
+            return Response({'detail': 'Pay run not found.'}, status=404)
+        if run.status not in {'FINALIZED', 'PAID'}:
+            return Response({'detail': 'Statutory returns are available only for finalized or paid payroll runs.'}, status=400)
+        if run.run_type != 'REGULAR':
+            return Response({'detail': 'Monthly statutory exports currently support Regular runs only. Off-cycle, arrears, and F&F need separate reporting rules.'}, status=400)
+
+        period_end = run.pay_calendar.period_end
+        run_employees = list(
+            PayrollRunEmployee.objects.filter(run=run).exclude(status='EXCLUDED')
+            .select_related('employee')
+            .prefetch_related('component_details__component')
+            .order_by('employee__employee_id')
+        )
+        if not run_employees:
+            return Response({'detail': 'This payroll run has no included employees.'}, status=400)
+        incomplete = [
+            f'{row.employee.employee_id} ({row.employee.full_name}): payroll result is {row.status.lower()}'
+            for row in run_employees if row.status != 'CALCULATED'
+        ]
+        if incomplete:
+            return Response({'detail': 'Every included employee must have a calculated result.', 'errors': incomplete}, status=400)
+        profiles = _statutory_profiles_for_run(run_employees, period_end)
+        errors = []
+        export_rows = []
+
+        for row in run_employees:
+            employee = row.employee
+            label = f'{employee.employee_id} ({employee.full_name})'
+            details = list(row.component_details.all())
+            amounts = {
+                detail.component.code: Decimal(str(detail.amount or 0))
+                for detail in details if detail.component_id and detail.component
+            }
+            profile_data = profiles.get(employee.id, {})
+            profile = profile_data.get('effective')
+            snapshot = row.input_snapshot or {}
+            # Calculation outputs live at the snapshot root; lock-time fields are nested.
+            statutory_snapshot = snapshot
+
+            if export_type == 'pf':
+                uan = str(
+                    (profile.uan if profile else '')
+                    or profile_data.get('latest_uan')
+                    or employee.uan_number_encrypted
+                    or ''
+                ).strip()
+                has_pf_components = any(code in amounts for code in ('PF_EMP', 'PF_ER', 'EPS_ER', 'EPF_ER'))
+                if not uan and not has_pf_components:
+                    continue
+                if not re.fullmatch(r'\d{12}', uan):
+                    errors.append(f'{label}: a valid 12-digit UAN is required for the PF ECR.')
+                    continue
+
+                basic = Decimal(str(statutory_snapshot.get('basic_full_month') or 0))
+                if has_pf_components and basic <= 0:
+                    errors.append(f'{label}: the frozen Basic wage is missing from this payroll snapshot.')
+                    continue
+                pf_detail = next((item for item in details if item.component_id and item.component.code in ('PF_EMP', 'PF_ER', 'EPS_ER', 'EPF_ER') and item.rule_reference), None)
+                rule = None
+                if pf_detail:
+                    try:
+                        rule = StatutoryRule.objects.get(id=pf_detail.rule_reference, statutory_type='PF')
+                    except (StatutoryRule.DoesNotExist, ValueError):
+                        errors.append(f'{label}: the PF statutory rule referenced by payroll is no longer available.')
+                pf_wage = basic
+                if rule and rule.wage_ceiling > 0:
+                    pf_wage = min(pf_wage, rule.wage_ceiling)
+
+                ncp_days = Decimal(str(row.lop_days or 0))
+                if ncp_days != ncp_days.to_integral_value():
+                    errors.append(f'{label}: PF ECR requires whole-number NCP days; payroll has {ncp_days}. Correct the source day data before export.')
+                    continue
+                if ncp_days < 0 or ncp_days > row.days_in_month:
+                    errors.append(f'{label}: NCP days must be between 0 and {row.days_in_month}.')
+                    continue
+                if not has_pf_components and any(amounts.get(code, 0) for code in ('PF_EMP', 'PF_ER', 'EPS_ER', 'EPF_ER')):
+                    errors.append(f'{label}: PF amounts exist but the employee has no PF component details.')
+                    continue
+
+                epf_employee = amounts.get('PF_EMP', Decimal('0'))
+                eps_employer = amounts.get('EPS_ER', Decimal('0'))
+                epf_employer = amounts.get('EPF_ER', Decimal('0'))
+                if amounts.get('PF_ER', Decimal('0')) > 0 and not (
+                    amounts.get('EPS_ER') is not None and amounts.get('EPF_ER') is not None
+                ):
+                    errors.append(f'{label}: employer PF is not split into EPS and EPF components; ECR fields cannot be mapped safely.')
+                    continue
+                if not rule and has_pf_components:
+                    errors.append(f'{label}: payroll PF components have no active statutory rule reference; PF wages cannot be validated.')
+                    continue
+                gross_wages = Decimal(str(
+                    statutory_snapshot.get('fixed_gross_pay_prorated')
+                    if 'fixed_gross_pay_prorated' in statutory_snapshot else row.gross_pay or 0
+                ))
+                gross_wages += Decimal(str(statutory_snapshot.get('variable_earnings') or 0))
+                if gross_wages == 0 and ncp_days != row.days_in_month:
+                    errors.append(f'{label}: EPFO requires NCP days equal to the full wage month when reported wages are zero; payroll has {int(ncp_days)} of {row.days_in_month}.')
+                    continue
+                if pf_wage > gross_wages:
+                    errors.append(f'{label}: PF wage base ₹{pf_wage} exceeds wages payable ₹{gross_wages}. The current payroll result cannot be represented as a valid ECR row; reconcile the PF wage basis with payable salary first.')
+                    continue
+                if any(value > gross_wages for value in (epf_employee, eps_employer, epf_employer)):
+                    errors.append(f'{label}: PF contributions exceed wages payable in the run. Correct the payroll wage/contribution basis before exporting ECR.')
+                    continue
+                export_rows.append({
+                    'employee': employee,
+                    'uan': uan,
+                    'gross_wages': gross_wages,
+                    'pf_wages': pf_wage,
+                    'employee_share': epf_employee,
+                    'eps_share': eps_employer,
+                    'epf_share': epf_employer,
+                    'ncp_days': int(ncp_days),
+                })
+            else:
+                ip_number = str(
+                    (profile.esi_number if profile else '')
+                    or profile_data.get('latest_esi_number')
+                    or ''
+                ).strip()
+                has_esi_components = any(code in amounts for code in ('ESI_EMP', 'ESI_ER'))
+                if not ip_number and not has_esi_components:
+                    continue
+                if not re.fullmatch(r'\d{10}', ip_number):
+                    errors.append(f'{label}: a valid 10-digit ESIC IP number is required for the ESI return.')
+                    continue
+                if Decimal(str(row.payable_days or 0)) != Decimal(str(row.payable_days or 0)).to_integral_value():
+                    errors.append(f'{label}: the ESIC contribution return requires whole-number days; payroll has {row.payable_days}.')
+                    continue
+                fixed_wage_base = Decimal(str(statutory_snapshot.get('esi_wage_base') or 0))
+                if has_esi_components and fixed_wage_base <= 0:
+                    errors.append(f'{label}: the frozen ESI wage base is missing from this payroll snapshot. Recalculate the run before creating the ESI review export.')
+                    continue
+                wages_paid = Decimal(str(statutory_snapshot.get('fixed_gross_pay_prorated') or 0))
+                employee_pf = amounts.get('PF_EMP', Decimal('0'))
+                employee_esi = amounts.get('ESI_EMP', Decimal('0'))
+                lop_deduction = sum((
+                    Decimal(str(detail.amount or 0))
+                    for detail in details
+                    if not detail.component_id and (detail.component_label or '').startswith('Leave / LOP Deduction')
+                ), Decimal('0'))
+                export_rows.append({
+                    'employee': employee,
+                    'ip_number': ip_number,
+                    'days_paid': int(Decimal(str(row.payable_days or 0))),
+                    'wages_paid': wages_paid,
+                    'esi_wage_base': fixed_wage_base,
+                    'gross_pay': Decimal(str(row.gross_pay or 0)),
+                    'total_deductions': Decimal(str(row.total_deductions or 0)),
+                    'lop_deduction': lop_deduction,
+                    'employee_pf': employee_pf,
+                    'employee_esi': employee_esi,
+                    'other_deductions': Decimal(str(row.total_deductions or 0)) - lop_deduction - employee_pf - employee_esi,
+                    'reimbursements': Decimal(str(row.total_reimbursements or 0)),
+                    'net_pay': Decimal(str(row.net_pay or 0)),
+                    'employee_share': employee_esi,
+                    'employer_share': amounts.get('ESI_ER', Decimal('0')),
+                    'base_source': 'frozen payroll ESI wage base' if fixed_wage_base else 'missing from payroll snapshot',
+                })
+
+        if errors:
+            return Response({
+                'detail': 'The statutory export was not generated because employee data needs correction.',
+                'errors': errors,
+            }, status=400)
+        if not export_rows:
+            return Response({'detail': f'No employees with {export_type.upper()} membership were found in this run.'}, status=400)
+
+        year, month = run.pay_calendar.year, run.pay_calendar.month
+        if export_type == 'pf':
+            # EPFO ECR 2.0: 11 fields separated by #~#, in the official field order.
+            response = HttpResponse(content_type='text/plain; charset=utf-8')
+            response['Content-Disposition'] = f'attachment; filename="EPFO_ECR_{year}_{month:02d}.txt"'
+            lines = []
+            for item in export_rows:
+                lines.append('#~#'.join([
+                    item['uan'],
+                    re.sub(r'#~#', ' ', item['employee'].full_name).strip(),
+                    str(_whole_rupees(item['gross_wages'])),
+                    str(_whole_rupees(item['pf_wages'])),
+                    str(_whole_rupees(item['pf_wages'])),
+                    str(_whole_rupees(item['pf_wages'])),
+                    str(_whole_rupees(item['employee_share'])),
+                    str(_whole_rupees(item['eps_share'])),
+                    str(_whole_rupees(item['epf_share'])),
+                    str(item['ncp_days']),
+                    '0',
+                ]))
+            response.write('\r\n'.join(lines))
+            response['Cache-Control'] = 'no-store, private'
+            response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+            return response
+
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        from openpyxl.worksheet.table import Table, TableStyleInfo
+        from django.conf import settings
+        from HRMSapp.models import CompanyLogo
+
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = 'ESI Return Detail'
+        company = CompanyLogo.objects.filter(is_active=True).first()
+        company_name = company.name if company else getattr(settings, 'COMPANY_NAME', 'Company')
+        navy = '17365D'
+        pale_blue = 'DCE6F1'
+        light_gray = 'F3F6FA'
+        white = 'FFFFFF'
+        thin_gray = Side(style='thin', color='D6DEE8')
+
+        worksheet.merge_cells('A1:I1')
+        worksheet['A1'] = company_name
+        worksheet['A1'].font = Font(name='Aptos Display', size=18, bold=True, color=white)
+        worksheet['A1'].fill = PatternFill('solid', fgColor=navy)
+        worksheet['A1'].alignment = Alignment(horizontal='left', vertical='center')
+        worksheet.row_dimensions[1].height = 32
+
+        worksheet.merge_cells('A2:I2')
+        worksheet['A2'] = 'ESIC MONTHLY CONTRIBUTION DETAIL'
+        worksheet['A2'].font = Font(name='Aptos', size=12, bold=True, color=navy)
+        worksheet['A2'].alignment = Alignment(horizontal='left', vertical='center')
+        worksheet.row_dimensions[2].height = 24
+
+        worksheet['A3'] = 'Payroll month'
+        worksheet['B3'] = f'{calendar.month_name[month]} {year}'
+        worksheet['D3'] = 'Pay run status'
+        worksheet['E3'] = run.status
+        worksheet['G3'] = 'Beneficiaries'
+        worksheet['H3'] = len(export_rows)
+        for cell in ('A3', 'D3', 'G3'):
+            worksheet[cell].font = Font(bold=True, color=navy)
+        worksheet.merge_cells('B3:C3')
+        worksheet.merge_cells('E3:F3')
+        worksheet.merge_cells('H3:I3')
+        for row_cells in worksheet.iter_rows(min_row=3, max_row=3, min_col=1, max_col=9):
+            for cell in row_cells:
+                cell.fill = PatternFill('solid', fgColor=light_gray)
+                cell.alignment = Alignment(vertical='center')
+
+        worksheet.merge_cells('A4:I4')
+        worksheet['A4'] = 'INTERNAL REVIEW REPORT — this workbook is not the ESIC portal upload template.'
+        worksheet['A4'].font = Font(bold=True, color='8A4B08')
+        worksheet['A4'].fill = PatternFill('solid', fgColor='FFF2CC')
+        worksheet['A4'].alignment = Alignment(vertical='center')
+        worksheet.row_dimensions[4].height = 22
+
+        worksheet.merge_cells('A5:I5')
+        worksheet['A5'] = 'ESI wages payable are prorated payable wages before employee PF/ESI deductions. The fixed monthly ESI base is the salary basis used to calculate contributions. Verify figures in the ESIC employer portal before filing.'
+        worksheet['A5'].font = Font(italic=True, size=9, color='44546A')
+        worksheet['A5'].alignment = Alignment(wrap_text=True, vertical='center')
+        worksheet.row_dimensions[5].height = 30
+
+        worksheet['A6'] = 'Report generated'
+        worksheet['B6'] = timezone.localtime().strftime('%d %b %Y, %H:%M')
+        worksheet['D6'] = 'Payroll run reference'
+        worksheet['E6'] = str(run.id)
+        worksheet.merge_cells('E6:I6')
+        for cell in ('A6', 'D6'):
+            worksheet[cell].font = Font(bold=True, color=navy)
+        for row_cells in worksheet.iter_rows(min_row=6, max_row=6, min_col=1, max_col=9):
+            for cell in row_cells:
+                cell.alignment = Alignment(vertical='center')
+
+        headers = [
+            'ESIC IP Number', 'Employee ID', 'Employee Name', 'Payable Days',
+            'ESI Wages Payable Before Employee Deductions (₹)', 'Fixed Monthly ESI Calculation Base (₹)',
+            'Employee ESI Contribution (₹)', 'Employer ESI Contribution (₹)', 'Total ESI Contribution (₹)',
+        ]
+        header_row = 7
+        for column, value in enumerate(headers, start=1):
+            cell = worksheet.cell(row=header_row, column=column, value=value)
+            cell.font = Font(bold=True, color=white)
+            cell.fill = PatternFill('solid', fgColor=navy)
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = Border(bottom=Side(style='medium', color=navy))
+        worksheet.row_dimensions[header_row].height = 36
+
+        first_data_row = header_row + 1
+        for row_number, item in enumerate(export_rows, start=first_data_row):
+            values = [
+                item['ip_number'], item['employee'].employee_id, item['employee'].full_name,
+                item['days_paid'], float(item['wages_paid']), float(item['esi_wage_base']),
+                float(item['employee_share']), float(item['employer_share']),
+                float(item['employee_share'] + item['employer_share']),
+            ]
+            for column, value in enumerate(values, start=1):
+                cell = worksheet.cell(row=row_number, column=column, value=value)
+                cell.border = Border(bottom=thin_gray)
+                cell.alignment = Alignment(vertical='center', horizontal='right' if column >= 4 else 'left')
+                if row_number % 2 == 0:
+                    cell.fill = PatternFill('solid', fgColor=light_gray)
+                if column >= 5:
+                    cell.number_format = '#,##0.00'
+
+        total_row = first_data_row + len(export_rows)
+        worksheet.cell(total_row, 1, 'TOTAL')
+        worksheet.cell(total_row, 2, f'{len(export_rows)} beneficiaries')
+        for column in range(1, 10):
+            cell = worksheet.cell(total_row, column)
+            cell.font = Font(bold=True, color=navy)
+            cell.fill = PatternFill('solid', fgColor=pale_blue)
+            cell.border = Border(top=Side(style='medium', color=navy))
+        for column in range(5, 10):
+            total_key = {
+                5: 'wages_paid',
+                6: 'esi_wage_base',
+                7: 'employee_share',
+                8: 'employer_share',
+            }.get(column)
+            total_value = (
+                sum((item[total_key] for item in export_rows), Decimal('0'))
+                if total_key else
+                sum((item['employee_share'] + item['employer_share'] for item in export_rows), Decimal('0'))
+            )
+            worksheet.cell(total_row, column, float(total_value))
+            worksheet.cell(total_row, column).number_format = '#,##0.00'
+
+        last_data_row = total_row - 1
+        table = Table(displayName='ESIContributionRows', ref=f'A{header_row}:I{last_data_row}')
+        table.tableStyleInfo = TableStyleInfo(name='TableStyleMedium2', showFirstColumn=False, showLastColumn=False, showRowStripes=True, showColumnStripes=False)
+        worksheet.add_table(table)
+        worksheet.freeze_panes = 'A8'
+        worksheet.auto_filter.ref = f'A{header_row}:I{last_data_row}'
+        worksheet.sheet_view.showGridLines = False
+        worksheet.sheet_properties.pageSetUpPr.fitToPage = True
+        worksheet.page_setup.orientation = 'landscape'
+        worksheet.page_setup.fitToWidth = 1
+        worksheet.page_setup.fitToHeight = 0
+        worksheet.print_title_rows = f'{header_row}:{header_row}'
+        worksheet.print_area = f'A1:I{total_row}'
+        for column, width in enumerate((18, 16, 26, 20, 22, 22, 23, 23, 22), start=1):
+            worksheet.column_dimensions[chr(64 + column)].width = width
+
+        # Add a payroll-to-net reconciliation so the ESI wage figure is not
+        # mistaken for the Gross Pay figure shown in the pay-run detail.
+        reconciliation = workbook.create_sheet('Payroll Reconciliation')
+        reconciliation.sheet_view.showGridLines = False
+        reconciliation_headers = [
+            'Employee ID', 'Employee Name', 'Gross Pay in Pay Run (Before Deductions)',
+            'ESI Wages Payable Before Employee Deductions', 'Fixed Monthly ESI Calculation Base',
+            'LOP Deduction', 'Employee PF Deduction', 'Employee ESI Deduction',
+            'Other Deductions', 'Total Deductions', 'Reimbursements', 'Net Pay',
+        ]
+        reconciliation.merge_cells('A1:L1')
+        reconciliation['A1'] = company_name
+        reconciliation['A1'].font = Font(name='Aptos Display', size=18, bold=True, color=white)
+        reconciliation['A1'].fill = PatternFill('solid', fgColor=navy)
+        reconciliation['A1'].alignment = Alignment(vertical='center')
+        reconciliation.row_dimensions[1].height = 32
+        reconciliation.merge_cells('A2:L2')
+        reconciliation['A2'] = 'PAYROLL GROSS-TO-NET RECONCILIATION'
+        reconciliation['A2'].font = Font(name='Aptos', size=12, bold=True, color=navy)
+        reconciliation['A2'].alignment = Alignment(vertical='center')
+        reconciliation['A3'] = f'Payroll month: {calendar.month_name[month]} {year}'
+        reconciliation['D3'] = f'Run status: {run.status}'
+        reconciliation['G3'] = f'Employees: {len(export_rows)}'
+        reconciliation.merge_cells('A3:C3')
+        reconciliation.merge_cells('D3:F3')
+        reconciliation.merge_cells('G3:L3')
+        reconciliation.merge_cells('A4:L4')
+        reconciliation['A4'] = ('Gross Pay matches Pay Run detail and is before deductions. ESI wages are prorated payable wages before employee PF/ESI. '
+                                'LOP is a separate deduction. Net Pay = Gross Pay + Reimbursements − Total Deductions.')
+        reconciliation['A4'].font = Font(italic=True, size=9, color='44546A')
+        reconciliation['A4'].alignment = Alignment(wrap_text=True, vertical='center')
+        reconciliation.row_dimensions[4].height = 32
+        reconciliation.merge_cells('A5:L5')
+        reconciliation['A5'] = f'Internal review only · generated {timezone.localtime().strftime("%d %b %Y, %H:%M")} · Run {run.id}'
+        reconciliation['A5'].font = Font(italic=True, size=9, color='44546A')
+        for column, value in enumerate(reconciliation_headers, start=1):
+            cell = reconciliation.cell(7, column, value)
+            cell.font = Font(bold=True, color=white)
+            cell.fill = PatternFill('solid', fgColor=navy)
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = Border(bottom=Side(style='medium', color=navy))
+        reconciliation.row_dimensions[7].height = 46
+        money_columns = set(range(3, 13))
+        for row_number, item in enumerate(export_rows, start=8):
+            values = [
+                item['employee'].employee_id, item['employee'].full_name, float(item['gross_pay']),
+                float(item['wages_paid']), float(item['esi_wage_base']), float(item['lop_deduction']),
+                float(item['employee_pf']), float(item['employee_esi']), float(item['other_deductions']),
+                float(item['total_deductions']), float(item['reimbursements']), float(item['net_pay']),
+            ]
+            for column, value in enumerate(values, start=1):
+                cell = reconciliation.cell(row_number, column, value)
+                cell.border = Border(bottom=thin_gray)
+                cell.alignment = Alignment(vertical='center', horizontal='right' if column in money_columns else 'left')
+                if row_number % 2 == 0:
+                    cell.fill = PatternFill('solid', fgColor=light_gray)
+                if column in money_columns:
+                    cell.number_format = '#,##0.00'
+        recon_total_row = 8 + len(export_rows)
+        reconciliation.cell(recon_total_row, 1, 'TOTAL')
+        for column in range(1, 13):
+            cell = reconciliation.cell(recon_total_row, column)
+            cell.font = Font(bold=True, color=navy)
+            cell.fill = PatternFill('solid', fgColor=pale_blue)
+            cell.border = Border(top=Side(style='medium', color=navy))
+            if column in money_columns:
+                cell.value = sum((item[{
+                    3: 'gross_pay', 4: 'wages_paid', 5: 'esi_wage_base', 6: 'lop_deduction',
+                    7: 'employee_pf', 8: 'employee_esi', 9: 'other_deductions',
+                    10: 'total_deductions', 11: 'reimbursements', 12: 'net_pay',
+                }[column]] for item in export_rows), Decimal('0'))
+                cell.number_format = '#,##0.00'
+        last_recon_data_row = recon_total_row - 1
+        if last_recon_data_row >= 8:
+            table = Table(displayName='PayrollReconciliationRows', ref=f'A7:L{last_recon_data_row}')
+            table.tableStyleInfo = TableStyleInfo(name='TableStyleMedium2', showRowStripes=True, showColumnStripes=False)
+            reconciliation.add_table(table)
+            reconciliation.auto_filter.ref = f'A7:L{last_recon_data_row}'
+        reconciliation.freeze_panes = 'A8'
+        reconciliation.sheet_properties.pageSetUpPr.fitToPage = True
+        reconciliation.page_setup.orientation = 'landscape'
+        reconciliation.page_setup.fitToWidth = 1
+        reconciliation.page_setup.fitToHeight = 0
+        reconciliation.print_title_rows = '7:7'
+        reconciliation.print_area = f'A1:L{recon_total_row}'
+        for column, width in enumerate((16, 25, 25, 28, 27, 17, 19, 19, 19, 20, 17, 17), start=1):
+            reconciliation.column_dimensions[chr(64 + column)].width = width
+
+        output = BytesIO()
+        workbook.save(output)
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="ESIC_Contribution_Review_{year}_{month:02d}.xlsx"'
+        response['Cache-Control'] = 'no-store, private'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+        return response
 
 
 class PaymentBatchRefreshBankDetailsView(APIView):

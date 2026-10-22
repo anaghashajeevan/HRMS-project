@@ -139,6 +139,20 @@ export const seedDefaults = () =>
 export const getPayRuns = (params?: Record<string, string>) =>
   api.get('/payroll/runs/', { params });
 
+export const downloadStatutoryReturn = async (runId: string, type: 'pf' | 'esi') => {
+  const response = await api.get(`/payroll/runs/${runId}/statutory-exports/${type}/`, { responseType: 'blob' });
+  const url = window.URL.createObjectURL(response.data);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  const disposition = response.headers['content-disposition'] || '';
+  const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+  anchor.download = filename || (type === 'pf' ? 'EPFO_ECR.txt' : 'ESIC_Contribution_Review.xlsx');
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+};
+
 export const getPayRun = (id: string) =>
   api.get(`/payroll/runs/${id}/`);
 

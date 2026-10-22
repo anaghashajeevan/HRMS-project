@@ -24,6 +24,7 @@ urlpatterns = [
     path('runs/<uuid:run_id>/employees/', views.RunEmployeeListView.as_view(), name='payroll-run-employees'),
     path('runs/<uuid:run_id>/adjustments/', views.RunAdjustmentListCreateView.as_view(), name='payroll-run-adjustments'),
     path('runs/<uuid:run_id>/payment-batches/', views.PayRunPaymentBatchView.as_view(), name='payroll-run-payment-batches'),
+    path('runs/<uuid:run_id>/statutory-exports/<str:export_type>/', views.StatutoryReturnExportView.as_view(), name='payroll-statutory-return-export'),
     path('payment-batches/<uuid:batch_id>/export/<str:export_format>/', views.PaymentBatchExportView.as_view(), name='payroll-payment-batch-export'),
     path('payment-batches/<uuid:batch_id>/refresh-bank-details/', views.PaymentBatchRefreshBankDetailsView.as_view(), name='payroll-payment-batch-refresh-bank-details'),
     path('payment-batches/<uuid:batch_id>/lines/<uuid:line_id>/status/', views.PaymentBatchLineStatusView.as_view(), name='payroll-payment-line-status'),

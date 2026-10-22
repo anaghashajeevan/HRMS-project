@@ -120,7 +120,7 @@ export default function StructureFormModal({ initial, onClose, onSaved }: Props)
               </button>
             </div>
             <p className="mb-2 text-xs text-gray-500">
-              Enter a fixed monthly amount or a percentage of Basic (enter 40 for 40%; 0.40 means 0.40%). If both are entered, the fixed amount is used; leave both blank when this component should calculate as zero.
+              For most components, enter a fixed amount or a percentage of Basic. For ESI_EMP/ESI_ER, enter the percentage (for example 0.75) and payroll applies it to fixed monthly gross, subject to the active ESI coverage ceiling; a fixed amount is ignored for ESI.
             </p>
 
             {rows.length === 0 && (
@@ -128,8 +128,11 @@ export default function StructureFormModal({ initial, onClose, onSaved }: Props)
             )}
 
             <div className="space-y-2">
-              {rows.map((row, i) => (
-                <div key={i} className="flex items-center gap-2 rounded-xl bg-gray-50 p-3 ring-1 ring-gray-100">
+              {rows.map((row, i) => {
+                const selected = compOptions.find((c: any) => c.id === row.component);
+                const isEsi = selected?.code === 'ESI_EMP' || selected?.code === 'ESI_ER';
+                return (
+                  <div key={i} className="flex items-center gap-2 rounded-xl bg-gray-50 p-3 ring-1 ring-gray-100">
                   <select
                     className="flex-1 rounded-lg border-0 bg-white px-3 py-2 text-sm ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-blue-500"
                     value={row.component}
@@ -153,7 +156,8 @@ export default function StructureFormModal({ initial, onClose, onSaved }: Props)
                   <input
                     type="number"
                     step="0.01"
-                    placeholder="% (e.g. 40)"
+                    placeholder={isEsi ? '% (e.g. 0.75)' : '% of Basic'}
+                    title={isEsi ? 'ESI rate applied to fixed monthly salary, subject to the active ESI wage ceiling.' : 'Percentage of Basic salary.'}
                     className="w-28 rounded-lg border-0 bg-white px-3 py-2 text-sm ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-blue-500"
                     value={row.percentage_of_basic}
                     onChange={(e) => updateRow(i, 'percentage_of_basic', e.target.value)}
@@ -172,8 +176,9 @@ export default function StructureFormModal({ initial, onClose, onSaved }: Props)
                   >
                     <TrashIcon className="h-4 w-4" />
                   </button>
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           </div>
 

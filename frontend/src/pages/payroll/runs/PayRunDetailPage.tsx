@@ -40,7 +40,10 @@ interface ActionDef {
 
 const ACTIONS: Record<string, ActionDef[]> = {
   OPEN: [{ key: 'lock', label: 'Lock Inputs & Load Employees', icon: LockClosedIcon, color: 'bg-yellow-600 hover:bg-yellow-700', confirm: 'Lock inputs and load employees with an eligible salary assignment for this pay period?' }],
-  LOCKED: [{ key: 'calculate', label: 'Calculate', icon: CalculatorIcon, color: 'bg-indigo-600 hover:bg-indigo-700', confirm: 'Run payroll calculation for all employees?' }],
+  LOCKED: [
+    { key: 'reopen', label: 'Reopen Inputs', icon: ArrowUturnLeftIcon, color: 'bg-amber-600 hover:bg-amber-700', confirm: 'Reopen this run? Its locked employee and attendance snapshots will be discarded and reloaded when you lock again.' },
+    { key: 'calculate', label: 'Calculate', icon: CalculatorIcon, color: 'bg-indigo-600 hover:bg-indigo-700', confirm: 'Run payroll calculation for all employees?' },
+  ],
   CALCULATED: [{ key: 'submit-review', label: 'Submit for Review', icon: PaperAirplaneIcon, color: 'bg-orange-600 hover:bg-orange-700' }],
   UNDER_REVIEW: [
     { key: 'approve', label: 'Approve', icon: CheckCircleIcon, color: 'bg-green-600 hover:bg-green-700', confirm: 'Approve this pay run?' },
@@ -96,9 +99,17 @@ export default function PayRunDetailPage() {
       return;
     }
     if (action.confirm && !confirm(action.confirm)) return;
+    let payload: any = undefined;
+    if (action.key === 'reopen' || action.key === 'refresh-calculation') {
+      const reason = prompt(action.key === 'reopen'
+        ? 'Enter the reason for reopening this payroll run:'
+        : 'Enter the reason for refreshing this payroll calculation:');
+      if (!reason?.trim()) return;
+      payload = { reason: reason.trim() };
+    }
     setActing(true);
     try {
-      const response = await transitionPayRun(id!, action.key);
+      const response = await transitionPayRun(id!, action.key, payload);
       setRun(response.data);
       load();
     } catch (err: any) {
@@ -205,8 +216,25 @@ export default function PayRunDetailPage() {
     );
   }
 
-  const actions = run.status === 'CALCULATED' && run.returned_by
-    ? [{ key: 'recalculate', label: 'Recalculate', icon: CalculatorIcon, color: 'bg-indigo-600 hover:bg-indigo-700', confirm: 'Recalculate using the inputs frozen when this run was locked?' }]
+  const hasFailedCalculations = employees.some((employee) => employee.status === 'ERROR');
+  const actions = run.status === 'CALCULATED'
+    ? (run.returned_by || hasFailedCalculations
+      ? [{
+          key: 'recalculate',
+          label: run.returned_by ? 'Recalculate' : 'Retry Calculation',
+          icon: CalculatorIcon,
+          color: 'bg-indigo-600 hover:bg-indigo-700',
+          confirm: run.returned_by
+            ? 'Refresh attendance and leave, then recalculate this returned run?'
+            : 'Retry payroll calculations using the inputs frozen when this run was locked?',
+        }]
+      : [{
+          key: 'refresh-calculation',
+          label: 'Refresh Calculation',
+          icon: CalculatorIcon,
+          color: 'bg-indigo-600 hover:bg-indigo-700',
+          confirm: 'Recalculate all employees using current salary, statutory, reimbursement, and finalized/paid payroll data? Locked attendance and leave snapshots will stay unchanged.',
+        }, ...(ACTIONS.CALCULATED || [])])
     : run.status === 'FINALIZED' && !paymentBatches.some((batch) => batch.status === 'RECONCILED')
       ? []
     : run.status === 'UNDER_REVIEW' && !run.can_current_user_approve
@@ -258,7 +286,12 @@ export default function PayRunDetailPage() {
       )}
       {run.status === 'LOCKED' && employees.length > 0 && employees.every((employee) => employee.status === 'PENDING') && (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
-          Employees and attendance inputs are loaded. Choose <strong>Calculate</strong> to calculate salary, deductions, reimbursements, and net pay.
+          Employees and attendance inputs are loaded. Choose <strong>Calculate</strong> to continue, or <strong>Reopen Inputs</strong> to refresh the employee list and locked attendance before calculation.
+        </div>
+      )}
+      {run.status === 'CALCULATED' && hasFailedCalculations && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {employees.filter((employee) => employee.status === 'ERROR').length} employee calculation(s) failed. Review the employee error below, then choose <strong>Retry Calculation</strong> after the issue is corrected. Locked attendance and leave inputs will be preserved.
         </div>
       )}
 

@@ -361,6 +361,7 @@ import PayRunDetailPage from './pages/payroll/runs/PayRunDetailPage';
 import CalculatePreviewPage from './pages/payroll/preview/CalculatePreviewPage';
 import PayrollSettingsPage from './pages/payroll/settings/PayrollSettingsPage';
 import PayslipsPage from './pages/payroll/payslips/PayslipsPage';
+import StatutoryExportsPage from './pages/payroll/statutory/StatutoryExportsPage';
 
 export default function App() {
   return (
@@ -1136,6 +1137,7 @@ export default function App() {
   <Route path="runs/:id" element={<PayRunDetailPage />} />
   <Route path="preview" element={<CalculatePreviewPage />} />
   <Route path="settings" element={<PayrollSettingsPage />} />
+  <Route path="statutory-exports" element={<StatutoryExportsPage />} />
 </Route>
           {/* ==================== FALLBACKS ==================== */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />

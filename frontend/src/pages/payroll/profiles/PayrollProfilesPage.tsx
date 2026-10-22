@@ -44,8 +44,8 @@ export default function PayrollProfilesPage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Bank & Payroll Profiles</h2>
-          <p className="text-sm text-gray-500">One row per employee, including employees without bank profiles. Edit the current details or open History to review previous versions.</p>
+          <h2 className="text-lg font-semibold text-gray-900">Employee Tax & Bank Profiles</h2>
+          <p className="text-sm text-gray-500">Set each employee's Old or New tax regime and Indian residency status here. These settings determine which TDS rule and resident rebate payroll uses. Bank and tax profile changes are effective-dated.</p>
         </div>
       </div>
 
@@ -67,6 +67,7 @@ export default function PayrollProfilesPage() {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Account</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">IFSC</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Tax Regime</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Tax Residency</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Version</th>
                   <th className="px-4 py-3" />
                 </tr>
@@ -87,6 +88,9 @@ export default function PayrollProfilesPage() {
                         {p.tax_regime || 'NEW'}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-center text-xs">
+                      {p.has_current_profile ? (p.tax_resident === true ? <span className="text-green-700">Resident</span> : p.tax_resident === false ? <span className="text-gray-600">Non-resident</span> : <span className="font-medium text-amber-700">Not confirmed</span>) : <span className="text-amber-700">Profile required</span>}
+                    </td>
                     <td className="px-4 py-3 text-center text-sm">
                       <span className={p.has_current_profile ? 'text-green-700' : 'text-gray-500'}>{p.has_current_profile ? 'Current' : p.has_profile_history ? 'No current profile' : 'No profile'}</span>
                       <div className="mt-0.5 text-xs text-gray-400">
@@ -97,7 +101,7 @@ export default function PayrollProfilesPage() {
                       <div className="flex items-center justify-end gap-1">
                         {p.has_current_profile ? <button
                           onClick={() => { setEditing({ ...p, id: p.profile_id, employee: p.employee }); setModalOpen(true); }}
-                          title={`Edit current bank profile for ${p.employee_code}`}
+                          title={`Edit tax and bank profile for ${p.employee_code}`}
                           className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 transition"
                         ><PencilSquareIcon className="h-4 w-4" /></button> : <button
                           onClick={() => {
@@ -106,11 +110,11 @@ export default function PayrollProfilesPage() {
                             setModalOpen(true);
                           }}
                           className="rounded-lg px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
-                        >{p.has_profile_history ? 'Add current' : 'Add bank details'}</button>}
+                        >{p.has_profile_history ? 'Add current' : 'Set up profile'}</button>}
                         {p.has_profile_history && <button
                           onClick={() => setHistoryFor(p)}
                           className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100"
-                          title={`View bank profile history for ${p.employee_code}`}
+                          title={`View profile history for ${p.employee_code}`}
                         ><ClockIcon className="h-4 w-4" />History</button>}
                       </div>
                     </td>
@@ -142,7 +146,7 @@ export default function PayrollProfilesPage() {
           <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="mb-5 flex items-start justify-between">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Bank profile history</h3>
+                <h3 className="text-lg font-semibold text-gray-900">Tax & bank profile history</h3>
                 <p className="mt-1 text-sm text-gray-500">{historyFor.employee_name} · {historyFor.employee_code}</p>
               </div>
               <button onClick={() => setHistoryFor(null)} className="rounded-lg p-1 text-gray-500 hover:bg-gray-100" aria-label="Close history"><XMarkIcon className="h-5 w-5" /></button>
@@ -157,6 +161,8 @@ export default function PayrollProfilesPage() {
                       <span className="text-xs text-gray-500">{version.effective_from} – {version.effective_to || 'Present'}</span>
                     </div>
                     <div className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                      <div><span className="text-gray-500">Tax regime:</span> {version.tax_regime || 'NEW'}</div>
+                      <div><span className="text-gray-500">Tax residency:</span> {version.tax_resident === true ? 'Resident' : version.tax_resident === false ? 'Non-resident' : 'Not confirmed'}</div>
                       <div><span className="text-gray-500">Bank:</span> {version.bank_name || '—'}</div>
                       <div><span className="text-gray-500">Account holder:</span> {version.account_holder_name || '—'}</div>
                       <div><span className="text-gray-500">Account:</span> {version.masked_account || '—'}</div>

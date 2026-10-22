@@ -297,6 +297,7 @@ class PayrollCalculationService:
                 'formula_used': sc.component.formula if not sc.component.is_fixed else '',
                 'is_earning': True,
                 'is_employer_cost': False,
+                'is_taxable': comp.is_taxable,
             }
             total_earnings_full += full_amount
 
@@ -310,10 +311,9 @@ class PayrollCalculationService:
         if special_sc and special_sc.component.id in earnings_full:
             special = earnings_full[special_sc.component.id]
             non_special = total_earnings_full - special['full_amount']
-            fixed_salary_target = assignment.fixed_salary_monthly
             candidate = max(
                 Decimal('0'),
-                (fixed_salary_target if fixed_salary_target is not None else ctc_monthly) - non_special,
+                ctc_monthly - non_special,
             )
             for _ in range(12):
                 candidate_gross = non_special + candidate
@@ -321,10 +321,11 @@ class PayrollCalculationService:
                     structure_comps, basic_full, candidate_gross, ctc_monthly,
                     period_end, parser,
                 )
-                if fixed_salary_target is not None:
-                    next_candidate = max(Decimal('0'), fixed_salary_target - non_special)
-                else:
-                    next_candidate = max(Decimal('0'), ctc_monthly - non_special - er_cost)
+                # Employer statutory costs can change with their effective
+                # rules between assignment creation and this pay period. Keep
+                # the assigned CTC balanced using this period's active rules;
+                # SPECIAL is the structure's balancing line for that purpose.
+                next_candidate = max(Decimal('0'), ctc_monthly - non_special - er_cost)
                 if next_candidate == candidate:
                     break
                 candidate = next_candidate
@@ -406,6 +407,7 @@ class PayrollCalculationService:
         employer_costs = []
         total_deductions = lop_deduction
         total_employer = Decimal('0')
+        tds_breakdown = None
         # LOP and run-specific variable earnings do not change the fixed ESI base.
         esi_wage_base = total_earnings_full
         split_pf = any(sc.component.code in ('EPS_ER', 'EPF_ER') for sc in structure_comps)
@@ -474,12 +476,33 @@ class PayrollCalculationService:
                 rule_ref = pt.get('rule_id') or ''
 
             elif comp.code == 'TDS':
+                taxable_full_month = sum(
+                    (item['full_amount'] for item in earnings_full.values() if item.get('is_taxable')),
+                    Decimal('0'),
+                )
+                taxable_current_period = PayrollCalculationService.prorate_monthly_amount(
+                    taxable_full_month, paid_salary_days, salary_divisor_days_dec,
+                )
                 tds = StatutoryService.calculate_tds(
-                    paid_wage_gross, period_end,
+                    taxable_current_period, taxable_full_month,
+                    run.pay_calendar.period_start if run else date(period_end.year, period_end.month, 1),
+                    period_end,
                     employee=employee, tax_regime=tax_regime,
+                    tax_resident=profile.tax_resident if profile else None,
+                    current_run_id=run.id if run else None,
+                    current_period_basis={
+                        'full_month_taxable_salary': str(taxable_full_month),
+                        'eligible_calendar_days': str(eligible_days),
+                        'lop_days': str(lop_days),
+                        'attendance_payable_days': str(payable_days),
+                        'off_day_worked': str(off_day_worked),
+                        'salary_calendar_day_equivalent': str(paid_salary_days),
+                        'calendar_day_divisor': str(salary_divisor_days_dec),
+                    },
                 )
                 amount = tds['amount']
                 rule_ref = tds.get('rule_id') or ''
+                tds_breakdown = tds
 
             else:
                 # Non-statutory: use structure amount or formula
@@ -560,6 +583,7 @@ class PayrollCalculationService:
             'structure_name': structure.name,
             'structure_version': structure.version,
             'tax_regime': tax_regime,
+            'tds': ({**tds_breakdown, 'amount': str(tds_breakdown['amount'])} if tds_breakdown else None),
             'jurisdiction': jurisdiction,
             'period_start': str(assignment.effective_from),
             'eligible_calendar_days': str(eligible_days),
@@ -571,7 +595,7 @@ class PayrollCalculationService:
             'basic_full_month': str(basic_full),
             'basic_prorated': str(basic_paid),
             'basic_full_month_displayed': str(basic_full),
-            'fixed_salary_monthly': str(assignment.fixed_salary_monthly or total_earnings_full),
+            'fixed_salary_monthly': str(total_earnings_full),
             'fixed_gross_pay_prorated': str(fixed_gross_pay),
             'leave_deduction': str(lop_deduction),
             'non_eligible_days': str(non_eligible_days),
@@ -604,7 +628,7 @@ class PayrollCalculationService:
             'paid_leave_days': day_data['paid_leave_days'],
             'gross_pay': gross_pay,
             'total_earnings': gross_pay,
-            'fixed_salary_monthly': assignment.fixed_salary_monthly or total_earnings_full,
+            'fixed_salary_monthly': total_earnings_full,
             'fixed_gross_pay_prorated': fixed_gross_pay,
             'total_variable_earnings': total_variable_earnings.quantize(QUANTIZE_PAISE),
             'esi_wage_base': esi_wage_base.quantize(QUANTIZE_PAISE),
