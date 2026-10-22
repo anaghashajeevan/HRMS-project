@@ -239,6 +239,8 @@ type RequestRow = {
   run_id: string;
   year: number;
   month: number;
+  run_type?: string;
+  run_type_display?: string;
   status: string;
   reason: string;
   requested_at: string;
@@ -374,7 +376,7 @@ export default function PayslipsPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div><label className={labelCls}>Payroll month *</label>
               <select value={selectedRunId} onChange={(event) => setSelectedRunId(event.target.value)} className={fieldCls}>
-                {requestableMonths.map((item) => <option key={item.run_id} value={item.run_id}>{monthLabel(item.month, item.year)}</option>)}
+                {requestableMonths.map((item) => <option key={item.run_id} value={item.run_id}>{monthLabel(item.month, item.year)} · {item.run_type_display || item.run_type || 'Regular'}</option>)}
               </select>
             </div>
             <div><label className={labelCls}>Reason *</label>
@@ -389,7 +391,7 @@ export default function PayslipsPage() {
         {eligible.length === 0 ? <p className="px-6 pb-8 pt-2 text-sm text-slate-500">{eligibleLoadError || (isPayrollAdmin ? 'No paid payroll month is linked to the employee account used for this admin login. Sign in as the employee included in the run to request their own payslip.' : 'No paid payslips are available yet.')}</p> : <ul className="space-y-3 px-6 pb-6">{eligible.map((item) => {
           const request = item.request as RequestRow | null;
           return <li key={item.run_id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50/70 px-5 py-4 transition hover:bg-indigo-50/50">
-            <div><p className="font-medium text-slate-800">{monthLabel(item.month, item.year)}</p><p className="mt-0.5 text-sm text-slate-500">Net pay: ₹{Number(item.net_pay).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+            <div><p className="font-medium text-slate-800">{monthLabel(item.month, item.year)} · {item.run_type_display || item.run_type || 'Regular'}</p><p className="mt-0.5 text-sm text-slate-500">Net pay: ₹{Number(item.net_pay).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
               {request?.status === 'REJECTED' && request.rejection_reason && <p className="mt-1 text-sm text-rose-600">Rejected: {request.rejection_reason}</p>}
             </div>
             {request?.status === 'APPROVED' ? <button disabled={working === request.id} onClick={() => void download(request.id)} className={primaryBtn}>Download PDF</button>
@@ -402,7 +404,7 @@ export default function PayslipsPage() {
       <section className={card}>
         <div className={cardHead}><h2 className={cardTitle}>My request history</h2></div>
         {myRequests.length === 0 ? <p className="px-6 pb-8 pt-2 text-sm text-slate-500">Your requests will appear here.</p> : <ul className="space-y-3 px-6 pb-6">{myRequests.map((row) => <li key={row.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50/70 px-5 py-4 transition hover:bg-indigo-50/50">
-          <div><p className="font-medium text-slate-800">{monthLabel(row.month, row.year)}</p><p className="mt-0.5 text-sm text-slate-500">Requested {new Date(row.requested_at).toLocaleDateString()}</p>{row.rejection_reason && <p className="mt-1 text-sm text-rose-600">{row.rejection_reason}</p>}
+          <div><p className="font-medium text-slate-800">{monthLabel(row.month, row.year)} · {row.run_type_display || row.run_type || 'Regular'}</p><p className="mt-0.5 text-sm text-slate-500">Requested {new Date(row.requested_at).toLocaleDateString()}</p>{row.rejection_reason && <p className="mt-1 text-sm text-rose-600">{row.rejection_reason}</p>}
             {row.approval_actions?.length ? <ol className="mt-2 space-y-1 text-xs text-slate-500">{row.approval_actions.map((step) => <li key={`${row.id}-${step.step_number}-${step.assigned_to_name}`}>Step {step.step_number}: {step.step_name} — {step.status.toLowerCase().replace('_', ' ')} ({step.assigned_to_name}){step.comments ? ` — ${step.comments}` : ''}</li>)}</ol> : null}
           </div><span className={`rounded-full px-3.5 py-1 text-xs font-medium ${statusClass(row.status)}`}>{row.status.replace('_', ' ')}</span>
         </li>)}</ul>}

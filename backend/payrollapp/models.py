@@ -430,6 +430,10 @@ class PayrollRun(models.Model):
     run_type = models.CharField(
         max_length=20, choices=RUN_TYPE_CHOICES, default='REGULAR',
     )
+    payment_date = models.DateField(
+        null=True, blank=True,
+        help_text='Expected or actual disbursement date. For off-cycle runs, this determines the TDS tax month and financial year; the pay calendar remains the reference period.',
+    )
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default='OPEN',
     )
@@ -677,13 +681,25 @@ class PayrollRunAdjustment(models.Model):
         ('DEDUCTION', 'Employee Deduction'),
         ('REIMBURSEMENT', 'Reimbursement'),
     ]
+    CATEGORY_CHOICES = [
+        ('BONUS', 'Bonus'),
+        ('INCREMENT_DIFFERENCE', 'Increment difference'),
+        ('EARNING_CORRECTION', 'Earning correction'),
+        ('DEDUCTION_CORRECTION', 'Deduction correction'),
+        ('REIMBURSEMENT', 'Reimbursement'),
+        ('OTHER', 'Other adjustment'),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     run = models.ForeignKey(PayrollRun, on_delete=models.CASCADE, related_name='adjustments')
     employee = models.ForeignKey('HRMSapp.Employee', on_delete=models.PROTECT)
     adjustment_type = models.CharField(max_length=24, choices=TYPE_CHOICES)
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='OTHER')
     label = models.CharField(max_length=150)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
+    taxable = models.BooleanField(default=True)
+    reference_period_start = models.DateField(null=True, blank=True)
+    reference_period_end = models.DateField(null=True, blank=True)
     reason = models.TextField(blank=True)
     source_claim = models.OneToOneField(
         'reimbursementapp.ReimbursementClaim', null=True, blank=True,

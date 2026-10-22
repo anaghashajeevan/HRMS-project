@@ -698,7 +698,7 @@ class PayrollRunListSerializer(serializers.ModelSerializer):
     class Meta:
         model = PayrollRun
         fields = [
-            'id', 'pay_calendar', 'pay_calendar_display', 'run_type',
+            'id', 'pay_calendar', 'pay_calendar_display', 'run_type', 'payment_date',
             'status', 'formula_version', 'totals',
             'prepared_by', 'prepared_by_name',
             'approved_by', 'finalized_by',
@@ -715,7 +715,7 @@ class PayrollRunListSerializer(serializers.ModelSerializer):
         return obj.prepared_by.full_name if obj.prepared_by else None
 
     def get_employee_count(self, obj):
-        return obj.employees.count()
+        return obj.employees.exclude(status='EXCLUDED').count()
 
     def get_totals(self, obj):
         return {
@@ -742,7 +742,7 @@ class PayrollRunDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = PayrollRun
         fields = [
-            'id', 'pay_calendar', 'pay_calendar_display', 'run_type',
+            'id', 'pay_calendar', 'pay_calendar_display', 'run_type', 'payment_date',
             'status', 'formula_version', 'totals',
             'prepared_by', 'prepared_by_name',
             'approved_by', 'approved_by_name',
@@ -771,7 +771,7 @@ class PayrollRunDetailSerializer(serializers.ModelSerializer):
         return obj.finalized_by.full_name if obj.finalized_by else None
 
     def get_employee_count(self, obj):
-        return obj.employees.count()
+        return obj.employees.exclude(status='EXCLUDED').count()
 
     def get_totals(self, obj):
         return {
@@ -929,14 +929,34 @@ class PayrollRunAdjustmentSerializer(serializers.ModelSerializer):
         model = PayrollRunAdjustment
         fields = [
             'id', 'run', 'employee', 'employee_name', 'employee_code',
-            'adjustment_type', 'label', 'amount', 'reason', 'created_by', 'created_at',
+            'adjustment_type', 'category', 'label', 'amount', 'taxable',
+            'reference_period_start', 'reference_period_end', 'source_claim',
+            'reason', 'created_by', 'created_at',
         ]
-        read_only_fields = ['id', 'run', 'created_by', 'created_at']
+        read_only_fields = ['id', 'run', 'source_claim', 'created_by', 'created_at']
 
     def validate_amount(self, value):
         if value <= 0:
             raise serializers.ValidationError('Amount must be greater than zero.')
         return value
+
+    def validate(self, attrs):
+        start = attrs.get('reference_period_start')
+        end = attrs.get('reference_period_end')
+        if start and end and start > end:
+            raise serializers.ValidationError({'reference_period_end': 'End date must be on or after the start date.'})
+        adjustment_type = attrs.get('adjustment_type')
+        category = attrs.get('category', 'REIMBURSEMENT' if adjustment_type == 'REIMBURSEMENT' else 'OTHER')
+        attrs['category'] = category
+        if adjustment_type == 'REIMBURSEMENT' and category != 'REIMBURSEMENT':
+            raise serializers.ValidationError({'category': 'Choose Reimbursement for a reimbursement payment.'})
+        if adjustment_type == 'REIMBURSEMENT':
+            attrs['taxable'] = False
+        if adjustment_type == 'DEDUCTION' and category not in ('DEDUCTION_CORRECTION', 'OTHER'):
+            raise serializers.ValidationError({'category': 'Choose Deduction correction for a deduction.'})
+        if adjustment_type == 'VARIABLE_EARNING' and category in ('DEDUCTION_CORRECTION', 'REIMBURSEMENT'):
+            raise serializers.ValidationError({'category': 'Choose an earning category for an earning payment.'})
+        return attrs
 
 
 class PayslipRequestCreateSerializer(serializers.Serializer):
@@ -967,6 +987,8 @@ class PayslipRequestSerializer(serializers.ModelSerializer):
     run_id = serializers.UUIDField(read_only=True)
     year = serializers.IntegerField(source='run.pay_calendar.year', read_only=True)
     month = serializers.IntegerField(source='run.pay_calendar.month', read_only=True)
+    run_type = serializers.CharField(source='run.run_type', read_only=True)
+    run_type_display = serializers.CharField(source='run.get_run_type_display', read_only=True)
     approved_by_name = serializers.CharField(source='approved_by.full_name', read_only=True, allow_null=True)
     approval_actions = PayslipRequestApprovalActionSerializer(many=True, read_only=True)
     can_review = serializers.SerializerMethodField()
@@ -976,7 +998,7 @@ class PayslipRequestSerializer(serializers.ModelSerializer):
         model = PayslipRequest
         fields = [
             'id', 'employee', 'employee_name', 'employee_code', 'run_id',
-            'year', 'month', 'status', 'reason', 'requested_at',
+            'year', 'month', 'run_type', 'run_type_display', 'status', 'reason', 'requested_at',
             'approved_by', 'approved_by_name', 'approved_at', 'rejection_reason',
             'approval_actions', 'can_review', 'is_requester',
         ]
@@ -1005,3 +1027,9 @@ class PayRunCreateSerializer(serializers.Serializer):
     run_type = serializers.ChoiceField(
         choices=['REGULAR', 'OFF_CYCLE', 'FNF', 'ARREARS']
     )
+    payment_date = serializers.DateField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        if attrs.get('run_type') == 'OFF_CYCLE' and not attrs.get('payment_date'):
+            raise serializers.ValidationError({'payment_date': 'A payment date is required for an off-cycle run.'})
+        return attrs

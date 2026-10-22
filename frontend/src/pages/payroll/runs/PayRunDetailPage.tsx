@@ -213,6 +213,7 @@ export default function PayRunDetailPage() {
       <div className="flex items-center justify-center py-20">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
       </div>
+
     );
   }
 
@@ -255,12 +256,19 @@ export default function PayRunDetailPage() {
           </h2>
           <p className="text-sm text-gray-500">
             {run.pay_calendar?.period_start} → {run.pay_calendar?.period_end}
+            {run.run_type === 'OFF_CYCLE' && run.payment_date ? ` · Payment date ${run.payment_date}` : ''}
           </p>
         </div>
         <span className={`inline-flex rounded-lg px-3 py-1.5 text-sm font-semibold ring-1 ring-inset ${STATUS_COLORS[run.status] || ''}`}>
           {run.status}
         </span>
       </div>
+
+      {run.run_type === 'OFF_CYCLE' && (
+        <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-950">
+          <strong>Off-cycle payout:</strong> monthly salary and attendance are not repeated. Lock the run, add each affected employee’s one-time pay item, then calculate, submit through the configured approval steps, finalize, create a separate bank batch, and reconcile payment. Taxable items use the employee’s tax profile and configured TDS rule. Increment differences are one-time payments; update the salary assignment separately for future monthly payroll.
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
@@ -281,12 +289,12 @@ export default function PayRunDetailPage() {
 
       {run.status === 'OPEN' && employees.length === 0 && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          This run is an empty draft. Choose <strong>Lock Inputs &amp; Load Employees</strong> to add employees who have a salary assignment effective during this pay period. Their pay amounts are calculated in the next step.
+          This run is an empty draft. Choose <strong>Lock Inputs &amp; Load Employees</strong> to load employees with a salary assignment effective during this pay period. {run.run_type === 'OFF_CYCLE' ? 'No salary or attendance is calculated unless a one-time pay item is entered for an employee.' : 'Their pay amounts are calculated in the next step.'}
         </div>
       )}
       {run.status === 'LOCKED' && employees.length > 0 && employees.every((employee) => employee.status === 'PENDING') && (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
-          Employees and attendance inputs are loaded. Choose <strong>Calculate</strong> to continue, or <strong>Reopen Inputs</strong> to refresh the employee list and locked attendance before calculation.
+          {run.run_type === 'OFF_CYCLE' ? 'Eligible employees are loaded for one-time pay entry. Add an item only for each employee who should receive this off-cycle payment, then choose Calculate.' : <>Employees and attendance inputs are loaded. Choose <strong>Calculate</strong> to continue, or <strong>Reopen Inputs</strong> to refresh the employee list and locked attendance before calculation.</>}
         </div>
       )}
       {run.status === 'CALCULATED' && hasFailedCalculations && (
@@ -423,7 +431,7 @@ export default function PayRunDetailPage() {
 
       {/* Tab Content */}
       {tab === 'employees' && (
-        <RunEmployeeTable employees={employees} runId={id!} runStatus={run.status} canAdjustReturned={Boolean(run.returned_by)} onReload={load} />
+        <RunEmployeeTable employees={employees} runId={id!} runStatus={run.status} runType={run.run_type} canAdjustReturned={Boolean(run.returned_by)} onReload={load} />
       )}
 
       {tab === 'summary' && (

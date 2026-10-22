@@ -12,7 +12,8 @@ import logging
 import calendar
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
-from django.db.models import Q
+from django.db.models import DateField, Q
+from django.db.models.functions import Coalesce
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +226,7 @@ class StatutoryService:
         current_taxable_amount, monthly_taxable_projection, period_start,
         as_of_date, employee=None, tax_regime='NEW', tax_resident=None,
         current_run_id=None, current_period_basis=None,
+        off_cycle=False,
     ):
         """Project annual salary tax and spread the remaining liability monthly.
 
@@ -245,7 +247,7 @@ class StatutoryService:
         payload = rule.slabs
         financial_year_start = date(as_of_date.year if as_of_date.month >= 4 else as_of_date.year - 1, 4, 1)
         financial_year_end = date(financial_year_start.year + 1, 3, 31)
-        current_period_start = max(period_start, financial_year_start)
+        current_period_start = max(date(as_of_date.year, as_of_date.month, 1), financial_year_start)
         remaining_periods = 1
         future_period_count = 0
         future_salary_projection = Decimal('0')
@@ -258,11 +260,18 @@ class StatutoryService:
                 employee=employee,
                 status__in=('CALCULATED', 'EXCLUDED'),
                 run__status__in=('FINALIZED', 'PAID'),
-                run__pay_calendar__period_end__gte=financial_year_start,
-                run__pay_calendar__period_end__lte=financial_year_end,
             ).exclude(run_id=current_run_id).select_related(
                 'run', 'run__pay_calendar',
             ).prefetch_related('component_details__component')
+            settled_rows = settled_rows.annotate(
+                tax_payment_date=Coalesce(
+                    'run__payment_date', 'run__pay_calendar__pay_date',
+                    output_field=DateField(),
+                ),
+            ).filter(
+                tax_payment_date__gte=financial_year_start,
+                tax_payment_date__lte=financial_year_end,
+            )
 
             for settled_row in settled_rows:
                 saved_tds = (settled_row.input_snapshot or {}).get('tds') or {}
@@ -291,7 +300,8 @@ class StatutoryService:
                         if detail.component_id and detail.component.code == 'TDS'
                     ), Decimal('0'))
 
-                month_key = (settled_row.run.pay_calendar.year, settled_row.run.pay_calendar.month)
+                payment_date = settled_row.tax_payment_date
+                month_key = (payment_date.year, payment_date.month)
                 month_data = settled_by_month.setdefault(month_key, {
                     'taxable_salary': Decimal('0'),
                     'tds': Decimal('0'),
@@ -310,7 +320,7 @@ class StatutoryService:
                     'tds_deducted': str(row_tds),
                 })
                 prior_tds += row_tds
-                if settled_row.run.pay_calendar.period_end < period_start:
+                if payment_date < current_period_start:
                     prior_taxable += row_taxable
 
         assignments = []
@@ -411,11 +421,16 @@ class StatutoryService:
         current_month_other_taxable = (
             current_month_settled['taxable_salary'] if current_month_settled else Decimal('0')
         )
+        offcycle_regular_projection = Decimal('0')
+        if off_cycle and not (current_month_settled and current_month_settled['regular_run_settled']):
+            offcycle_regular_projection = Decimal(str(monthly_taxable_projection or 0))
         projected_salary = (
             prior_taxable + current_month_other_taxable
+            + offcycle_regular_projection
             + Decimal(str(current_taxable_amount)) + future_salary_projection
         )
-        standard_deduction = min(max(Decimal('0'), Decimal(str(payload.get('standard_deduction', 0)))), max(Decimal('0'), projected_salary))
+        standard_deduction_limit = max(Decimal('0'), Decimal(str(payload.get('standard_deduction', 0))))
+        standard_deduction = min(standard_deduction_limit, max(Decimal('0'), projected_salary))
         taxable_income = max(Decimal('0'), projected_salary - standard_deduction)
         tax_slabs = payload['slabs']
         age_band = None
@@ -426,34 +441,48 @@ class StatutoryService:
             age_band = 'super_senior' if age >= 80 else 'senior' if age >= 60 else None
             if age_band:
                 tax_slabs = payload.get('age_slabs', {}).get(age_band, tax_slabs)
-        income_tax = StatutoryService._progressive_tax(taxable_income, tax_slabs)
-
         rebate = payload.get('rebate', {})
-        rebate_amount = Decimal('0')
-        threshold = Decimal(str(rebate.get('threshold', 0)))
-        maximum = Decimal(str(rebate.get('max_amount', 0)))
         rebate_eligible = not rebate.get('resident_only', True) or tax_resident is True
-        if rebate_eligible and taxable_income <= threshold:
-            rebate_amount = min(income_tax, maximum)
-        elif rebate_eligible and rebate.get('marginal_relief', False) and taxable_income > threshold:
-            rebate_amount = min(maximum, max(Decimal('0'), income_tax - (taxable_income - threshold)))
-
-        tax_after_rebate = max(Decimal('0'), income_tax - rebate_amount)
-        surcharge = Decimal('0')
-        for band in payload.get('surcharge', []):
-            lower = Decimal(str(band.get('min', 0)))
-            upper = Decimal(str(band['max'])) if band.get('max') is not None else None
-            if taxable_income >= lower and (upper is None or taxable_income <= upper):
-                surcharge = tax_after_rebate * Decimal(str(band.get('rate', 0))) / Decimal('100')
-                cap = payload.get('surcharge_cap_rate')
-                if cap is not None:
-                    surcharge = min(surcharge, income_tax * Decimal(str(cap)) / Decimal('100'))
-                break
-
         cess_rate = Decimal(str(payload.get('cess_rate', 4)))
-        annual_tax = (tax_after_rebate + surcharge) * (Decimal('1') + cess_rate / Decimal('100'))
-        annual_tax = annual_tax.quantize(Decimal('1'), rounding=ROUND_HALF_UP)
-        amount = max(Decimal('0'), annual_tax - prior_tds) / Decimal(remaining_periods)
+        def annual_tax_for(income):
+            standard = min(standard_deduction_limit, max(Decimal('0'), income))
+            taxable = max(Decimal('0'), income - standard)
+            base_tax = StatutoryService._progressive_tax(taxable, tax_slabs)
+            tax_rebate = Decimal('0')
+            threshold = Decimal(str(rebate.get('threshold', 0)))
+            maximum = Decimal(str(rebate.get('max_amount', 0)))
+            if rebate_eligible and taxable <= threshold:
+                tax_rebate = min(base_tax, maximum)
+            elif rebate_eligible and rebate.get('marginal_relief', False) and taxable > threshold:
+                tax_rebate = min(maximum, max(Decimal('0'), base_tax - (taxable - threshold)))
+            after_rebate = max(Decimal('0'), base_tax - tax_rebate)
+            extra = Decimal('0')
+            for band in payload.get('surcharge', []):
+                lower = Decimal(str(band.get('min', 0)))
+                upper = Decimal(str(band['max'])) if band.get('max') is not None else None
+                if taxable >= lower and (upper is None or taxable <= upper):
+                    extra = after_rebate * Decimal(str(band.get('rate', 0))) / Decimal('100')
+                    cap = payload.get('surcharge_cap_rate')
+                    if cap is not None:
+                        extra = min(extra, base_tax * Decimal(str(cap)) / Decimal('100'))
+                    break
+            annual = ((after_rebate + extra) * (Decimal('1') + cess_rate / Decimal('100'))).quantize(
+                Decimal('1'), rounding=ROUND_HALF_UP,
+            )
+            return annual, base_tax, tax_rebate, extra
+
+        annual_tax, income_tax, rebate_amount, surcharge = annual_tax_for(projected_salary)
+        annual_tax_without_offcycle = None
+        if off_cycle:
+            # Withhold the estimated incremental annual liability caused by
+            # this one-time taxable payment. Regular payroll later spreads any
+            # remaining annual liability across the remaining salary periods.
+            annual_tax_without_offcycle = annual_tax_for(
+                max(Decimal('0'), projected_salary - Decimal(str(current_taxable_amount))),
+            )[0]
+            amount = max(Decimal('0'), annual_tax - annual_tax_without_offcycle)
+        else:
+            amount = max(Decimal('0'), annual_tax - prior_tds) / Decimal(remaining_periods)
         amount = amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         return {
             'amount': amount, 'rule_id': str(rule.id), 'rule_name': rule.name,
@@ -463,6 +492,7 @@ class StatutoryService:
             'financial_year_end': str(financial_year_end),
             'prior_taxable_salary': str(prior_taxable),
             'current_month_other_settled_taxable_salary': str(current_month_other_taxable),
+            'current_month_regular_salary_projection': str(offcycle_regular_projection),
             'current_period_taxable_salary': str(current_taxable_amount),
             'current_period_basis': current_period_basis or {},
             'monthly_taxable_projection': str(monthly_taxable_projection),
@@ -475,6 +505,10 @@ class StatutoryService:
             'income_tax_before_rebate': str(income_tax),
             'rebate': str(rebate_amount), 'surcharge': str(surcharge),
             'cess_rate': str(cess_rate), 'annual_tax': str(annual_tax),
+            'annual_tax_without_offcycle': (
+                str(annual_tax_without_offcycle)
+                if annual_tax_without_offcycle is not None else None
+            ),
             'prior_tds': str(prior_tds),
             'remaining_periods': remaining_periods,
             'employee_declarations_included': False,

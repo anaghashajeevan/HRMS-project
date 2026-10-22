@@ -29,6 +29,7 @@ def generate_payslip_pdf(run_employee_id):
     ).get(id=run_employee_id, status='CALCULATED', run__status__in=['FINALIZED', 'PAID'])
     employee = row.employee
     calendar = row.run.pay_calendar
+    is_offcycle = row.run.run_type == 'OFF_CYCLE'
 
     profile = employee.payroll_profiles.filter(is_active=True).order_by('-effective_from').first()
     account = (profile.bank_account if profile else '') or getattr(employee, 'bank_account_encrypted', '') or ''
@@ -50,16 +51,19 @@ def generate_payslip_pdf(run_employee_id):
         fontSize=8, leading=10, spaceAfter=0,
     )
     story = [
-        Paragraph('PAYSLIP', title),
-        Paragraph(f"Pay period: {month_calendar.month_name[calendar.month]} {calendar.year}", styles['Heading2']),
+        Paragraph('OFF-CYCLE PAYSLIP' if is_offcycle else 'PAYSLIP', title),
+        Paragraph(f"{'Payment period' if is_offcycle else 'Pay period'}: {month_calendar.month_name[calendar.month]} {calendar.year}", styles['Heading2']),
         Spacer(1, 5 * mm),
     ]
 
     employee_rows = [
         ['Employee', employee.full_name, 'Employee ID', employee.employee_id],
-        ['Calendar days', str(row.days_in_month), 'Payable days', str(row.payable_days)],
-        ['LOP / absent', str(row.lop_days), 'Paid leave', str(day_summary.get('paid_leave', '0'))],
-        ['Off-day work', str(day_summary.get('off_day_worked', 0)), 'Salary divisor', f"{row.salary_divisor_days or row.days_in_month} calendar days"],
+        ['Run type', row.run.get_run_type_display(), 'Payment date', str(row.run.payment_date or calendar.pay_date)],
+        *([] if is_offcycle else [
+            ['Calendar days', str(row.days_in_month), 'Payable days', str(row.payable_days)],
+            ['LOP / absent', str(row.lop_days), 'Paid leave', str(day_summary.get('paid_leave', '0'))],
+            ['Off-day work', str(day_summary.get('off_day_worked', 0)), 'Salary divisor', f"{row.salary_divisor_days or row.days_in_month} calendar days"],
+        ]),
         ['Bank account', _masked_account(account), 'IFSC', (ifsc or 'Not provided')],
     ]
     info = Table(employee_rows, colWidths=[30 * mm, 58 * mm, 30 * mm, 58 * mm])
@@ -108,11 +112,11 @@ def generate_payslip_pdf(run_employee_id):
         ('PADDING', (0, 0), (-1, -1), 7),
     ]))
     story.extend([detail_table, Spacer(1, 3 * mm), Paragraph(
-        'Salary structure components are shown at their assigned monthly amounts; unpaid days appear as a separate deduction.',
+        'Off-cycle items are separate one-time payments; monthly salary and attendance are not repeated.' if is_offcycle else 'Salary structure components are shown at their assigned monthly amounts; unpaid days appear as a separate deduction.',
         styles['Italic'],
     ), Spacer(1, 5 * mm), Paragraph(
         'This is a computer-generated payslip. Bank account details are masked for security.',
         styles['Italic'],
     )])
     doc.build(story)
-    return buffer.getvalue(), f"payslip_{employee.employee_id}_{calendar.year}_{calendar.month:02d}.pdf"
+    return buffer.getvalue(), f"payslip_{employee.employee_id}_{calendar.year}_{calendar.month:02d}_{row.run.run_type.lower()}_{str(row.run_id)[:8]}.pdf"

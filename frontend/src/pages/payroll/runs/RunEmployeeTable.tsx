@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { EyeIcon, XCircleIcon, PlusIcon } from '@heroicons/react/24/outline';
-import { createRunAdjustment, excludeRunEmployee, getRunEmployee } from '../../../api/payrollApi';
+import { useEffect, useState } from 'react';
+import { EyeIcon, XCircleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { createRunAdjustment, deleteRunAdjustment, excludeRunEmployee, getRunAdjustments, getRunEmployee } from '../../../api/payrollApi';
 
 const fmt = (v: number | string | null) =>
   v != null ? Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
@@ -16,21 +16,34 @@ interface Props {
   employees: any[];
   runId: string;
   runStatus: string;
+  runType?: string;
   canAdjustReturned?: boolean;
   onReload: () => void;
 }
 
-export default function RunEmployeeTable({ employees, runId, runStatus, canAdjustReturned = false, onReload }: Props) {
+export default function RunEmployeeTable({ employees, runId, runStatus, runType = 'REGULAR', canAdjustReturned = false, onReload }: Props) {
   const [detail, setDetail] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [adjustmentEmployee, setAdjustmentEmployee] = useState<any>(null);
-  const [adjustmentType, setAdjustmentType] = useState('VARIABLE_EARNING');
+  const [adjustmentCategory, setAdjustmentCategory] = useState('BONUS');
   const [adjustmentLabel, setAdjustmentLabel] = useState('');
   const [adjustmentAmount, setAdjustmentAmount] = useState('');
   const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [adjustmentTaxable, setAdjustmentTaxable] = useState(true);
+  const [referencePeriodStart, setReferencePeriodStart] = useState('');
+  const [referencePeriodEnd, setReferencePeriodEnd] = useState('');
   const [adjustmentSaving, setAdjustmentSaving] = useState(false);
+  const [adjustments, setAdjustments] = useState<any[]>([]);
   const lockedDayData = detail?.input_snapshot?.locked_inputs?.day_data;
   const tds = detail?.input_snapshot?.tds;
+  const isOffCycleTds = detail?.input_snapshot?.run_type === 'OFF_CYCLE';
+  const loadAdjustments = async () => {
+    try {
+      const response = await getRunAdjustments(runId);
+      setAdjustments(response.data || []);
+    } catch { setAdjustments([]); }
+  };
+  useEffect(() => { void loadAdjustments(); }, [runId, runStatus]);
   const runComponents = detail?.component_details || [];
   const employeePfDeduction = runComponents
     .filter((component: any) => component.component_code === 'PF_EMP')
@@ -92,25 +105,63 @@ export default function RunEmployeeTable({ employees, runId, runStatus, canAdjus
   const saveAdjustment = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!adjustmentEmployee) return;
+    const adjustmentType = adjustmentCategory === 'DEDUCTION_CORRECTION' ? 'DEDUCTION'
+      : adjustmentCategory === 'REIMBURSEMENT' ? 'REIMBURSEMENT' : 'VARIABLE_EARNING';
+    if (runType === 'OFF_CYCLE' && !adjustmentReason.trim()) {
+      alert('A business reason is required for off-cycle pay.');
+      return;
+    }
     setAdjustmentSaving(true);
     try {
       await createRunAdjustment(runId, {
         employee: adjustmentEmployee.employee,
-        adjustment_type: adjustmentType as 'VARIABLE_EARNING' | 'DEDUCTION' | 'REIMBURSEMENT',
+        adjustment_type: adjustmentType,
+        category: adjustmentCategory as any,
         label: adjustmentLabel,
         amount: Number(adjustmentAmount),
+        taxable: adjustmentTaxable,
+        reference_period_start: referencePeriodStart || undefined,
+        reference_period_end: referencePeriodEnd || undefined,
         reason: adjustmentReason,
       });
       setAdjustmentEmployee(null);
       setAdjustmentLabel(''); setAdjustmentAmount(''); setAdjustmentReason('');
+      setReferencePeriodStart(''); setReferencePeriodEnd('');
+      await loadAdjustments();
       onReload();
     } catch (err: any) {
       alert(JSON.stringify(err?.response?.data) || 'Could not save adjustment.');
     } finally { setAdjustmentSaving(false); }
   };
 
+  const removeAdjustment = async (item: any) => {
+    if (!confirm(`Remove “${item.label}” for ${item.employee_name}?`)) return;
+    try {
+      await deleteRunAdjustment(runId, item.id);
+      await loadAdjustments();
+      onReload();
+    } catch (err: any) {
+      alert(JSON.stringify(err?.response?.data) || 'Could not remove pay item.');
+    }
+  };
+
   return (
     <>
+      {adjustments.length > 0 && (
+        <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+          <h3 className="text-sm font-semibold text-gray-900">Run pay items</h3>
+          <div className="mt-2 divide-y divide-gray-100">
+            {adjustments.map((item) => (
+              <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                <div><span className="font-medium text-gray-800">{item.employee_name} · {item.label}</span><span className="ml-2 text-xs text-gray-500">{String(item.category || '').replaceAll('_', ' ')}{item.taxable ? ' · taxable' : ' · non-taxable'}{item.reference_period_start ? ` · ${item.reference_period_start} to ${item.reference_period_end}` : ''}</span></div>
+                <div className="flex items-center gap-3"><span className="font-semibold">₹{fmt(item.amount)}</span>
+                  {(runStatus === 'LOCKED' || (runStatus === 'CALCULATED' && canAdjustReturned)) && !item.source_claim && <button onClick={() => void removeAdjustment(item)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600" title="Remove before calculation"><TrashIcon className="h-4 w-4" /></button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="rounded-2xl bg-white shadow-sm ring-1 ring-gray-100 overflow-hidden">
         {employees.length === 0 ? (
           <div className="py-12 text-center text-sm text-gray-400">No employees in this run.</div>
@@ -120,8 +171,8 @@ export default function RunEmployeeTable({ employees, runId, runStatus, canAdjus
               <thead className="bg-gray-50/60">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Employee</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Payable / Workdays</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">LOP</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">{runType === 'OFF_CYCLE' ? 'Run item' : 'Payable / Workdays'}</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">{runType === 'OFF_CYCLE' ? 'Taxable pay' : 'LOP'}</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Gross</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Deductions</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Net Pay</th>
@@ -137,9 +188,9 @@ export default function RunEmployeeTable({ employees, runId, runStatus, canAdjus
                       <div className="text-xs text-gray-400">{e.employee_code || ''}</div>
                     </td>
                     <td className="px-4 py-3 text-center text-sm text-gray-500">
-                      {e.payable_days != null ? `${e.payable_days}/${e.salary_divisor_days || e.days_in_month}` : '—'}
+                      {runType === 'OFF_CYCLE' ? 'One-time' : e.payable_days != null ? `${e.payable_days}/${e.salary_divisor_days || e.days_in_month}` : '—'}
                     </td>
-                    <td className="px-4 py-3 text-center text-sm text-gray-500">{e.lop_days ?? '—'}</td>
+                    <td className="px-4 py-3 text-center text-sm text-gray-500">{runType === 'OFF_CYCLE' ? (e.status === 'CALCULATED' ? 'As entered' : '—') : e.lop_days ?? '—'}</td>
                     <td className="px-4 py-3 text-right text-sm font-medium">₹{fmt(e.gross_pay)}</td>
                     <td className="px-4 py-3 text-right text-sm text-red-600">₹{fmt(e.total_deductions)}</td>
                     <td className="px-4 py-3 text-right text-sm font-semibold text-green-700">₹{fmt(e.net_pay)}</td>
@@ -176,15 +227,30 @@ export default function RunEmployeeTable({ employees, runId, runStatus, canAdjus
       {adjustmentEmployee && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
           <form onSubmit={saveAdjustment} className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-xl">
-            <div className="font-semibold text-gray-900">Adjustment for {adjustmentEmployee.employee_name}</div>
-            <select className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" value={adjustmentType} onChange={(e) => setAdjustmentType(e.target.value)}>
-              <option value="VARIABLE_EARNING">Variable earning</option>
-              <option value="DEDUCTION">Deduction</option>
-              <option value="REIMBURSEMENT">Reimbursement</option>
-            </select>
+            <div className="font-semibold text-gray-900">{runType === 'OFF_CYCLE' ? 'Add one-time pay for' : 'Adjustment for'} {adjustmentEmployee.employee_name}</div>
+            <label className="block text-xs font-medium text-gray-600">Pay item category
+              <select className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" value={adjustmentCategory} onChange={(e) => {
+                setAdjustmentCategory(e.target.value);
+                if (e.target.value === 'REIMBURSEMENT') setAdjustmentTaxable(false);
+                else setAdjustmentTaxable(true);
+              }}>
+                <option value="BONUS">Bonus</option>
+                <option value="INCREMENT_DIFFERENCE">Increment difference</option>
+                <option value="EARNING_CORRECTION">Earning correction</option>
+                <option value="DEDUCTION_CORRECTION">Deduction correction</option>
+                <option value="REIMBURSEMENT">Reimbursement</option>
+                <option value="OTHER">Other earning</option>
+              </select>
+            </label>
             <input required className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" placeholder="Description" value={adjustmentLabel} onChange={(e) => setAdjustmentLabel(e.target.value)} />
             <input required min="0.01" step="0.01" type="number" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" placeholder="Amount" value={adjustmentAmount} onChange={(e) => setAdjustmentAmount(e.target.value)} />
-            <textarea className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" placeholder="Reason (optional)" value={adjustmentReason} onChange={(e) => setAdjustmentReason(e.target.value)} />
+            {adjustmentCategory === 'INCREMENT_DIFFERENCE' && <div className="grid grid-cols-2 gap-2">
+              <label className="text-xs text-gray-600">Difference from<input required type="date" value={referencePeriodStart} onChange={(e) => setReferencePeriodStart(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-2 text-sm" /></label>
+              <label className="text-xs text-gray-600">Through<input required type="date" value={referencePeriodEnd} onChange={(e) => setReferencePeriodEnd(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-2 text-sm" /></label>
+            </div>}
+            {adjustmentCategory !== 'REIMBURSEMENT' && <label className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={adjustmentTaxable} onChange={(e) => setAdjustmentTaxable(e.target.checked)} />Include in taxable salary projection</label>}
+            <textarea required={runType === 'OFF_CYCLE'} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" placeholder={runType === 'OFF_CYCLE' ? 'Business reason (required)' : 'Reason (optional)'} value={adjustmentReason} onChange={(e) => setAdjustmentReason(e.target.value)} />
+            {runType === 'OFF_CYCLE' && <p className="text-xs leading-5 text-gray-500">This run pays only the item entered here. Monthly salary and attendance are not repeated. Taxable items use the employee’s configured tax regime and TDS rule; maintain a salary assignment separately for future increments.</p>}
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setAdjustmentEmployee(null)} className="rounded-lg px-4 py-2 text-sm text-gray-600 hover:bg-gray-100">Cancel</button>
               <button disabled={adjustmentSaving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{adjustmentSaving ? 'Saving…' : 'Add adjustment'}</button>
@@ -222,7 +288,7 @@ export default function RunEmployeeTable({ employees, runId, runStatus, canAdjus
                   </div>
                 )}
                 {/* Day Summary */}
-                <div className="rounded-xl bg-gray-50 p-4 ring-1 ring-gray-100">
+                {detail.input_snapshot?.run_type !== 'OFF_CYCLE' && <div className="rounded-xl bg-gray-50 p-4 ring-1 ring-gray-100">
                   <h4 className="text-xs font-semibold uppercase text-gray-500 mb-2">Day Summary</h4>
                   <div className="grid grid-cols-4 gap-3 text-sm">
                     <div><span className="text-gray-500">Calendar Days:</span> <span className="font-medium">{detail.days_in_month}</span></div>
@@ -237,7 +303,7 @@ export default function RunEmployeeTable({ employees, runId, runStatus, canAdjus
                       Weekend/holiday attendance counted as extra paid days: {detail.input_snapshot.locked_inputs.day_data.summary.off_day_worked || 0}
                     </p>
                   )}
-                </div>
+                </div>}
 
                 {tds && (
                   <div className="rounded-xl bg-purple-50 p-4 ring-1 ring-purple-100">
@@ -254,8 +320,11 @@ export default function RunEmployeeTable({ employees, runId, runStatus, canAdjus
                               <p className="mb-2 text-xs text-gray-500">Financial year: {tds.financial_year_start} to {tds.financial_year_end}</p>
                               <div className="space-y-1.5">
                                 <div className="flex justify-between gap-3"><span className="text-gray-600">Taxable earnings from earlier finalized/paid months</span><span className="shrink-0 font-medium">₹{fmt(tdsPriorTaxable)}</span></div>
-                                <div className="flex justify-between gap-3"><span className="text-gray-600">Taxable earnings for this pay period</span><span className="shrink-0 font-medium">₹{fmt(tdsCurrentPeriodTaxable)}</span></div>
-                                {tds.current_period_basis && (
+                                <div className="flex justify-between gap-3"><span className="text-gray-600">{detail.input_snapshot?.run_type === 'OFF_CYCLE' ? 'Taxable one-time pay in this run' : 'Taxable earnings for this pay period'}</span><span className="shrink-0 font-medium">₹{fmt(tdsCurrentPeriodTaxable)}</span></div>
+                                {detail.input_snapshot?.run_type === 'OFF_CYCLE' && Number(tds.current_month_regular_salary_projection || 0) > 0 && (
+                                  <div className="flex justify-between gap-3"><span className="text-gray-600">Regular salary projected for this month (no regular run settled yet)</span><span className="shrink-0 font-medium">₹{fmt(tds.current_month_regular_salary_projection)}</span></div>
+                                )}
+                                {tds.current_period_basis && detail.input_snapshot?.run_type !== 'OFF_CYCLE' && (
                                   <div className="my-2 rounded-md bg-purple-50/70 p-2.5 text-xs text-gray-700">
                                     <p className="mb-1 font-semibold text-purple-900">How this pay period’s taxable salary was derived</p>
                                     <p>Full-month taxable salary: ₹{fmt(tds.current_period_basis.full_month_taxable_salary)}</p>
@@ -312,10 +381,21 @@ export default function RunEmployeeTable({ employees, runId, runStatus, canAdjus
                             </div>
                           )}
                           <div className="mt-3 grid grid-cols-2 gap-3">
-                            <div><span className="text-gray-600">Projected annual tax (using this regime's effective rule):</span> <span className="font-medium">₹{fmt(tds.annual_tax)}</span></div>
-                            <div><span className="text-gray-600">TDS already deducted in other finalized/paid payrolls this financial year:</span> <span className="font-medium">₹{fmt(tds.prior_tds)}</span></div>
-                            <div><span className="text-gray-600">Periods left, including current:</span> <span className="font-medium">{tds.remaining_periods}</span></div>
-                            <div className="col-span-2 border-t border-purple-100 pt-2"><span className="text-gray-600">TDS for this run = max(projected annual tax − TDS already deducted in finalized/paid payrolls, 0) ÷ remaining unpaid payroll periods (including this run):</span> <span className="font-semibold">₹{fmt(tds.amount)}</span></div>
+                            {isOffCycleTds ? (
+                              <>
+                                <div><span className="text-gray-600">Projected annual tax including this payment:</span> <span className="font-medium">{'\u20B9'}{fmt(tds.annual_tax)}</span></div>
+                                <div><span className="text-gray-600">Projected annual tax without this payment:</span> <span className="font-medium">{'\u20B9'}{fmt(tds.annual_tax_without_offcycle)}</span></div>
+                                <div className="col-span-2 border-t border-purple-100 pt-2"><span className="text-gray-600">Off-cycle TDS = tax with this payment minus tax without it:</span> <span className="font-semibold">{'\u20B9'}{fmt(tds.amount)}</span></div>
+                                <p className="col-span-2 text-xs text-gray-500">This is the estimated additional annual tax caused by this one-time payment. It is not divided across monthly payroll periods. Regular payroll recalculates the remaining annual tax when it runs.</p>
+                              </>
+                            ) : (
+                              <>
+                                <div><span className="text-gray-600">Projected annual tax (using this regime's effective rule):</span> <span className="font-medium">{'\u20B9'}{fmt(tds.annual_tax)}</span></div>
+                                <div><span className="text-gray-600">TDS already deducted in other finalized/paid payrolls this financial year:</span> <span className="font-medium">{'\u20B9'}{fmt(tds.prior_tds)}</span></div>
+                                <div><span className="text-gray-600">Regular payroll periods left, including current:</span> <span className="font-medium">{tds.remaining_periods}</span></div>
+                                <div className="col-span-2 border-t border-purple-100 pt-2"><span className="text-gray-600">Regular-run TDS = max(projected annual tax minus TDS already deducted, 0) divided by remaining regular payroll periods:</span> <span className="font-semibold">{'\u20B9'}{fmt(tds.amount)}</span></div>
+                              </>
+                            )}
                           </div>
                         </div>
                         <p className="mt-2 text-xs text-purple-900">

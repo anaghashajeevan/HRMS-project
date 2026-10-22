@@ -10,6 +10,7 @@ import logging
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
+from django.db.models import Q
 from django.db import transaction
 from django.utils import timezone
 
@@ -127,8 +128,52 @@ class PayrollCalculationService:
         period_end = run.pay_calendar.period_end
         days_in_month = run.pay_calendar.days_in_month
 
-        # Compute
+        # Off-cycle runs pay only explicitly entered one-time adjustments; they
+        # never repeat the employee's monthly salary or attendance calculation.
         run_emp = PayrollRunEmployee.objects.filter(run=run, employee=employee).first()
+        if run.run_type == 'OFF_CYCLE':
+            result = PayrollCalculationService._compute_offcycle(run, employee, run_emp)
+            if not result.get('ok'):
+                run_emp, _ = PayrollRunEmployee.objects.update_or_create(
+                    run=run, employee=employee,
+                    defaults={
+                        'status': 'ERROR', 'error_message': result.get('error', 'Off-cycle calculation failed.'),
+                        'days_in_month': days_in_month,
+                    },
+                )
+                return run_emp
+            run_emp, _ = PayrollRunEmployee.objects.update_or_create(
+                run=run, employee=employee,
+                defaults={
+                    'salary_assignment_id': result['assignment_id'],
+                    'eligible_calendar_days': 0, 'days_in_month': days_in_month,
+                    'salary_divisor_days': 0, 'payable_days': 0, 'lop_days': 0,
+                    'paid_leave_days': 0, 'gross_pay': result['gross_pay'],
+                    'total_earnings': result['total_earnings'],
+                    'total_deductions': result['total_deductions'],
+                    'total_employer_cost': result['total_employer_cost'],
+                    'total_reimbursements': result['total_reimbursements'],
+                    'total_ctc': result['total_ctc'], 'net_pay': result['net_pay'],
+                    'input_snapshot': result['input_snapshot'],
+                    'status': 'CALCULATED', 'error_message': '',
+                },
+            )
+            run_emp.component_details.all().delete()
+            for component in result['components']:
+                PayrollRunComponentDetail.objects.create(
+                    run_employee=run_emp,
+                    component_id=component.get('component_id'),
+                    component_label=component.get('name', ''),
+                    amount=component['amount'],
+                    is_earning=component['is_earning'],
+                    is_employer_cost=component.get('is_employer_cost', False),
+                    is_reimbursement=component.get('is_reimbursement', False),
+                    formula_used=component.get('formula_used', ''),
+                    rule_reference=component.get('rule_reference', ''),
+                )
+            return run_emp
+
+        # Compute regular monthly, arrears, and F&F runs through the salary engine.
         locked_inputs = (run_emp.input_snapshot or {}).get('locked_inputs', {}) if run_emp else {}
         result = PayrollCalculationService.preview_calculate(
             employee, period_start, period_end, days_in_month, run=run,
@@ -198,6 +243,142 @@ class PayrollCalculationService:
 
         return run_emp
 
+    @staticmethod
+    def _compute_offcycle(run, employee, run_employee):
+        """Compute an off-cycle payout without repeating ordinary monthly pay."""
+        from ..models import EmployeePayrollProfile, PayrollRunAdjustment
+        from .assignment_service import AssignmentService
+
+        reference_period_start = run.pay_calendar.period_start
+        reference_period_end = run.pay_calendar.period_end
+        payment_date = run.payment_date or run.pay_calendar.pay_date
+        payment_period_start = date(payment_date.year, payment_date.month, 1)
+        assignment = run_employee.salary_assignment if run_employee else None
+        if assignment is None:
+            assignment = AssignmentService.get_assignment_for_period(
+                employee, reference_period_start, reference_period_end,
+            ).order_by('-effective_from').first()
+        if assignment is None:
+            return {'ok': False, 'error': 'An active salary assignment is required for off-cycle tax calculation.'}
+
+        adjustments = list(PayrollRunAdjustment.objects.filter(run=run, employee=employee))
+        if not adjustments:
+            return {'ok': False, 'error': 'Add at least one bonus, increment difference, correction, or reimbursement before calculating this off-cycle run.'}
+
+        taxable_earnings = sum((
+            item.amount for item in adjustments
+            if item.adjustment_type == 'VARIABLE_EARNING' and item.taxable
+        ), Decimal('0'))
+        gross_pay = sum((
+            item.amount for item in adjustments if item.adjustment_type == 'VARIABLE_EARNING'
+        ), Decimal('0')).quantize(QUANTIZE_PAISE, rounding=ROUND_HALF_UP)
+        total_reimbursements = sum((
+            item.amount for item in adjustments if item.adjustment_type == 'REIMBURSEMENT'
+        ), Decimal('0')).quantize(QUANTIZE_PAISE, rounding=ROUND_HALF_UP)
+        total_deductions = sum((
+            item.amount for item in adjustments if item.adjustment_type == 'DEDUCTION'
+        ), Decimal('0')).quantize(QUANTIZE_PAISE, rounding=ROUND_HALF_UP)
+        components = []
+        adjustment_snapshot = []
+        for item in adjustments:
+            adjustment_snapshot.append({
+                'id': str(item.id), 'category': item.category, 'label': item.label,
+                'amount': str(item.amount), 'taxable': item.taxable,
+                'reference_period_start': str(item.reference_period_start) if item.reference_period_start else None,
+                'reference_period_end': str(item.reference_period_end) if item.reference_period_end else None,
+                'reason': item.reason,
+            })
+            if item.adjustment_type == 'VARIABLE_EARNING':
+                item_label = f'{item.get_category_display()}: {item.label}'
+                if item.reference_period_start and item.reference_period_end:
+                    item_label += f' ({item.reference_period_start} to {item.reference_period_end})'
+                components.append({
+                    'component_id': None, 'name': item_label, 'amount': item.amount,
+                    'is_earning': True, 'is_employer_cost': False,
+                })
+            elif item.adjustment_type == 'DEDUCTION':
+                components.append({
+                    'component_id': None, 'name': item.label, 'amount': item.amount,
+                    'is_earning': False, 'is_employer_cost': False,
+                })
+            elif item.adjustment_type == 'REIMBURSEMENT':
+                components.append({
+                    'component_id': None, 'name': item.label, 'amount': item.amount,
+                    'is_earning': False, 'is_employer_cost': False, 'is_reimbursement': True,
+                })
+
+        profile = EmployeePayrollProfile.objects.filter(
+            employee=employee, is_active=True, effective_from__lte=payment_date,
+        ).filter(
+            __import__('django.db.models', fromlist=['Q']).Q(effective_to__isnull=True)
+            | __import__('django.db.models', fromlist=['Q']).Q(effective_to__gte=payment_date),
+        ).order_by('-effective_from').first()
+        tax_regime = profile.tax_regime if profile else 'NEW'
+        tax_assignment = AssignmentService.get_assignment_for_period(
+            employee, payment_period_start, payment_date,
+        ).order_by('-effective_from').first() or assignment
+        structure_components = tax_assignment.structure.components.select_related('component').all()
+        tds_component = next((
+            item for item in structure_components if item.component.code == 'TDS'
+        ), None)
+        tds_result = None
+        if taxable_earnings > 0:
+            if tds_component is None:
+                return {'ok': False, 'error': 'This employee has taxable off-cycle earnings, but their active salary structure has no TDS component. Add/configure TDS before calculating.'}
+            taxable_monthly_projection = Decimal('0')
+            breakdown = AssignmentService.preview_breakdown(
+                tax_assignment.structure, tax_assignment.ctc_monthly, as_of_date=payment_date,
+            )
+            taxable_monthly_projection = sum((
+                Decimal(str(item.get('amount', 0))) for item in breakdown.get('earnings', [])
+                if item.get('is_taxable', True)
+            ), Decimal('0'))
+            tds_result = StatutoryService.calculate_tds(
+                taxable_earnings, taxable_monthly_projection,
+                payment_period_start, payment_date, employee=employee,
+                tax_regime=tax_regime,
+                tax_resident=profile.tax_resident if profile else None,
+                current_run_id=run.id,
+                current_period_basis={
+                    'run_type': 'OFF_CYCLE',
+                    'taxable_offcycle_earnings': str(taxable_earnings),
+                    'regular_monthly_taxable_projection': str(taxable_monthly_projection),
+                    'reference_period_start': str(reference_period_start),
+                    'reference_period_end': str(reference_period_end),
+                    'payment_date': str(payment_date),
+                },
+                off_cycle=True,
+            )
+            if tds_result.get('reason'):
+                return {'ok': False, 'error': f"TDS could not be calculated for this taxable off-cycle pay: {tds_result['reason']}"}
+            tds_amount = tds_result['amount'].quantize(QUANTIZE_PAISE, rounding=ROUND_HALF_UP)
+            total_deductions += tds_amount
+            components.append({
+                'component_id': tds_component.component_id,
+                'name': tds_component.component.name,
+                'amount': tds_amount, 'is_earning': False,
+                'is_employer_cost': False, 'rule_reference': tds_result.get('rule_id') or '',
+            })
+
+        total_deductions = total_deductions.quantize(QUANTIZE_PAISE, rounding=ROUND_HALF_UP)
+        net_pay = (gross_pay + total_reimbursements - total_deductions).quantize(QUANTIZE_PAISE, rounding=ROUND_HALF_UP)
+        snapshot = {
+            'run_type': 'OFF_CYCLE', 'salary_assignment_id': str(assignment.id),
+            'structure_name': assignment.structure.name, 'tax_regime': tax_regime,
+            'adjustments': adjustment_snapshot,
+            'tds': ({**tds_result, 'amount': str(tds_result['amount'])} if tds_result else None),
+            'offcycle_taxable_earnings': str(taxable_earnings),
+            'fixed_gross_pay_prorated': '0', 'esi_wage_base': '0',
+            'formula_version': FORMULA_VERSION, 'frozen_at': timezone.now().isoformat(),
+        }
+        return {
+            'ok': True, 'assignment_id': str(assignment.id),
+            'gross_pay': gross_pay, 'total_earnings': gross_pay,
+            'total_deductions': total_deductions, 'total_employer_cost': Decimal('0'),
+            'total_reimbursements': total_reimbursements, 'total_ctc': gross_pay,
+            'net_pay': net_pay, 'components': components, 'input_snapshot': snapshot,
+        }
+
     # ==========================================================================
     # CORE COMPUTATION
     # ==========================================================================
@@ -236,6 +417,8 @@ class PayrollCalculationService:
         profile = EmployeePayrollProfile.objects.filter(
             employee=employee, is_active=True,
             effective_from__lte=period_end,
+        ).filter(
+            Q(effective_to__isnull=True) | Q(effective_to__gte=period_end),
         ).order_by('-effective_from').first()
 
         tax_regime = profile.tax_regime if profile else 'NEW'
@@ -408,6 +591,14 @@ class PayrollCalculationService:
         total_deductions = lop_deduction
         total_employer = Decimal('0')
         tds_breakdown = None
+        from ..models import PayrollRunAdjustment
+        run_adjustments = list(PayrollRunAdjustment.objects.filter(
+            run=run, employee=employee,
+        )) if run else []
+        taxable_adjustments = sum((
+            item.amount for item in run_adjustments
+            if item.adjustment_type == 'VARIABLE_EARNING' and item.taxable
+        ), Decimal('0'))
         # LOP and run-specific variable earnings do not change the fixed ESI base.
         esi_wage_base = total_earnings_full
         split_pf = any(sc.component.code in ('EPS_ER', 'EPF_ER') for sc in structure_comps)
@@ -483,15 +674,24 @@ class PayrollCalculationService:
                 taxable_current_period = PayrollCalculationService.prorate_monthly_amount(
                     taxable_full_month, paid_salary_days, salary_divisor_days_dec,
                 )
+                taxable_current_period += taxable_adjustments
+                tax_payment_date = (
+                    (run.payment_date or run.pay_calendar.pay_date)
+                    if run else period_end
+                )
+                tax_period_start = date(
+                    tax_payment_date.year, tax_payment_date.month, 1,
+                )
                 tds = StatutoryService.calculate_tds(
                     taxable_current_period, taxable_full_month,
-                    run.pay_calendar.period_start if run else date(period_end.year, period_end.month, 1),
-                    period_end,
+                    tax_period_start,
+                    tax_payment_date,
                     employee=employee, tax_regime=tax_regime,
                     tax_resident=profile.tax_resident if profile else None,
                     current_run_id=run.id if run else None,
                     current_period_basis={
                         'full_month_taxable_salary': str(taxable_full_month),
+                        'taxable_run_adjustments': str(taxable_adjustments),
                         'eligible_calendar_days': str(eligible_days),
                         'lop_days': str(lop_days),
                         'attendance_payable_days': str(payable_days),
@@ -542,8 +742,7 @@ class PayrollCalculationService:
         total_variable_earnings = Decimal('0')
         # Run adjustments are explicit month-only lines. Approved reimbursements
         # add to payout but remain outside CTC and gross earnings.
-        from ..models import PayrollRunAdjustment
-        adjustments = list(PayrollRunAdjustment.objects.filter(run=run, employee=employee)) if run else []
+        adjustments = run_adjustments
         total_reimbursements = Decimal('0')
         for adjustment in adjustments:
             amount = adjustment.amount.quantize(QUANTIZE_PAISE, rounding=ROUND_HALF_UP)

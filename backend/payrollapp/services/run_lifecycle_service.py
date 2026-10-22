@@ -73,7 +73,7 @@ class RunLifecycleService:
     # ──────────────────────────────────────────
     @classmethod
     @transaction.atomic
-    def create_run(cls, pay_calendar_id, run_type, user):
+    def create_run(cls, pay_calendar_id, run_type, user, payment_date=None):
         """Create a new PayrollRun in OPEN status."""
         cal = PayCalendar.objects.select_for_update().get(id=pay_calendar_id)
 
@@ -91,13 +91,15 @@ class RunLifecycleService:
         run = PayrollRun.objects.create(
             pay_calendar=cal,
             run_type=run_type,
+            payment_date=payment_date,
             status='OPEN',
             formula_version='1.0',
             prepared_by=cls._actor_employee(user),
         )
 
         cls._audit(run, user, 'RUN_CREATED', None, 'OPEN',
-                   reason=f'{run_type} run created')
+                   reason=f'{run_type} run created',
+                   new_values={'payment_date': str(payment_date) if payment_date else None})
 
         return run
 
@@ -158,7 +160,7 @@ class RunLifecycleService:
         period_end = cal.period_end
 
         # Lock the calendar
-        if cal.status != 'LOCKED':
+        if run.run_type != 'OFF_CYCLE' and cal.status != 'LOCKED':
             cal.status = 'LOCKED'
             cal.input_locked_at = timezone.now()
             cal.save(update_fields=['status', 'input_locked_at'])
@@ -182,7 +184,7 @@ class RunLifecycleService:
             employee_status = (emp.status or '').strip().upper()
             if employee_status not in ('ACTIVE', 'PROBATION'):
                 # Include if FNF run or if they were active during period
-                if run.run_type != 'FNF':
+                if run.run_type not in ('FNF', 'OFF_CYCLE'):
                     # For regular runs: skip terminated employees
                     # unless their DOE is within or after period_start
                     if emp.date_of_exit and emp.date_of_exit < period_start:
@@ -219,9 +221,18 @@ class RunLifecycleService:
         bulk = []
         for emp_id, assignment in emp_assignment_map.items():
             employee = assignment.employee
-            day_data = DayReconciliationService.reconcile(
-                employee, period_start, period_end,
-                saturday_is_working=cal.saturday_is_working,
+            day_data = (
+                {
+                    'salary_divisor_days': 0, 'eligible_calendar_days': Decimal('0'),
+                    'payable_days': Decimal('0'), 'lop_days': Decimal('0'),
+                    'paid_leave_days': Decimal('0'), 'day_map': {}, 'summary': {},
+                    'leave_breakdown': [],
+                }
+                if run.run_type == 'OFF_CYCLE'
+                else DayReconciliationService.reconcile(
+                    employee, period_start, period_end,
+                    saturday_is_working=cal.saturday_is_working,
+                )
             )
             locked_inputs = {
                 'locked_at': timezone.now().isoformat(),
@@ -267,7 +278,7 @@ class RunLifecycleService:
 
         PayrollRunEmployee.objects.bulk_create(bulk)
 
-        logger.info(f'Run {run.id}: locked with {len(bulk)} employees')
+        logger.info(f'Run {run.id}: locked with {len(bulk)} employees (type={run.run_type})')
 
     @classmethod
     def _handle_reopen(cls, run, user, reason):
@@ -295,7 +306,7 @@ class RunLifecycleService:
         # next lock, allowing attendance, leave, and eligibility to be refreshed.
         employee_rows.delete()
 
-        if run.pay_calendar.status == 'LOCKED':
+        if run.run_type != 'OFF_CYCLE' and run.pay_calendar.status == 'LOCKED':
             another_locked_run = PayrollRun.objects.filter(
                 pay_calendar=run.pay_calendar,
                 status__in=('LOCKED', 'CALCULATED', 'UNDER_REVIEW', 'APPROVED', 'FINALIZED', 'PAID'),
@@ -395,25 +406,26 @@ class RunLifecycleService:
             # again in another payroll run.
             payroll_adjustment__isnull=False,
         ).select_related('employee', 'batch').distinct()
-        from reimbursementapp.services import recalculate_claim_and_batch_totals
-        run_employee_ids = set(PayrollRunEmployee.objects.filter(run=run).values_list('employee_id', flat=True))
-        for claim in claims:
-            if claim.employee_id not in run_employee_ids:
-                continue
-            # Refresh totals and the claim-level status from approved expense
-            # rows so older claims with stale denormalized fields are handled.
-            claim = recalculate_claim_and_batch_totals(claim)
-            if claim.total_approved_amount <= 0:
-                continue
-            PayrollRunAdjustment.objects.create(
-                run=run,
-                employee=claim.employee,
-                adjustment_type='REIMBURSEMENT',
-                label=f'Reimbursement — {claim.batch.title or calendar}',
-                amount=claim.total_approved_amount,
-                reason=f'Imported from reimbursement claim {claim.pk}',
-                source_claim=claim,
-            )
+        if run.run_type == 'REGULAR':
+            from reimbursementapp.services import recalculate_claim_and_batch_totals
+            run_employee_ids = set(PayrollRunEmployee.objects.filter(run=run).values_list('employee_id', flat=True))
+            for claim in claims:
+                if claim.employee_id not in run_employee_ids:
+                    continue
+                claim = recalculate_claim_and_batch_totals(claim)
+                if claim.total_approved_amount <= 0:
+                    continue
+                PayrollRunAdjustment.objects.create(
+                    run=run,
+                    employee=claim.employee,
+                    adjustment_type='REIMBURSEMENT',
+                    category='REIMBURSEMENT',
+                    taxable=False,
+                    label=f'Reimbursement — {claim.batch.title or calendar}',
+                    amount=claim.total_approved_amount,
+                    reason=f'Imported from reimbursement claim {claim.pk}',
+                    source_claim=claim,
+                )
         run_employees = PayrollRunEmployee.objects.filter(
             run=run
         ).exclude(status='EXCLUDED').select_related('employee', 'salary_assignment')
@@ -427,7 +439,17 @@ class RunLifecycleService:
         calc_count = 0
         error_count = 0
 
+        if run.run_type == 'OFF_CYCLE' and not PayrollRunAdjustment.objects.filter(run=run).exists():
+            raise RunLifecycleError('Add at least one employee pay item before calculating this off-cycle run.')
+
         for re in run_employees:
+            if run.run_type == 'OFF_CYCLE' and not PayrollRunAdjustment.objects.filter(
+                run=run, employee=re.employee,
+            ).exists():
+                re.status = 'EXCLUDED'
+                re.error_message = 'No off-cycle pay item was entered for this employee.'
+                re.save(update_fields=['status', 'error_message', 'updated_at'])
+                continue
             try:
                 calc_service.calculate_for_run(run, re.employee)
                 re.refresh_from_db()

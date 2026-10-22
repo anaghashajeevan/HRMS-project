@@ -168,12 +168,19 @@ export const getRunEmployees = (runId: string, params?: Record<string, string>) 
 export const getRunAdjustments = (runId: string) =>
   api.get(`/payroll/runs/${runId}/adjustments/`);
 
+export const deleteRunAdjustment = (runId: string, adjustmentId: string) =>
+  api.delete(`/payroll/runs/${runId}/adjustments/${adjustmentId}/`);
+
 export const createRunAdjustment = (runId: string, data: {
   employee: string;
   adjustment_type: 'VARIABLE_EARNING' | 'DEDUCTION' | 'REIMBURSEMENT';
+  category: 'BONUS' | 'INCREMENT_DIFFERENCE' | 'EARNING_CORRECTION' | 'DEDUCTION_CORRECTION' | 'REIMBURSEMENT' | 'OTHER';
   label: string;
   amount: number;
-  reason?: string;
+  taxable: boolean;
+  reference_period_start?: string;
+  reference_period_end?: string;
+  reason: string;
 }) => api.post(`/payroll/runs/${runId}/adjustments/`, data);
 
 export const getRunEmployee = (runId: string, empId: string) =>

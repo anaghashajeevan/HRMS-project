@@ -34,7 +34,7 @@ from .models import (
     PayrollRun, SalaryComponent, SalaryStructure, SalaryStructureComponent,
     StatutoryRule, PayCalendar, EmployeeSalaryAssignment,
     EmployeePayrollProfile, PayrollRunAdjustment, PayrollRunEmployee,
-    PayrollRunComponentDetail, PayslipRequest, PayslipRequestApprovalAction,
+    PayrollRunComponentDetail, PayrollAuditLog, PayslipRequest, PayslipRequestApprovalAction,
     PaymentBatch, PaymentBatchLine, PayrollRunApprovalAction,
 )
 from .serializers import (
@@ -865,6 +865,7 @@ class PayRunListCreateView(APIView):
                 pay_calendar_id=s.validated_data['pay_calendar'],
                 run_type=s.validated_data['run_type'],
                 user=request.user,
+                payment_date=s.validated_data.get('payment_date'),
             )
             return Response(
                 PayrollRunDetailSerializer(run, context={'request': request}).data,
@@ -992,7 +993,7 @@ def _amount_in_indian_words(amount):
 def _build_salary_payment_pdf(batch, lines):
     from xml.sax.saxutils import escape
     from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import SimpleDocTemplate, Spacer, Table, TableStyle, Paragraph, Image as PDFImage
@@ -1012,8 +1013,12 @@ def _build_salary_payment_pdf(batch, lines):
         }
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=10*mm, leftMargin=10*mm, topMargin=10*mm, bottomMargin=12*mm)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=14*mm, leftMargin=14*mm, topMargin=14*mm, bottomMargin=14*mm)
     styles = getSampleStyleSheet()
+    styles['Title'].fontSize = 18
+    styles['Title'].leading = 22
+    styles['Normal'].fontSize = 10
+    styles['Normal'].leading = 13
     period = batch.run.pay_calendar
     company = CompanyLogo.objects.filter(is_active=True).first()
     company_name = company.name if company else 'Company Name'
@@ -1025,10 +1030,10 @@ def _build_salary_payment_pdf(batch, lines):
             company.logo.close()
         except (OSError, ValueError):
             logo_cell = Paragraph('', styles['Normal'])
-    payment_date = period.pay_date.strftime('%d %b %Y')
+    payment_date = (batch.run.payment_date or period.pay_date).strftime('%d %b %Y')
 
     story = [
-        Table([[logo_cell, Paragraph(f'<b>{escape(company_name)}</b><br/><font size="12">SALARY PAYMENT BATCH</font>', styles['Title'])]], colWidths=[30*mm, 247*mm]),
+        Table([[logo_cell, Paragraph(f'<b>{escape(company_name)}</b><br/><font size="13">{"OFF-CYCLE PAYMENT BATCH" if batch.run.run_type == "OFF_CYCLE" else "SALARY PAYMENT BATCH"}</font>', styles['Title'])]], colWidths=[30*mm, 152*mm]),
         Spacer(1, 3*mm),
         Paragraph(
             f'<b>Payroll month:</b> {calendar.month_name[period.month]} {period.year}'
@@ -1039,11 +1044,18 @@ def _build_salary_payment_pdf(batch, lines):
         ),
         Spacer(1, 5*mm),
     ]
+    cell_style = ParagraphStyle('PaymentTableCell', parent=styles['Normal'], fontSize=8, leading=10)
+    header_style = ParagraphStyle(
+        'PaymentTableHeader', parent=cell_style, fontName='Helvetica-Bold',
+        textColor=colors.white, alignment=1,
+    )
     table_data = [[
-        'Sl. No.', 'Employee ID', 'Employee Name', 'Beneficiary Name',
-        'Account Number', 'IFSC Code', 'Net Salary (INR)', 'Payment Reference / Remarks',
+        Paragraph('Sl. No.', header_style), Paragraph('Employee ID', header_style),
+        Paragraph('Employee Name', header_style), Paragraph('Beneficiary Name', header_style),
+        Paragraph('Account Number', header_style), Paragraph('IFSC Code', header_style),
+        Paragraph('Net Salary (INR)', header_style),
+        Paragraph('Payment Reference /<br/>Remarks', header_style),
     ]]
-    cell_style = ParagraphStyle('PaymentTableCell', parent=styles['Normal'], fontSize=6.5, leading=8)
     for index, line in enumerate(line_list, start=1):
         employee = line.run_employee.employee
         table_data.append([
@@ -1057,21 +1069,22 @@ def _build_salary_payment_pdf(batch, lines):
     table_data.append(['', '', '', '', '', 'TOTAL', f'{total:,.2f}', ''])
     table = Table(
         table_data,
-        colWidths=[9*mm, 21*mm, 31*mm, 34*mm, 50*mm, 24*mm, 30*mm, 78*mm],
+        colWidths=[8*mm, 15*mm, 22*mm, 23*mm, 29*mm, 18*mm, 23*mm, 37*mm],
         repeatRows=1, splitByRow=1,
     )
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#17365d')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
         ('GRID', (0, 0), (-1, -1), .4, colors.HexColor('#cbd5e1')),
-        ('FONTSIZE', (0, 0), (-1, -1), 6.5),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('WORDWRAP', (0, 0), (-1, -1), 'CJK'),
         ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#f8fafc')]),
         ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e8eef5')),
         ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
         ('ALIGN', (0, 0), (0, -1), 'CENTER'), ('ALIGN', (6, 1), (6, -1), 'RIGHT'),
-        ('LEFTPADDING', (0, 0), (-1, -1), 3), ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-        ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4), ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
     ]))
     story.extend([
         table, Spacer(1, 4*mm),
@@ -1081,12 +1094,47 @@ def _build_salary_payment_pdf(batch, lines):
             f'&nbsp;&nbsp;&nbsp; <b>Payment date:</b> {payment_date}', styles['Normal'],
         ),
         Paragraph(f'<b>Amount in words:</b> {_amount_in_indian_words(total)}', styles['Normal']),
-        Spacer(1, 13*mm),
+        Spacer(1, 6*mm),
+    ])
+
+    approvals = list(batch.run.approval_actions.filter(status='APPROVED').select_related(
+        'assigned_to', 'acted_by',
+    ).order_by('cycle', 'step_number', 'acted_at'))
+    approver_rows = [['Approval step', 'Approver', 'Approved at']]
+    if approvals:
+        for approval in approvals:
+            approver = approval.acted_by or approval.assigned_to
+            acted_at = timezone.localtime(approval.acted_at).strftime('%d %b %Y, %I:%M %p') if approval.acted_at else '—'
+            approver_rows.append([
+                Paragraph(escape(approval.step_name or f'Step {approval.step_number}'), cell_style),
+                Paragraph(escape(approver.full_name), cell_style),
+                Paragraph(acted_at, cell_style),
+            ])
+    elif batch.run.approved_by:
+        approver_rows.append([
+            Paragraph('Run approval', cell_style),
+            Paragraph(escape(batch.run.approved_by.full_name), cell_style),
+            Paragraph(timezone.localtime(batch.run.approved_at).strftime('%d %b %Y, %I:%M %p') if batch.run.approved_at else '—', cell_style),
+        ])
+    else:
+        approver_rows.append([Paragraph('No approval record available', cell_style), '', ''])
+    story.extend([
+        Paragraph('<b>Payroll run approval record</b>', styles['Heading2']),
+        Table(approver_rows, colWidths=[58*mm, 68*mm, 56*mm], repeatRows=1, style=TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#eef2f7')),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('GRID', (0, 0), (-1, -1), .5, colors.HexColor('#94a3b8')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5), ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ])),
+        Spacer(1, 6*mm),
         Table([
             ['Prepared by', 'Verified by', 'Authorized signatory', 'Date / Company seal'],
             ['\n\n\n', '\n\n\n', '\n\n\n', '\n\n\n'],
             ['Name / Signature', 'Name / Signature', 'Name / Signature', ''],
-        ], colWidths=[69.25*mm] * 4, rowHeights=[8*mm, 19*mm, 8*mm], style=TableStyle([
+        ], colWidths=[45.5*mm] * 4, rowHeights=[8*mm, 15*mm, 8*mm], style=TableStyle([
             ('GRID', (0, 0), (-1, -1), .5, colors.HexColor('#94a3b8')),
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#eef2f7')),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -1133,7 +1181,7 @@ class PayRunPaymentBatchView(APIView):
 
         # Use the bank profile effective on the scheduled pay date and retain
         # an encrypted snapshot on each payment line.
-        pay_date = run.pay_calendar.pay_date
+        pay_date = run.payment_date or run.pay_calendar.pay_date
         profiles = EmployeePayrollProfile.objects.filter(
             employee_id__in=run_employees.values('employee_id'),
             is_active=True, effective_from__lte=pay_date,
@@ -1180,7 +1228,7 @@ class PayRunPaymentBatchView(APIView):
         actor = getattr(request.user, 'employee', None)
         batch = PaymentBatch.objects.create(
             run=run,
-            batch_number=f'PAY-{run.pay_calendar.year}{run.pay_calendar.month:02d}-{uuid4().hex[:8].upper()}',
+            batch_number=f'{"PAY-OC" if run.run_type == "OFF_CYCLE" else "PAY"}-{run.pay_calendar.year}{run.pay_calendar.month:02d}-{uuid4().hex[:8].upper()}',
             payment_mode=payment_mode,
             total_amount=sum((row.net_pay for row, *_ in line_data), Decimal('0.00')),
             created_by=actor,
@@ -1204,6 +1252,7 @@ class PayRunPaymentBatchView(APIView):
             'payment_mode': batch.payment_mode,
             'total_amount': str(batch.total_amount), 'status': batch.status,
             'file_generated': batch.file_generated, 'created_at': batch.created_at,
+            'payment_date': batch.run.payment_date or batch.run.pay_calendar.pay_date,
             'line_count': lines.count(),
             'settled_count': lines.filter(status='SETTLED').count(),
             'lines': [{
@@ -1250,7 +1299,7 @@ class PaymentBatchExportView(APIView):
                 writer.writerow([
                     line.account_holder_name, line.bank_account, line.ifsc_code,
                     f'{line.amount:.2f}',
-                    f'Salary {batch.run.pay_calendar.year}-{batch.run.pay_calendar.month:02d}',
+                    f'{"Off-cycle payroll" if batch.run.run_type == "OFF_CYCLE" else "Salary"} {batch.run.pay_calendar.year}-{batch.run.pay_calendar.month:02d}',
                     line.run_employee.employee.employee_id,
                 ])
             batch.file_generated = True
@@ -1772,7 +1821,7 @@ class PaymentBatchRefreshBankDetailsView(APIView):
         lines = list(batch.lines.select_related('run_employee__employee'))
         if any(line.status != 'PENDING' for line in lines):
             return Response({'detail': 'Bank details cannot be refreshed after any payment line has been uploaded or reconciled.'}, status=400)
-        pay_date = batch.run.pay_calendar.pay_date
+        pay_date = batch.run.payment_date or batch.run.pay_calendar.pay_date
         employee_ids = [line.run_employee.employee_id for line in lines]
         profiles = EmployeePayrollProfile.objects.filter(
             employee_id__in=employee_ids, is_active=True, effective_from__lte=pay_date,
@@ -1899,8 +1948,13 @@ class RunAdjustmentListCreateView(APIView):
                 {'detail': 'Adjustments can only be entered before calculation or while a run is returned for correction.'},
                 status=400,
             )
+        if run.run_type == 'OFF_CYCLE' and not request.data.get('reason', '').strip():
+            return Response({'reason': 'A business reason is required for every off-cycle pay item.'}, status=400)
         serializer = PayrollRunAdjustmentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        if run.run_type == 'OFF_CYCLE' and serializer.validated_data.get('category') == 'INCREMENT_DIFFERENCE':
+            if not serializer.validated_data.get('reference_period_start') or not serializer.validated_data.get('reference_period_end'):
+                return Response({'reference_period_start': 'Enter the from and through dates covered by this increment difference.'}, status=400)
         employee = serializer.validated_data['employee']
         if not PayrollRunEmployee.objects.filter(
             run=run, employee=employee, status__in=['PENDING', 'CALCULATED'],
@@ -1909,7 +1963,50 @@ class RunAdjustmentListCreateView(APIView):
         row = serializer.save(
             run=run, created_by=getattr(request.user, 'employee', None),
         )
+        PayrollAuditLog.objects.create(
+            run=run, employee=employee, action='OFF_CYCLE_ADJUSTMENT_ADDED' if run.run_type == 'OFF_CYCLE' else 'RUN_ADJUSTMENT_ADDED',
+            reason=row.reason, performed_by=getattr(request.user, 'employee', None),
+            new_values={
+                'adjustment_id': str(row.id), 'category': row.category,
+                'adjustment_type': row.adjustment_type, 'label': row.label,
+                'amount': str(row.amount), 'taxable': row.taxable,
+                'reference_period_start': str(row.reference_period_start) if row.reference_period_start else None,
+                'reference_period_end': str(row.reference_period_end) if row.reference_period_end else None,
+            },
+        )
         return Response(PayrollRunAdjustmentSerializer(row).data, status=201)
+
+
+class RunAdjustmentDetailView(APIView):
+    """Delete a mistaken line before calculation or while correcting a returned run."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def delete(self, request, run_id, adjustment_id):
+        try:
+            run = PayrollRun.objects.get(id=run_id)
+            row = PayrollRunAdjustment.objects.select_related('employee').get(
+                id=adjustment_id, run=run,
+            )
+        except (PayrollRun.DoesNotExist, PayrollRunAdjustment.DoesNotExist):
+            return Response({'detail': 'Pay run adjustment not found.'}, status=404)
+        if not (run.status == 'LOCKED' or (run.status == 'CALCULATED' and run.returned_by_id)):
+            return Response({'detail': 'Pay items can only be removed before calculation or while a run is returned for correction.'}, status=400)
+        if row.source_claim_id:
+            return Response({'detail': 'A reimbursement imported from an approved claim cannot be removed here.'}, status=400)
+        actor = getattr(request.user, 'employee', None)
+        PayrollAuditLog.objects.create(
+            run=run, employee=row.employee, action='RUN_ADJUSTMENT_REMOVED',
+            reason=request.data.get('reason', 'Adjustment removed before approval.'),
+            performed_by=actor,
+            old_values={
+                'adjustment_id': str(row.id), 'category': row.category,
+                'adjustment_type': row.adjustment_type, 'label': row.label,
+                'amount': str(row.amount), 'taxable': row.taxable,
+                'reason': row.reason,
+            },
+        )
+        row.delete()
+        return Response({'detail': 'Pay item removed.'})
 
 
 class RunEmployeeDetailView(APIView):
@@ -2004,6 +2101,8 @@ class PayslipEligibleRunsView(APIView):
             'run_employee_id': str(row.id),
             'year': row.run.pay_calendar.year,
             'month': row.run.pay_calendar.month,
+            'run_type': row.run.run_type,
+            'run_type_display': row.run.get_run_type_display(),
             'net_pay': row.net_pay,
             'request': PayslipRequestSerializer(
                 requests_by_run[str(row.run_id)], context={'request': request},

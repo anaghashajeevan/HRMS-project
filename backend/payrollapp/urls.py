@@ -23,6 +23,7 @@ urlpatterns = [
     path('runs/', views.PayRunListCreateView.as_view(), name='payroll-runs'),
     path('runs/<uuid:run_id>/employees/', views.RunEmployeeListView.as_view(), name='payroll-run-employees'),
     path('runs/<uuid:run_id>/adjustments/', views.RunAdjustmentListCreateView.as_view(), name='payroll-run-adjustments'),
+    path('runs/<uuid:run_id>/adjustments/<uuid:adjustment_id>/', views.RunAdjustmentDetailView.as_view(), name='payroll-run-adjustment-detail'),
     path('runs/<uuid:run_id>/payment-batches/', views.PayRunPaymentBatchView.as_view(), name='payroll-run-payment-batches'),
     path('runs/<uuid:run_id>/statutory-exports/<str:export_type>/', views.StatutoryReturnExportView.as_view(), name='payroll-statutory-return-export'),
     path('payment-batches/<uuid:batch_id>/export/<str:export_format>/', views.PaymentBatchExportView.as_view(), name='payroll-payment-batch-export'),
