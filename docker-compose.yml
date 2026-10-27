@@ -517,6 +517,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - WHATSAPP_GATEWAY_URL=http://whatsapp_gateway:3005
       - TESSERACT_CMD=/usr/bin/tesseract
+      - SQLITE_NAME=data/db.sqlite3
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -524,7 +525,19 @@ services:
         condition: service_healthy
       whatsapp_gateway:
         condition: service_started
+    healthcheck:
+      # Gunicorn is ready only after migrations and collectstatic complete.
+      # Do not expose the frontend while the API socket is still unavailable.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/v1/logos/active/ >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 45s
     volumes:
+      # SQLite is the active database in this environment. Keep it outside
+      # the container filesystem so migrations, web requests, and restarts
+      # operate on the same persistent database.
+      - backend_db:/app/data
       - backend_static:/app/staticfiles
       - backend_media:/app/media
       - backend_logs:/app/logs
@@ -545,17 +558,19 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - WHATSAPP_GATEWAY_URL=http://whatsapp_gateway:3005
       - TESSERACT_CMD=/usr/bin/tesseract
+      - SQLITE_NAME=data/db.sqlite3
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
       backend:
-        condition: service_started
+        condition: service_healthy
       whatsapp_gateway:
         condition: service_started
     command: celery -A HRMS worker --loglevel=info --concurrency=4
     volumes:
+      - backend_db:/app/data
       - backend_logs:/app/logs
       - backend_media:/app/media
     networks:
@@ -575,14 +590,17 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - WHATSAPP_GATEWAY_URL=http://whatsapp_gateway:3005
       - TESSERACT_CMD=/usr/bin/tesseract
+      - SQLITE_NAME=data/db.sqlite3
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
       backend:
-        condition: service_started
+        condition: service_healthy
     command: celery -A HRMS beat --loglevel=info
+    volumes:
+      - backend_db:/app/data
     networks:
       - hrms_network
 
@@ -594,8 +612,10 @@ services:
     container_name: hrms_frontend
     restart: unless-stopped
     depends_on:
-      - backend
-      - whatsapp_gateway
+      backend:
+        condition: service_healthy
+      whatsapp_gateway:
+        condition: service_started
     ports:
       - "9001:80"
     volumes:
@@ -620,3 +640,4 @@ volumes:
   backend_static:
   backend_media:
   backend_logs:
+  backend_db:

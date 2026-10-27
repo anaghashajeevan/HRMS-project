@@ -23,6 +23,9 @@ from .views import (
     EmployeeDocumentViewSet,
     GetLMSTokenView,
     LoginView,
+    NexusSsoLoginView,
+    NexusSsoAuthorizeView,
+    NexusSsoPortalLoginView,
     LogoutView,
     CustomTokenRefreshView,
     MeView,
@@ -120,6 +123,9 @@ router.register(r'logos', CompanyLogoViewSet, basename='logos')
 urlpatterns = [
     # ---------- Authentication ----------
     path('auth/token/', LoginView.as_view(), name='login'),
+    path('auth/sso/nexus/', NexusSsoLoginView.as_view(), name='nexus-sso-login'),
+    path('auth/sso/nexus/authorize/', NexusSsoAuthorizeView.as_view(), name='nexus-sso-authorize'),
+    path('auth/sso/nexus/login-url/', NexusSsoPortalLoginView.as_view(), name='nexus-sso-login-url'),
     path('auth/token/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
     path('auth/logout/', LogoutView.as_view(), name='logout'),
     path('auth/me/', MeView.as_view(), name='me'),

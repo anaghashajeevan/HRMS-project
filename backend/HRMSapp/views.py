@@ -1,4 +1,7 @@
 from time import timezone
+import uuid
+import secrets
+from urllib.parse import urlencode
 from django.shortcuts import render
 from django.db import models, transaction
 from django.conf import settings
@@ -13,8 +16,9 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework.decorators import action
+import requests
 from decimal import Decimal
-from .models import  CommonKPIMaster, CompanyLogo, UserAccount, UserActiveSession, AuthAuditLog, Role,EmployeeAuditLog, ProbationPolicy
+from .models import  CommonKPIMaster, CompanyLogo, Employee, UserAccount, UserActiveSession, AuthAuditLog, Role,EmployeeAuditLog, ProbationPolicy
 # from .models import KRAPeerNomination, PeerRating
 from .serializers import (
     CommonKPIMasterSerializer,
@@ -59,6 +63,174 @@ class LoginView(APIView):
             'refresh': tokens['refresh'],
             'user': UserProfileSerializer(user).data,
         }, status=status.HTTP_200_OK)
+
+
+class NexusSsoLoginView(APIView):
+    """Exchange a NexusOne authorization code for a normal HRMS session."""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        code = str(request.data.get('code') or '').strip()
+        state = str(request.data.get('state') or '').strip()
+        if not code:
+            return Response({'detail': 'Missing SSO authorization code.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        expected_state = request.COOKIES.get('nexus_sso_state', '')
+        # NexusOne can launch HRMS directly after its own portal login. In
+        # that IdP-initiated flow HRMS has no browser state cookie yet; the
+        # authorization code is still verified server-to-server below using
+        # this application's client credentials and registered redirect URI.
+        # When HRMS initiated the flow, retain strict state validation.
+        if expected_state and (not state or not secrets.compare_digest(expected_state, state)):
+            return Response({'detail': 'Invalid or expired SSO sign-in request.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        required = (
+            settings.NEXUS_SSO_TOKEN_URL,
+            settings.NEXUS_SSO_CLIENT_ID,
+            settings.NEXUS_SSO_CLIENT_SECRET,
+            settings.NEXUS_SSO_REDIRECT_URI,
+        )
+        if not all(required):
+            return Response({'detail': 'HRMS SSO has not been configured.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        try:
+            exchange = requests.post(
+                settings.NEXUS_SSO_TOKEN_URL,
+                json={
+                    'code': code,
+                    'client_id': settings.NEXUS_SSO_CLIENT_ID,
+                    'client_secret': settings.NEXUS_SSO_CLIENT_SECRET,
+                    'redirect_uri': settings.NEXUS_SSO_REDIRECT_URI,
+                },
+                timeout=settings.NEXUS_SSO_TIMEOUT_SECONDS,
+            )
+            data = exchange.json() if exchange.content else {}
+        except (requests.RequestException, ValueError):
+            return Response({'detail': 'NexusOne could not be reached.'}, status=status.HTTP_502_BAD_GATEWAY)
+
+        if not exchange.ok:
+            return Response({'detail': data.get('detail', 'The SSO code is invalid or expired.')}, status=status.HTTP_401_UNAUTHORIZED)
+
+        nexus_user = data.get('user') or {}
+        email = str(nexus_user.get('email') or '').strip().lower()
+        if not email:
+            return Response({'detail': 'NexusOne did not return a verified email address.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        user = UserAccount.objects.filter(email__iexact=email, is_active=True).first()
+        if not user:
+            # JIT link only to an existing active HRMS employee.  This permits
+            # passwordless SSO for employees imported by HR while preventing a
+            # Nexus account from creating an arbitrary HRMS employee/role.
+            employee = Employee.objects.filter(
+                models.Q(official_email__iexact=email) | models.Q(personal_email__iexact=email),
+                status__in=['ACTIVE', 'PROBATION'],
+                is_deleted=False,
+            ).first()
+            if not employee:
+                if not settings.NEXUS_SSO_AUTO_PROVISION:
+                    return Response(
+                        {'detail': 'Your NexusOne identity is not linked to an active HRMS employee.'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+                # The token endpoint has already verified this identity. Create
+                # only a minimal employee profile and the lowest-privilege
+                # account; HR can enrich employment data later in HRMS.
+                full_name = str(
+                    nexus_user.get('full_name') or nexus_user.get('name') or email.split('@', 1)[0]
+                ).strip()
+                name_parts = full_name.split(maxsplit=1)
+                employee = Employee.objects.create(
+                    employee_id=f"SSO-{uuid.uuid4().hex[:12].upper()}",
+                    first_name=name_parts[0][:50] or 'Nexus',
+                    last_name=(name_parts[1][:50] if len(name_parts) > 1 else 'User'),
+                    official_email=email,
+                    phone_number=str(nexus_user.get('phone') or '+910000000000')[:20],
+                    date_of_birth='1990-01-01',
+                    date_of_joining=django_timezone.now().date(),
+                    status='ACTIVE',
+                )
+
+            with transaction.atomic():
+                user, created = UserAccount.objects.get_or_create(
+                    employee=employee,
+                    defaults={
+                        'email': email,
+                        'username': email,
+                        'is_ldap_user': True,
+                        'is_active': True,
+                    },
+                )
+                if created:
+                    # Nexus authenticates this account; no local password is
+                    # stored or accepted for the JIT-linked user.
+                    user.set_unusable_password()
+                    user.save(update_fields=['password'])
+                    employee_role = Role.objects.filter(role_name='EMPLOYEE', is_active=True).first()
+                    if employee_role:
+                        user.roles.add(employee_role)
+                elif not user.is_active:
+                    return Response({'detail': 'Your HRMS account is disabled.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Existing SSO accounts created before the role master was seeded may
+        # have no role at all. Give only the self-service employee role; never
+        # infer elevated privileges from a Nexus identity.
+        if user.is_ldap_user and not user.roles.filter(is_active=True).exists():
+            employee_role = Role.objects.filter(role_name='EMPLOYEE', is_active=True).first()
+            if employee_role:
+                user.roles.add(employee_role)
+
+        tokens = LoginSerializer(context={'request': request}).create_tokens(user, device_id='nexus-sso')
+        response = Response({
+            'access': tokens['access'],
+            'refresh': tokens['refresh'],
+            'user': UserProfileSerializer(user).data,
+        }, status=status.HTTP_200_OK)
+        response.delete_cookie('nexus_sso_state', path='/')
+        return response
+
+
+class NexusSsoAuthorizeView(APIView):
+    """Begin an SSO-only login without exposing a local password form."""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        required = (
+            settings.NEXUS_SSO_AUTHORIZE_URL,
+            settings.NEXUS_SSO_CLIENT_ID,
+            settings.NEXUS_SSO_REDIRECT_URI,
+        )
+        if not all(required):
+            return Response({'detail': 'HRMS SSO has not been configured.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        state = secrets.token_urlsafe(32)
+        query = urlencode({
+            'client_id': settings.NEXUS_SSO_CLIENT_ID,
+            'redirect_uri': settings.NEXUS_SSO_REDIRECT_URI,
+            'state': state,
+        })
+        response = Response({'authorize_url': f'{settings.NEXUS_SSO_AUTHORIZE_URL}?{query}'})
+        response.set_cookie(
+            'nexus_sso_state', state, httponly=True, samesite='Lax',
+            secure=request.is_secure(), max_age=600, path='/',
+        )
+        return response
+
+
+class NexusSsoPortalLoginView(APIView):
+    """Return the configured Nexus portal page used after HRMS sign-out."""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        if not settings.NEXUS_SSO_LOGIN_URL:
+            return Response(
+                {'detail': 'NexusOne login page has not been configured.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({'login_url': settings.NEXUS_SSO_LOGIN_URL})
 
 
 # ==============================================================================

@@ -1,13 +1,19 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 
-// const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1';
-const API_BASE_URL = 'http://127.0.0.1:8000/api/v1';
+// Use the HRMS host's reverse proxy in production. A browser opened through
+// NexusOne must not call its own localhost address.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
+  // The Nexus SSO handshake uses a short-lived, HttpOnly state cookie.  It
+  // must accompany both the request that starts SSO and the code exchange.
+  // This is a no-op for the normal same-origin /api proxy, and also supports
+  // a deliberately configured credentialed API origin.
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -43,7 +49,16 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // A 401 from a login or SSO-code exchange describes that request itself;
+    // it is not an expired HRMS session.  Let the caller show the provider's
+    // response rather than clearing storage and redirecting back to /login.
+    const requestUrl = originalRequest?.url || '';
+    const isAuthenticationRequest =
+      requestUrl.includes('/auth/token/') ||
+      requestUrl.includes('/auth/sso/') ||
+      requestUrl.includes('/auth/token/refresh/');
+
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthenticationRequest) {
       const refresh = localStorage.getItem('refresh_token');
 
       if (!refresh) {
