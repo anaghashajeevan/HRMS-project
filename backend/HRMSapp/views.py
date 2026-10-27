@@ -1,5 +1,4 @@
 from time import timezone
-import uuid
 import secrets
 from urllib.parse import urlencode
 from django.shortcuts import render
@@ -18,7 +17,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework.decorators import action
 import requests
 from decimal import Decimal
-from .models import  CommonKPIMaster, CompanyLogo, Employee, UserAccount, UserActiveSession, AuthAuditLog, Role,EmployeeAuditLog, ProbationPolicy
+from .models import  CommonKPIMaster, CompanyLogo, UserAccount, UserActiveSession, AuthAuditLog, Role,EmployeeAuditLog, ProbationPolicy
 # from .models import KRAPeerNomination, PeerRating
 from .serializers import (
     CommonKPIMasterSerializer,
@@ -70,6 +69,56 @@ class NexusSsoLoginView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
+    # NexusOne role names are business-facing; HRMS permissions and sidebar
+    # route guards use these canonical role names.
+    SSO_ROLE_ALIASES = {
+        'ADMIN': 'SYSTEM_ADMIN',
+        'ADMINISTRATOR': 'SYSTEM_ADMIN',
+        'SUPER_ADMIN': 'SYSTEM_ADMIN',
+        'SUPERADMIN': 'SYSTEM_ADMIN',
+        'SYSTEM_ADMIN': 'SYSTEM_ADMIN',
+        'SYSTEMADMIN': 'SYSTEM_ADMIN',
+        'HR_ADMIN': 'HR_ADMIN',
+        'HR_ADMINISTRATOR': 'HR_ADMIN',
+        'HRADMIN': 'HR_ADMIN',
+        'MANAGER': 'MANAGER',
+        'REPORTING_MANAGER': 'REPORTING_MANAGER',
+        'HOD': 'HOD',
+        'EMPLOYEE': 'EMPLOYEE',
+    }
+
+    @classmethod
+    def _sso_role_names(cls, nexus_user):
+        """Return canonical HRMS roles from the verified SSO user payload."""
+        raw_roles = []
+        for field in (
+            'roles', 'role_codes', 'role', 'role_name', 'user_role',
+            'user_type', 'account_type', 'groups',
+        ):
+            value = nexus_user.get(field)
+            if value:
+                raw_roles.extend(value if isinstance(value, list) else [value])
+
+        # Some SSO portals represent the administrator role with a boolean
+        # claim instead of a role string.
+        if any(nexus_user.get(field) is True for field in ('is_admin', 'is_administrator', 'is_superadmin')):
+            raw_roles.append('SYSTEM_ADMIN')
+
+        if isinstance(raw_roles, (str, dict)):
+            raw_roles = [raw_roles]
+
+        role_names = set()
+        for role in raw_roles:
+            value = (
+                role.get('code') or role.get('name') or role.get('role') or role.get('role_name')
+                if isinstance(role, dict) else role
+            )
+            normalized = str(value or '').strip().upper().replace('-', '_').replace(' ', '_')
+            canonical_name = cls.SSO_ROLE_ALIASES.get(normalized)
+            if canonical_name:
+                role_names.add(canonical_name)
+        return role_names
+
     def post(self, request):
         code = str(request.data.get('code') or '').strip()
         state = str(request.data.get('state') or '').strip()
@@ -117,69 +166,43 @@ class NexusSsoLoginView(APIView):
         if not email:
             return Response({'detail': 'NexusOne did not return a verified email address.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        user = UserAccount.objects.filter(email__iexact=email, is_active=True).first()
+        # NexusOne is the authentication and role source. HRMS retains the
+        # employee link only to apply an employee's normal data scope.
+        user = UserAccount.objects.filter(email__iexact=email).first()
         if not user:
-            # JIT link only to an existing active HRMS employee.  This permits
-            # passwordless SSO for employees imported by HR while preventing a
-            # Nexus account from creating an arbitrary HRMS employee/role.
-            employee = Employee.objects.filter(
-                models.Q(official_email__iexact=email) | models.Q(personal_email__iexact=email),
-                status__in=['ACTIVE', 'PROBATION'],
-                is_deleted=False,
-            ).first()
-            if not employee:
-                if not settings.NEXUS_SSO_AUTO_PROVISION:
-                    return Response(
-                        {'detail': 'Your NexusOne identity is not linked to an active HRMS employee.'},
-                        status=status.HTTP_403_FORBIDDEN,
-                    )
+            return Response(
+                {'detail': 'Your SSO account has not been provisioned for HRMS.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not user.is_active:
+            return Response({'detail': 'Your HRMS account is disabled.'}, status=status.HTTP_403_FORBIDDEN)
 
-                # The token endpoint has already verified this identity. Create
-                # only a minimal employee profile and the lowest-privilege
-                # account; HR can enrich employment data later in HRMS.
-                full_name = str(
-                    nexus_user.get('full_name') or nexus_user.get('name') or email.split('@', 1)[0]
-                ).strip()
-                name_parts = full_name.split(maxsplit=1)
-                employee = Employee.objects.create(
-                    employee_id=f"SSO-{uuid.uuid4().hex[:12].upper()}",
-                    first_name=name_parts[0][:50] or 'Nexus',
-                    last_name=(name_parts[1][:50] if len(name_parts) > 1 else 'User'),
-                    official_email=email,
-                    phone_number=str(nexus_user.get('phone') or '+910000000000')[:20],
-                    date_of_birth='1990-01-01',
-                    date_of_joining=django_timezone.now().date(),
-                    status='ACTIVE',
-                )
-
-            with transaction.atomic():
-                user, created = UserAccount.objects.get_or_create(
-                    employee=employee,
+        # An SSO Administrator must become SYSTEM_ADMIN before we create the
+        # JWT/profile: all sidebar items, protected routes, and API permission
+        # classes consistently grant full access to SYSTEM_ADMIN.
+        sso_role_names = self._sso_role_names(nexus_user) or self._sso_role_names(data)
+        if sso_role_names:
+            sso_roles = list(Role.objects.filter(role_name__in=sso_role_names, is_active=True))
+            missing_roles = sso_role_names.difference(role.role_name for role in sso_roles)
+            for role_name in missing_roles:
+                role, _ = Role.objects.get_or_create(
+                    role_name=role_name,
                     defaults={
-                        'email': email,
-                        'username': email,
-                        'is_ldap_user': True,
+                        'code': role_name.lower(),
+                        'description': f'Synchronized from NexusOne SSO ({role_name}).',
+                        'level': 100 if role_name == 'SYSTEM_ADMIN' else 10,
                         'is_active': True,
                     },
                 )
-                if created:
-                    # Nexus authenticates this account; no local password is
-                    # stored or accepted for the JIT-linked user.
-                    user.set_unusable_password()
-                    user.save(update_fields=['password'])
-                    employee_role = Role.objects.filter(role_name='EMPLOYEE', is_active=True).first()
-                    if employee_role:
-                        user.roles.add(employee_role)
-                elif not user.is_active:
-                    return Response({'detail': 'Your HRMS account is disabled.'}, status=status.HTTP_403_FORBIDDEN)
+                if role.is_active:
+                    sso_roles.append(role)
+            user.roles.set(sso_roles)
 
-        # Existing SSO accounts created before the role master was seeded may
-        # have no role at all. Give only the self-service employee role; never
-        # infer elevated privileges from a Nexus identity.
-        if user.is_ldap_user and not user.roles.filter(is_active=True).exists():
-            employee_role = Role.objects.filter(role_name='EMPLOYEE', is_active=True).first()
-            if employee_role:
-                user.roles.add(employee_role)
+        # Mark the local account as SSO-authenticated without changing its
+        # employee link.
+        if not user.is_ldap_user:
+            user.is_ldap_user = True
+            user.save(update_fields=['is_ldap_user'])
 
         tokens = LoginSerializer(context={'request': request}).create_tokens(user, device_id='nexus-sso')
         response = Response({
