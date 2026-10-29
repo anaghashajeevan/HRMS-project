@@ -573,6 +573,13 @@ NEXUS_SSO_CLIENT_SECRET = os.getenv('NEXUS_SSO_CLIENT_SECRET', '')
 NEXUS_SSO_REDIRECT_URI = os.getenv('NEXUS_SSO_REDIRECT_URI', '')
 NEXUS_SSO_LOGIN_URL = os.getenv('NEXUS_SSO_LOGIN_URL', '')
 NEXUS_SSO_TIMEOUT_SECONDS = int(os.getenv('NEXUS_SSO_TIMEOUT_SECONDS', '10'))
+NEXUS_SSO_AUTO_PROVISION = os.getenv('NEXUS_SSO_AUTO_PROVISION', 'False').strip().lower() in ('1', 'true', 'yes', 'on')
+# Authenticates SSO's assignment-driven employee provisioning requests. This
+# is deliberately separate from the browser SSO client secret.
+NEXUS_SSO_DIRECTORY_SYNC_SECRET = os.getenv(
+    'NEXUS_SSO_DIRECTORY_SYNC_SECRET',
+    os.getenv('NEXUS_SSO_ROLE_SYNC_SECRET', ''),
+)
 
 # If running outside Docker, replace docker service name with localhost
 if not RUNNING_IN_DOCKER:

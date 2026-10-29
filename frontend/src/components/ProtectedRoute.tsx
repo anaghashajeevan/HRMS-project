@@ -59,7 +59,9 @@ export default function ProtectedRoute({ children, requiredRoles }: Props) {
   }
 
   if (requiredRoles && requiredRoles.length > 0) {
-    const hasRole = user?.role_codes.some((r) => requiredRoles.includes(r));
+    const userRoles = user?.role_codes ?? [];
+    const isAdministrator = userRoles.some((role) => role.toUpperCase() === 'ADMIN');
+    const hasRole = isAdministrator || userRoles.some((role) => requiredRoles.includes(role));
     if (!hasRole) {
       return <Navigate to="/unauthorized" replace />;
     }

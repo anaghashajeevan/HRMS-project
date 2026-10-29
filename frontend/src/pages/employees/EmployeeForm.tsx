@@ -1316,6 +1316,9 @@ export default function EmployeeForm() {
             bank_account_encrypted: (emp as any).bank_account || '',
             bank_name: emp.bank_name || '',
             bank_account_holder_name: emp.bank_account_holder_name || '',
+            role_ids: (emp.user_account_info?.roles || [])
+              .map((roleName) => (roleData.results || []).find((role: Role) => role.role_name === roleName)?.id)
+              .filter((roleId): roleId is string => Boolean(roleId)),
           });
 
           const empData = emp as any;
@@ -1395,7 +1398,7 @@ export default function EmployeeForm() {
 
       if (!form.create_user_account) {
         delete payload.password;
-        delete payload.role_ids;
+        if (!isEditMode) delete payload.role_ids;
         delete payload.create_user_account;
       }
 
@@ -1403,7 +1406,6 @@ export default function EmployeeForm() {
         if (!form.create_user_account) {
           delete payload.create_user_account;
           delete payload.password;
-          delete payload.role_ids;
         }
         await employeesApi.update(id, payload);
         toast.success(
@@ -1834,6 +1836,29 @@ export default function EmployeeForm() {
                     This employee already has a login account.
                   </p>
                 </div>
+                <Field label="Roles">
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {roles.filter((r) => r.is_active).map((r) => (
+                      <label key={r.id} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm hover:bg-gray-50">
+                        <input
+                          type="checkbox"
+                          checked={form.role_ids?.includes(r.id) || false}
+                          onChange={(e) => {
+                            const current = form.role_ids || [];
+                            update(
+                              'role_ids',
+                              e.target.checked
+                                ? [...current, r.id]
+                                : current.filter((roleId) => roleId !== r.id),
+                            );
+                          }}
+                          className="h-4 w-4 rounded"
+                        />
+                        {r.role_name}
+                      </label>
+                    ))}
+                  </div>
+                </Field>
               </SectionCard>
             )}
 

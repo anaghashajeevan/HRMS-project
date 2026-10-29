@@ -24,6 +24,8 @@ from .views import (
     GetLMSTokenView,
     LoginView,
     NexusSsoLoginView,
+    NexusSsoDirectorySyncView,
+    NexusSsoDirectoryReconcileView,
     NexusSsoAuthorizeView,
     NexusSsoPortalLoginView,
     LogoutView,
@@ -124,6 +126,11 @@ urlpatterns = [
     # ---------- Authentication ----------
     path('auth/token/', LoginView.as_view(), name='login'),
     path('auth/sso/nexus/', NexusSsoLoginView.as_view(), name='nexus-sso-login'),
+    path('auth/sso/nexus/directory/sync/', NexusSsoDirectorySyncView.as_view(), name='nexus-sso-directory-sync'),
+    path('auth/sso/nexus/directory/reconcile/', NexusSsoDirectoryReconcileView.as_view(), name='nexus-sso-directory-reconcile'),
+    # Compatibility path for existing SSO deployment configuration. It now
+    # accepts identity provisioning only, never role synchronization.
+    path('auth/sso/nexus/roles/sync/', NexusSsoDirectorySyncView.as_view(), name='nexus-sso-legacy-role-sync'),
     path('auth/sso/nexus/authorize/', NexusSsoAuthorizeView.as_view(), name='nexus-sso-authorize'),
     path('auth/sso/nexus/login-url/', NexusSsoPortalLoginView.as_view(), name='nexus-sso-login-url'),
     path('auth/token/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),

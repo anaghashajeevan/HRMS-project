@@ -2233,10 +2233,12 @@ function entranceStyle(index: number): React.CSSProperties {
 function SidebarGroup({
   group,
   userRoles,
+  isAdministrator,
   index,
 }: {
   group: NavGroup;
   userRoles: string[];
+  isAdministrator: boolean;
   index: number;
 }) {
   const location = useLocation();
@@ -2246,7 +2248,7 @@ function SidebarGroup({
   });
 
   const visibleChildren = group.children.filter((child) =>
-    child.allowedRoles.some((role) => userRoles.includes(role))
+    isAdministrator || child.allowedRoles.some((role) => userRoles.includes(role))
   );
 
   if (visibleChildren.length === 0) return null;
@@ -2311,12 +2313,13 @@ export default function Sidebar() {
   const { user } = useAuth();
   const { logo } = useCompanyLogo();
   const userRoles = user?.role_codes || [];
+  const isAdministrator = userRoles.some((role) => role.toUpperCase() === 'ADMIN');
 
   const canAccess = (item: NavItem) =>
-    item.allowedRoles.some((role) => userRoles.includes(role));
+    isAdministrator || item.allowedRoles.some((role) => userRoles.includes(role));
 
   const canAccessGroup = (group: NavGroup) =>
-    group.allowedRoles.some((role) => userRoles.includes(role));
+    isAdministrator || group.allowedRoles.some((role) => userRoles.includes(role));
 
   const visibleMainNav = mainNav.filter((entry) => {
     if (isNavGroup(entry)) return canAccessGroup(entry);
@@ -2402,6 +2405,7 @@ export default function Sidebar() {
                       key={entry.label}
                       group={entry}
                       userRoles={userRoles}
+                      isAdministrator={isAdministrator}
                       index={index}
                     />
                   );

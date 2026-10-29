@@ -32,6 +32,7 @@ class Role(models.Model):
     description = models.TextField(blank=True, null=True)
     level = models.IntegerField(default=10, help_text="Higher = more privileges")
     is_active = models.BooleanField(default=True)
+    sso_managed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -477,6 +478,9 @@ class UserAccount(AbstractBaseUser, PermissionsMixin):
 
     username = models.CharField(max_length=150, unique=True)
     email = models.EmailField(max_length=150, unique=True)
+    # Immutable external identity from NexusOne. Email may be renamed in the
+    # identity provider, so it must not be the only SSO matching key.
+    sso_user_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
 
     # AD/LDAP + MFA
     is_ldap_user = models.BooleanField(default=False)
@@ -513,10 +517,17 @@ class UserAccount(AbstractBaseUser, PermissionsMixin):
         return self.email  
 
     def get_role_codes(self):
+        """Return only the active roles synchronized from the identity provider."""
         return list(self.roles.filter(is_active=True).values_list('role_name', flat=True))
 
     def has_role(self, role_name):
-        return self.roles.filter(role_name=role_name, is_active=True).exists()
+        """Check SSO-synchronized roles, with SSO's ADMIN role unrestricted."""
+        requested_role = str(role_name or '').upper()
+        effective_roles = {role.upper() for role in self.get_role_codes()}
+
+        if 'ADMIN' in effective_roles:
+            return True
+        return requested_role in effective_roles
 
 
 # ==============================================================================

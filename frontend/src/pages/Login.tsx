@@ -35,6 +35,9 @@ export default function Login() {
     const state = new URLSearchParams(location.search).get('state');
     if (!code || handledSsoCode.current === code) return;
     handledSsoCode.current = code;
+    // The code is one-time. Remove it from the address bar immediately so a
+    // refresh or browser restore cannot submit the same code again.
+    window.history.replaceState({}, document.title, location.pathname);
     setIsSubmitting(true);
     loginWithNexus(code, state || '')
       // Do not cancel this continuation in the effect cleanup. React

@@ -3,6 +3,7 @@ import secrets
 from urllib.parse import urlencode
 from django.shortcuts import render
 from django.db import models, transaction
+from django.db.models import Q
 from django.conf import settings
 """
 Authentication views — flat class-based APIViews.
@@ -17,7 +18,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework.decorators import action
 import requests
 from decimal import Decimal
-from .models import  CommonKPIMaster, CompanyLogo, UserAccount, UserActiveSession, AuthAuditLog, Role,EmployeeAuditLog, ProbationPolicy
+from .models import  CommonKPIMaster, CompanyLogo, UserAccount, UserActiveSession, AuthAuditLog, Role, Employee, EmployeeAuditLog, ProbationPolicy
 # from .models import KRAPeerNomination, PeerRating
 from .serializers import (
     CommonKPIMasterSerializer,
@@ -69,27 +70,9 @@ class NexusSsoLoginView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
-    # NexusOne role names are business-facing; HRMS permissions and sidebar
-    # route guards use these canonical role names.
-    SSO_ROLE_ALIASES = {
-        'ADMIN': 'SYSTEM_ADMIN',
-        'ADMINISTRATOR': 'SYSTEM_ADMIN',
-        'SUPER_ADMIN': 'SYSTEM_ADMIN',
-        'SUPERADMIN': 'SYSTEM_ADMIN',
-        'SYSTEM_ADMIN': 'SYSTEM_ADMIN',
-        'SYSTEMADMIN': 'SYSTEM_ADMIN',
-        'HR_ADMIN': 'HR_ADMIN',
-        'HR_ADMINISTRATOR': 'HR_ADMIN',
-        'HRADMIN': 'HR_ADMIN',
-        'MANAGER': 'MANAGER',
-        'REPORTING_MANAGER': 'REPORTING_MANAGER',
-        'HOD': 'HOD',
-        'EMPLOYEE': 'EMPLOYEE',
-    }
-
     @classmethod
     def _sso_role_names(cls, nexus_user):
-        """Return canonical HRMS roles from the verified SSO user payload."""
+        """Return normalized role codes exactly as supplied by verified SSO."""
         raw_roles = []
         for field in (
             'roles', 'role_codes', 'role', 'role_name', 'user_role',
@@ -101,8 +84,14 @@ class NexusSsoLoginView(APIView):
 
         # Some SSO portals represent the administrator role with a boolean
         # claim instead of a role string.
-        if any(nexus_user.get(field) is True for field in ('is_admin', 'is_administrator', 'is_superadmin')):
+        is_sso_admin = any(nexus_user.get(field) is True for field in ('is_admin', 'is_administrator', 'is_superadmin'))
+        if is_sso_admin:
+            # Canonical HRMS admin role: its existing sidebar and protected
+            # routes use this code, while the SSO business role is retained.
             raw_roles.append('SYSTEM_ADMIN')
+        else:
+            # Canonical HRMS employee role controls the employee sidebar.
+            raw_roles.append('EMPLOYEE')
 
         if isinstance(raw_roles, (str, dict)):
             raw_roles = [raw_roles]
@@ -114,9 +103,8 @@ class NexusSsoLoginView(APIView):
                 if isinstance(role, dict) else role
             )
             normalized = str(value or '').strip().upper().replace('-', '_').replace(' ', '_')
-            canonical_name = cls.SSO_ROLE_ALIASES.get(normalized)
-            if canonical_name:
-                role_names.add(canonical_name)
+            if normalized:
+                role_names.add(normalized)
         return role_names
 
     def post(self, request):
@@ -125,14 +113,11 @@ class NexusSsoLoginView(APIView):
         if not code:
             return Response({'detail': 'Missing SSO authorization code.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        expected_state = request.COOKIES.get('nexus_sso_state', '')
-        # NexusOne can launch HRMS directly after its own portal login. In
-        # that IdP-initiated flow HRMS has no browser state cookie yet; the
-        # authorization code is still verified server-to-server below using
-        # this application's client credentials and registered redirect URI.
-        # When HRMS initiated the flow, retain strict state validation.
-        if expected_state and (not state or not secrets.compare_digest(expected_state, state)):
-            return Response({'detail': 'Invalid or expired SSO sign-in request.'}, status=status.HTTP_400_BAD_REQUEST)
+        # HRMS supports both an HRMS-initiated flow and a portal-initiated
+        # launch. A portal launch may arrive with a stale state cookie from a
+        # previous HRMS attempt, so that cookie must not reject the new code.
+        # The exchange below is still protected by a one-time code, registered
+        # redirect URI, client secret, application assignment, and SSO session.
 
         required = (
             settings.NEXUS_SSO_TOKEN_URL,
@@ -166,9 +151,22 @@ class NexusSsoLoginView(APIView):
         if not email:
             return Response({'detail': 'NexusOne did not return a verified email address.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        # NexusOne is the authentication and role source. HRMS retains the
-        # employee link only to apply an employee's normal data scope.
-        user = UserAccount.objects.filter(email__iexact=email).first()
+        # Use the immutable SSO ID first. Falling back to email supports users
+        # who existed before the SSO ID field was introduced.
+        sso_user_id = str(nexus_user.get('id') or nexus_user.get('sso_user_id') or '').strip()
+        user = UserAccount.objects.filter(sso_user_id=sso_user_id).first() if sso_user_id else None
+        user = user or UserAccount.objects.filter(email__iexact=email).first()
+        if not user:
+            # Assignment provisioning is performed by SSO at the moment the
+            # employee receives HRMS access. Login must not create accounts:
+            # that would accidentally provision portal-only administrators.
+            return Response(
+                {'detail': 'Your SSO account has not been provisioned for HRMS.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if sso_user_id and user.sso_user_id != sso_user_id:
+            user.sso_user_id = sso_user_id
+            user.save(update_fields=['sso_user_id'])
         if not user:
             return Response(
                 {'detail': 'Your SSO account has not been provisioned for HRMS.'},
@@ -177,26 +175,23 @@ class NexusSsoLoginView(APIView):
         if not user.is_active:
             return Response({'detail': 'Your HRMS account is disabled.'}, status=status.HTTP_403_FORBIDDEN)
 
-        # An SSO Administrator must become SYSTEM_ADMIN before we create the
-        # JWT/profile: all sidebar items, protected routes, and API permission
-        # classes consistently grant full access to SYSTEM_ADMIN.
-        sso_role_names = self._sso_role_names(nexus_user) or self._sso_role_names(data)
-        if sso_role_names:
-            sso_roles = list(Role.objects.filter(role_name__in=sso_role_names, is_active=True))
-            missing_roles = sso_role_names.difference(role.role_name for role in sso_roles)
-            for role_name in missing_roles:
-                role, _ = Role.objects.get_or_create(
-                    role_name=role_name,
-                    defaults={
-                        'code': role_name.lower(),
-                        'description': f'Synchronized from NexusOne SSO ({role_name}).',
-                        'level': 100 if role_name == 'SYSTEM_ADMIN' else 10,
-                        'is_active': True,
-                    },
-                )
-                if role.is_active:
-                    sso_roles.append(role)
-            user.roles.set(sso_roles)
+        # NexusOne is the identity source of truth. Refresh the HRMS employee
+        # profile on every SSO login so changed portal details are visible in
+        # HRMS without manual duplicate data entry.
+        employee = user.employee
+        full_name = str(nexus_user.get('name') or '').strip()
+        first_name = str(nexus_user.get('first_name') or full_name.split(' ', 1)[0] or employee.first_name).strip()[:50]
+        last_name = str(nexus_user.get('last_name') or (full_name.split(' ', 1)[1] if ' ' in full_name else employee.last_name)).strip()[:50] or employee.last_name
+        employee.first_name = first_name
+        employee.last_name = last_name
+        employee.official_email = email
+        if nexus_user.get('phone_number'):
+            employee.phone_number = str(nexus_user['phone_number'])[:20]
+        employee.save(update_fields=['first_name', 'last_name', 'official_email', 'phone_number'])
+
+        # HRMS roles are local business authorization.  SSO proves identity
+        # and application assignment only; it must never create, replace, or
+        # elevate HRMS roles during sign-in.
 
         # Mark the local account as SSO-authenticated without changing its
         # employee link.
@@ -213,6 +208,101 @@ class NexusSsoLoginView(APIView):
         response.delete_cookie('nexus_sso_state', path='/')
         return response
 
+    @staticmethod
+    def _provision_user(nexus_user, email, sso_user_id):
+        """Create the minimum HRMS profile required for an assigned SSO user."""
+        full_name = str(nexus_user.get('name') or '').strip()
+        first_name = str(nexus_user.get('first_name') or full_name.split(' ', 1)[0] or 'SSO').strip()[:50]
+        last_name = str(nexus_user.get('last_name') or (full_name.split(' ', 1)[1] if ' ' in full_name else '-')).strip()[:50] or '-'
+        employee_id = str(nexus_user.get('employee_id') or f'SSO-{sso_user_id or email}').strip()[:20]
+        base_employee_id = employee_id
+        suffix = 2
+        while Employee.objects.filter(employee_id=employee_id).exists():
+            employee_id = f'{base_employee_id[:16]}-{suffix}'
+            suffix += 1
+        with transaction.atomic():
+            employee = Employee.objects.filter(official_email__iexact=email).first()
+            if not employee:
+                employee = Employee.objects.create(
+                    employee_id=employee_id,
+                    first_name=first_name,
+                    last_name=last_name,
+                    official_email=email,
+                    phone_number=str(nexus_user.get('phone_number') or '+910000000000')[:20],
+                    date_of_birth='1990-01-01',
+                    date_of_joining=django_timezone.localdate(),
+                    status='ACTIVE',
+                )
+            user = UserAccount.objects.create_user(
+                email=email,
+                username=email,
+                password=None,
+                employee=employee,
+                is_active=bool(nexus_user.get('is_active', True)),
+                is_ldap_user=True,
+                sso_user_id=sso_user_id or None,
+            )
+            default_role, _ = Role.objects.get_or_create(
+                code='employee',
+                defaults={'role_name': 'EMPLOYEE', 'description': 'Default HRMS employee role.', 'level': 10, 'is_active': True},
+            )
+            if default_role.is_active:
+                user.roles.add(default_role)
+        return user
+
+
+class NexusSsoDirectorySyncView(APIView):
+    """Assignment-driven identity provisioning from NexusOne SSO.
+
+    This endpoint intentionally has no role fields: HRMS owns its role
+    catalogue and employee role assignments.
+    """
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    def post(self, request):
+        secret = request.headers.get('X-SSO-Directory-Sync-Secret', '')
+        if not settings.NEXUS_SSO_DIRECTORY_SYNC_SECRET or not secrets.compare_digest(secret, settings.NEXUS_SSO_DIRECTORY_SYNC_SECRET):
+            return Response({'detail': 'Invalid directory sync credentials.'}, status=status.HTTP_403_FORBIDDEN)
+        sso_user_id = str(request.data.get('user_id') or '').strip()
+        email = str(request.data.get('email') or '').strip().lower()
+        if not sso_user_id or not email:
+            return Response({'detail': 'SSO user ID and email are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        user = UserAccount.objects.filter(sso_user_id=sso_user_id).first()
+        user = user or UserAccount.objects.filter(email__iexact=email).first()
+        created = not bool(user)
+        if not user:
+            user = NexusSsoLoginView._provision_user(request.data, email, sso_user_id)
+        employee = user.employee
+        full_name = str(request.data.get('name') or '').strip()
+        employee.first_name = str(request.data.get('first_name') or full_name.split(' ', 1)[0] or employee.first_name).strip()[:50]
+        employee.last_name = str(request.data.get('last_name') or (full_name.split(' ', 1)[1] if ' ' in full_name else employee.last_name)).strip()[:50] or employee.last_name
+        employee.official_email = email
+        if request.data.get('phone_number'):
+            employee.phone_number = str(request.data['phone_number'])[:20]
+        employee.save(update_fields=['first_name', 'last_name', 'official_email', 'phone_number'])
+        user.email = email
+        user.sso_user_id = sso_user_id
+        user.is_active = bool(request.data.get('is_active', True))
+        user.save(update_fields=['email', 'sso_user_id', 'is_active'])
+        return Response({'id': str(user.id), 'employee_id': str(employee.id), 'active': user.is_active}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class NexusSsoDirectoryReconcileView(APIView):
+    """Disable SSO-linked HRMS accounts absent from SSO's HRMS roster."""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        secret = request.headers.get('X-SSO-Directory-Sync-Secret', '')
+        if not settings.NEXUS_SSO_DIRECTORY_SYNC_SECRET or not secrets.compare_digest(secret, settings.NEXUS_SSO_DIRECTORY_SYNC_SECRET):
+            return Response({'detail': 'Invalid directory sync credentials.'}, status=status.HTTP_403_FORBIDDEN)
+        assigned_user_ids = request.data.get('assigned_user_ids')
+        if not isinstance(assigned_user_ids, list) or any(not isinstance(value, str) for value in assigned_user_ids):
+            return Response({'detail': 'assigned_user_ids must be a list of SSO user IDs.'}, status=status.HTTP_400_BAD_REQUEST)
+        assigned_user_ids = {value.strip() for value in assigned_user_ids if value.strip()}
+        stale_users = UserAccount.objects.filter(sso_user_id__isnull=False).exclude(sso_user_id__in=assigned_user_ids).filter(is_active=True)
+        deactivated = stale_users.update(is_active=False)
+        return Response({'deactivated': deactivated, 'assigned': len(assigned_user_ids)})
 
 class NexusSsoAuthorizeView(APIView):
     """Begin an SSO-only login without exposing a local password form."""
@@ -693,7 +783,14 @@ class EmployeeViewSet(ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Employee.objects.filter(is_deleted=False).select_related(
+        # Keep HRMS employment history intact, but do not show an SSO-linked
+        # employee whose HRMS assignment was revoked. Locally managed employee
+        # accounts and employees without accounts remain visible.
+        qs = Employee.objects.filter(is_deleted=False).filter(
+            Q(user_account__isnull=True)
+            | Q(user_account__sso_user_id__isnull=True)
+            | Q(user_account__is_active=True)
+        ).select_related(
             'position', 'position__department', 'reporting_manager', 'structure_location','department', 'location', 'cost_center',
         )
 
@@ -868,7 +965,11 @@ class EmployeeViewSet(ModelViewSet):
     @action(detail=False, methods=['get'], url_path='managers')
     def managers(self, request):
         """Get list of employees filtered by role (e.g., REPORTING_MANAGER or HOD)."""
-        qs = Employee.objects.filter(is_deleted=False, status__in=['ACTIVE', 'PROBATION'])
+        qs = Employee.objects.filter(is_deleted=False, status__in=['ACTIVE', 'PROBATION']).filter(
+            Q(user_account__isnull=True)
+            | Q(user_account__sso_user_id__isnull=True)
+            | Q(user_account__is_active=True)
+        )
 
         # 👇 Check if frontend is asking for a specific role (e.g., ?role=REPORTING_MANAGER)
         role_filter = request.query_params.get('role', '').strip().upper()
@@ -1235,10 +1336,11 @@ from .permissions import IsHRAdmin, IsSystemAdmin
 # ------------------------------------------------------------------------------
 
 class RoleViewSet(ModelViewSet):
-    """Full CRUD for roles. Only System Admins can manage."""
+    """Role directory used when assigning a role to an employee account."""
     queryset = Role.objects.all().order_by('-level', 'role_name')
     serializer_class = RoleFullSerializer
     permission_classes = [IsAuthenticated, ReadHROnlyWriteSystemAdmin]
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['role_name', 'code', 'description']
     ordering_fields = ['level', 'role_name', 'created_at']
