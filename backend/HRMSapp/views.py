@@ -70,6 +70,24 @@ class NexusSsoLoginView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
+    @staticmethod
+    def _apply_portal_admin_mapping(user, is_portal_admin):
+        """Map an explicitly HRMS-authorized portal admin to local HRMS admin."""
+        if not is_portal_admin:
+            return
+        role, _ = Role.objects.get_or_create(
+            code='system_admin',
+            defaults={
+                'role_name': 'SYSTEM_ADMIN',
+                'description': 'Full HRMS administration.',
+                'level': 100,
+                'is_active': True,
+                'sso_managed': False,
+            },
+        )
+        if role.is_active:
+            user.roles.add(role)
+
     @classmethod
     def _sso_role_names(cls, nexus_user):
         """Return normalized role codes exactly as supplied by verified SSO."""
@@ -190,8 +208,9 @@ class NexusSsoLoginView(APIView):
         employee.save(update_fields=['first_name', 'last_name', 'official_email', 'phone_number'])
 
         # HRMS roles are local business authorization.  SSO proves identity
-        # and application assignment only; it must never create, replace, or
-        # elevate HRMS roles during sign-in.
+        # and application assignment. The one agreed exception is an
+        # explicitly assigned portal administrator, mapped to SYSTEM_ADMIN.
+        self._apply_portal_admin_mapping(user, bool(nexus_user.get('is_portal_admin')))
 
         # Mark the local account as SSO-authenticated without changing its
         # employee link.
@@ -284,6 +303,7 @@ class NexusSsoDirectorySyncView(APIView):
         user.sso_user_id = sso_user_id
         user.is_active = bool(request.data.get('is_active', True))
         user.save(update_fields=['email', 'sso_user_id', 'is_active'])
+        NexusSsoLoginView._apply_portal_admin_mapping(user, bool(request.data.get('is_portal_admin')))
         return Response({'id': str(user.id), 'employee_id': str(employee.id), 'active': user.is_active}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
