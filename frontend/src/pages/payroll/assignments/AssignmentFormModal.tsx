@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
+import SearchableSelect from '../../../components/SearchableSelect';
 import { getPayrollEmployees, getStructures, createAssignment, previewStructure } from '../../../api/payrollApi';
 
 const inputCls =
@@ -27,7 +28,10 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
   const [preview, setPreview] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [previewError, setPreviewError] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [employeesLoading, setEmployeesLoading] = useState(true);
+  const previewRequestId = useRef(0);
 
   useEffect(() => {
     getPayrollEmployees()
@@ -41,27 +45,48 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
 
   const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
 
-  const handlePreview = async () => {
-    if (!form.structure || !form.ctc_annual) return;
-    try {
-      const res = await previewStructure({
-        structure_id: form.structure,
-        ctc_annual: parseFloat(form.ctc_annual),
-        effective_from: form.effective_from || undefined,
-      });
-      setPreview(res.data);
-      setForm((current) => ({
-        ...current,
-        fixed_salary_monthly: String(res.data.fixed_salary_monthly ?? res.data.gross ?? ''),
-      }));
-    } catch {
+  useEffect(() => {
+    const requestId = ++previewRequestId.current;
+    const annualCtc = Number(form.ctc_annual);
+    if (!form.structure || !Number.isFinite(annualCtc) || annualCtc <= 0 || !form.effective_from) {
       setPreview(null);
+      setPreviewError('');
+      setPreviewLoading(false);
+      setForm((current) => ({ ...current, fixed_salary_monthly: '' }));
+      return;
     }
-  };
+
+    setPreview(null);
+    setPreviewError('');
+    setPreviewLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await previewStructure({
+          structure_id: form.structure,
+          ctc_annual: annualCtc,
+          effective_from: form.effective_from,
+        });
+        if (requestId !== previewRequestId.current) return;
+        setPreview(response.data);
+        setForm((current) => ({
+          ...current,
+          fixed_salary_monthly: String(response.data.fixed_salary_monthly ?? response.data.gross ?? ''),
+        }));
+      } catch (err: any) {
+        if (requestId !== previewRequestId.current) return;
+        setPreview(null);
+        setPreviewError(err?.response?.data?.detail || 'Could not calculate this structure preview.');
+      } finally {
+        if (requestId === previewRequestId.current) setPreviewLoading(false);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [form.structure, form.ctc_annual, form.effective_from]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.employee || !form.structure || !form.ctc_annual || !form.fixed_salary_monthly || !form.effective_from) {
+    if (!form.employee || !form.structure || !form.ctc_annual || !form.effective_from || !preview) {
       setError('All required fields must be filled.');
       return;
     }
@@ -72,7 +97,6 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
         employee: form.employee,
         structure: form.structure,
         ctc_annual: parseFloat(form.ctc_annual),
-        fixed_salary_monthly: parseFloat(form.fixed_salary_monthly),
         effective_from: form.effective_from,
         reason: form.reason || null,
       });
@@ -99,26 +123,28 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600">Employee *</label>
-            <select
+            <SearchableSelect
               className={inputCls}
               value={form.employee}
-              onChange={(e) => {
-                const selectedEmployee = employees.find((employee) => employee.id === e.target.value);
+              options={employees.map((emp: any) => ({
+                value: emp.id,
+                label: `${emp.employee_id} — ${emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim()}`,
+              }))}
+              placeholder={employeesLoading ? 'Loading employees…' : 'Search employee ID or name…'}
+              disabled={employeesLoading}
+              required
+              noOptionsMessage="No employees match your search."
+              onChange={(employeeId) => {
+                const selectedEmployee = employees.find((employee) => employee.id === employeeId);
                 setForm((current) => ({
                   ...current,
-                  employee: e.target.value,
+                  employee: employeeId,
                   effective_from: selectedEmployee?.date_of_joining || '',
                   fixed_salary_monthly: '',
                 }));
+                setError('');
               }}
-            >
-              <option value="">{employeesLoading ? 'Loading employees…' : 'Select employee…'}</option>
-              {employees.map((emp: any) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.employee_id} — {emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim()}
-                </option>
-              ))}
-            </select>
+            />
           </div>
 
           <div>
@@ -133,6 +159,8 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
                   fixed_salary_monthly: '',
                 }));
                 setPreview(null);
+                setPreviewError('');
+                setError('');
               }}
             >
               <option value="">Select structure…</option>
@@ -156,8 +184,9 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
                   fixed_salary_monthly: '',
                 }));
                 setPreview(null);
+                setPreviewError('');
+                setError('');
               }}
-              onBlur={handlePreview}
               placeholder="600000"
             />
             <p className="mt-1 text-xs text-gray-500">
@@ -171,10 +200,12 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
               type="number"
               step="0.01"
               className={inputCls}
-              value={form.fixed_salary_monthly}
-              onChange={(e) => set('fixed_salary_monthly', e.target.value)}
-              placeholder="20000"
+              value={preview?.fixed_salary_monthly ?? ''}
+              readOnly
+              placeholder={previewLoading ? 'Calculating from structure…' : 'Calculated from selected structure'}
             />
+            {previewError && <p className="mt-1 text-xs text-red-600">{previewError}</p>}
+            {previewLoading && <p className="mt-1 text-xs text-blue-600">Recalculating preview from the selected structure and effective date…</p>}
             <p className="mt-1 text-xs text-gray-500">
               Preview fills this from the structure. It must match fixed earning components; monthly variable pay is entered separately in the payroll run.
             </p>
@@ -182,7 +213,12 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
 
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600">Effective From *</label>
-            <input type="date" className={inputCls} value={form.effective_from} onChange={(e) => set('effective_from', e.target.value)} />
+            <input type="date" className={inputCls} value={form.effective_from} onChange={(e) => {
+              setForm((current) => ({ ...current, effective_from: e.target.value, fixed_salary_monthly: '' }));
+              setPreview(null);
+              setPreviewError('');
+              setError('');
+            }} />
             <p className="mt-1 text-xs text-gray-500">Defaults to the selected employee’s joining date. You can change it before saving.</p>
           </div>
 
@@ -227,7 +263,7 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
 
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} className="rounded-xl px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100 transition">Cancel</button>
-            <button type="submit" disabled={saving} className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 transition">
+            <button type="submit" disabled={saving || previewLoading || !preview} className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 transition">
               {saving ? 'Saving…' : 'Assign'}
             </button>
           </div>

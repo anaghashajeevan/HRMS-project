@@ -34,9 +34,12 @@ export default function RunEmployeeTable({ employees, runId, runStatus, runType 
   const [referencePeriodEnd, setReferencePeriodEnd] = useState('');
   const [adjustmentSaving, setAdjustmentSaving] = useState(false);
   const [adjustments, setAdjustments] = useState<any[]>([]);
+  const isFnfRun = runType === 'FNF';
+  const isArrearsRun = runType === 'ARREARS';
+  const isOneTimeRun = runType === 'OFF_CYCLE' || isArrearsRun;
   const lockedDayData = detail?.input_snapshot?.locked_inputs?.day_data;
   const tds = detail?.input_snapshot?.tds;
-  const isOffCycleTds = detail?.input_snapshot?.run_type === 'OFF_CYCLE';
+  const isOffCycleTds = ['OFF_CYCLE', 'ARREARS'].includes(detail?.input_snapshot?.run_type);
   const loadAdjustments = async () => {
     try {
       const response = await getRunAdjustments(runId);
@@ -171,8 +174,8 @@ export default function RunEmployeeTable({ employees, runId, runStatus, runType 
               <thead className="bg-gray-50/60">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Employee</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">{runType === 'OFF_CYCLE' ? 'Run item' : 'Payable / Workdays'}</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">{runType === 'OFF_CYCLE' ? 'Taxable pay' : 'LOP'}</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">{isOneTimeRun ? 'Run item' : 'Payable / Workdays'}</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">{isOneTimeRun ? 'Taxable pay' : 'LOP'}</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Gross</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Deductions</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Net Pay</th>
@@ -188,9 +191,9 @@ export default function RunEmployeeTable({ employees, runId, runStatus, runType 
                       <div className="text-xs text-gray-400">{e.employee_code || ''}</div>
                     </td>
                     <td className="px-4 py-3 text-center text-sm text-gray-500">
-                      {runType === 'OFF_CYCLE' ? 'One-time' : e.payable_days != null ? `${e.payable_days}/${e.salary_divisor_days || e.days_in_month}` : '—'}
+                      {isOneTimeRun ? (isArrearsRun ? 'Generated arrears' : 'One-time') : e.payable_days != null ? `${e.payable_days}/${e.salary_divisor_days || e.days_in_month}` : '—'}
                     </td>
-                    <td className="px-4 py-3 text-center text-sm text-gray-500">{runType === 'OFF_CYCLE' ? (e.status === 'CALCULATED' ? 'As entered' : '—') : e.lop_days ?? '—'}</td>
+                    <td className="px-4 py-3 text-center text-sm text-gray-500">{isOneTimeRun ? (e.status === 'CALCULATED' ? 'As generated' : '—') : e.lop_days ?? '—'}</td>
                     <td className="px-4 py-3 text-right text-sm font-medium">₹{fmt(e.gross_pay)}</td>
                     <td className="px-4 py-3 text-right text-sm text-red-600">₹{fmt(e.total_deductions)}</td>
                     <td className="px-4 py-3 text-right text-sm font-semibold text-green-700">₹{fmt(e.net_pay)}</td>
@@ -201,7 +204,7 @@ export default function RunEmployeeTable({ employees, runId, runStatus, runType 
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-1">
-                        {(runStatus === 'LOCKED' || (runStatus === 'CALCULATED' && canAdjustReturned)) && e.status !== 'EXCLUDED' && (
+                        {!isArrearsRun && (runStatus === 'LOCKED' || (runStatus === 'CALCULATED' && canAdjustReturned)) && e.status !== 'EXCLUDED' && (
                           <button onClick={() => setAdjustmentEmployee(e)} className="rounded-lg p-1.5 text-gray-400 hover:bg-green-50 hover:text-green-600 transition" title="Add payroll adjustment">
                             <PlusIcon className="h-4 w-4" />
                           </button>
@@ -288,7 +291,13 @@ export default function RunEmployeeTable({ employees, runId, runStatus, runType 
                   </div>
                 )}
                 {/* Day Summary */}
-                {detail.input_snapshot?.run_type !== 'OFF_CYCLE' && <div className="rounded-xl bg-gray-50 p-4 ring-1 ring-gray-100">
+                {isFnfRun && (
+                  <div className="rounded-xl bg-violet-50 p-4 text-sm text-violet-900 ring-1 ring-violet-100">
+                    This F&amp;F run settles only the remaining salary balance after paid payroll. It does not repeat monthly salary components or the regular run’s LOP deduction. Encashment, approved dues, recoveries, and applicable statutory calculations are shown below.
+                  </div>
+                )}
+                {isArrearsRun && <div className="rounded-xl bg-amber-50 p-4 text-sm text-amber-950 ring-1 ring-amber-100">This employee’s pay items come from previously generated arrears, listed above with their source periods. This run does not repeat the regular monthly salary or attendance calculation.</div>}
+                {!isFnfRun && !['OFF_CYCLE', 'ARREARS'].includes(detail.input_snapshot?.run_type) && <div className="rounded-xl bg-gray-50 p-4 ring-1 ring-gray-100">
                   <h4 className="text-xs font-semibold uppercase text-gray-500 mb-2">Day Summary</h4>
                   <div className="grid grid-cols-4 gap-3 text-sm">
                     <div><span className="text-gray-500">Calendar Days:</span> <span className="font-medium">{detail.days_in_month}</span></div>
@@ -320,11 +329,11 @@ export default function RunEmployeeTable({ employees, runId, runStatus, runType 
                               <p className="mb-2 text-xs text-gray-500">Financial year: {tds.financial_year_start} to {tds.financial_year_end}</p>
                               <div className="space-y-1.5">
                                 <div className="flex justify-between gap-3"><span className="text-gray-600">Taxable earnings from earlier finalized/paid months</span><span className="shrink-0 font-medium">₹{fmt(tdsPriorTaxable)}</span></div>
-                                <div className="flex justify-between gap-3"><span className="text-gray-600">{detail.input_snapshot?.run_type === 'OFF_CYCLE' ? 'Taxable one-time pay in this run' : 'Taxable earnings for this pay period'}</span><span className="shrink-0 font-medium">₹{fmt(tdsCurrentPeriodTaxable)}</span></div>
-                                {detail.input_snapshot?.run_type === 'OFF_CYCLE' && Number(tds.current_month_regular_salary_projection || 0) > 0 && (
+                                <div className="flex justify-between gap-3"><span className="text-gray-600">{isOffCycleTds ? 'Taxable one-time pay in this run' : 'Taxable earnings for this pay period'}</span><span className="shrink-0 font-medium">₹{fmt(tdsCurrentPeriodTaxable)}</span></div>
+                                {isOffCycleTds && Number(tds.current_month_regular_salary_projection || 0) > 0 && (
                                   <div className="flex justify-between gap-3"><span className="text-gray-600">Regular salary projected for this month (no regular run settled yet)</span><span className="shrink-0 font-medium">₹{fmt(tds.current_month_regular_salary_projection)}</span></div>
                                 )}
-                                {tds.current_period_basis && detail.input_snapshot?.run_type !== 'OFF_CYCLE' && (
+                                {tds.current_period_basis && !isOffCycleTds && (
                                   <div className="my-2 rounded-md bg-purple-50/70 p-2.5 text-xs text-gray-700">
                                     <p className="mb-1 font-semibold text-purple-900">How this pay period’s taxable salary was derived</p>
                                     <p>Full-month taxable salary: ₹{fmt(tds.current_period_basis.full_month_taxable_salary)}</p>
@@ -407,7 +416,7 @@ export default function RunEmployeeTable({ employees, runId, runStatus, runType 
                   </div>
                 )}
 
-                {reconciledDays.length > 0 && (
+                {!isFnfRun && reconciledDays.length > 0 && (
                   <div className="rounded-xl bg-white p-4 ring-1 ring-gray-200">
                     <h4 className="text-xs font-semibold uppercase text-gray-500 mb-2">Reconciled Attendance Dates</h4>
                     <div className="max-h-48 overflow-y-auto space-y-1 text-xs">
@@ -437,7 +446,7 @@ export default function RunEmployeeTable({ employees, runId, runStatus, runType 
                 {detail.component_details && (
                   <div>
                     <h4 className="text-xs font-semibold uppercase text-gray-500 mb-2">Components</h4>
-                    <p className="mb-2 text-xs text-gray-500">Salary structure components are shown at their assigned monthly amounts. LOP and unpaid days are listed separately under deductions.</p>
+                    <p className="mb-2 text-xs text-gray-500">{isFnfRun ? 'F&F settlement items and applicable statutory deductions are listed below.' : 'Salary structure components are shown at their assigned monthly amounts. LOP and unpaid days are listed separately under deductions.'}</p>
                     <div className="space-y-1">
                       {detail.component_details
                         .filter((c: any) => c.is_earning && !c.is_employer_cost)

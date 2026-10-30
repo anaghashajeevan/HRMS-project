@@ -389,6 +389,8 @@ class EmployeeDocument(models.Model):
         ('ADDRESS_PROOF', 'Address Proof'),
         ('EDUCATION', 'Education Certificate'),
         ('EXPERIENCE', 'Experience Certificate'),
+        ('RELIEVING_LETTER', 'Relieving Letter'),
+        ('FNF_STATEMENT', 'Full & Final Settlement Statement'),
         ('PAN', 'PAN Card'),
         ('AADHAAR', 'Aadhaar Card'),
         ('PASSPORT', 'Passport'),
@@ -738,6 +740,7 @@ class ApprovalWorkflow(models.Model):
          ('CALENDAR', 'Annual Calendar'),
          ('PAYROLL', 'Payroll Run'),
          ('PAYSLIP', 'Payslip Request'),
+         ('EXIT', 'Employee Exit'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -820,6 +823,10 @@ class LetterTemplate(models.Model):
         ('PROBATION_PERIOD_CHANGED', 'Probation Period Changed'),
         ('EMPLOYMENT_STATUS_CHANGED', 'Employment Status Changed'),
         ('EMPLOYEE_ID_CHANGED', 'Employee ID Changed'),
+        ('PAYROLL_APPROVAL_REQUEST', 'Payroll Approval Request Email'),
+        ('PAYROLL_RUN_APPROVED', 'Payroll Run Approved Email'),
+        ('PAYROLL_RUN_RETURNED', 'Payroll Run Returned Email'),
+        ('PAYROLL_RUN_PAID', 'Payroll Run Paid Email'),
     ]
     CREATION_METHOD_CHOICES = [
         ('AI', 'AI Generated'),

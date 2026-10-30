@@ -29,6 +29,57 @@ const STATUS_COLORS: Record<string, string> = {
 const fmt = (v: number | string | null) =>
   v != null ? Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 
+const auditLabel = (key: string) => key
+  .replaceAll('_', ' ')
+  .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const isAuditIdKey = (key: string) => /(^id$|_id$|uuid)/i.test(key);
+const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+const stripAuditIds = (value: string) => value
+  .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi, '')
+  .replace(/\s{2,}/g, ' ')
+  .trim();
+
+function AuditValue({ value, fieldKey = '' }: { value: unknown; fieldKey?: string }) {
+  if (value == null || value === '') return <span>—</span>;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span>None</span>;
+    return (
+      <div className="space-y-2">
+        {value.map((item, index) => (
+          <div key={index} className="rounded-md bg-gray-50 p-2">
+            <AuditValue value={item} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).filter(([key]) => !isAuditIdKey(key));
+    if (entries.length === 0) return <span>—</span>;
+    return (
+      <dl className="space-y-1.5">
+        {entries.map(([key, nestedValue]) => (
+          <div key={key} className="flex justify-between gap-3">
+            <dt className="text-gray-500">{auditLabel(key)}</dt>
+            <dd className="text-right text-gray-800"><AuditValue value={nestedValue} fieldKey={key} /></dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  if (typeof value === 'boolean') return <span>{value ? 'Yes' : 'No'}</span>;
+  if (typeof value === 'string' && isUuid(value)) return <span>—</span>;
+  if (typeof value === 'number' && /(amount|salary|ctc|gross|net_pay|daily_rate)/i.test(fieldKey)) {
+    return <span>₹{fmt(value)}</span>;
+  }
+  if (typeof value === 'string' && /(amount|salary|ctc|gross|net_pay|daily_rate)/i.test(fieldKey) && Number.isFinite(Number(value))) {
+    return <span>₹{fmt(value)}</span>;
+  }
+  if (typeof value === 'string' && /^[A-Z][A-Z_]+$/.test(value)) return <span>{auditLabel(value)}</span>;
+  return <span>{stripAuditIds(String(value)) || '—'}</span>;
+}
+
 interface ActionDef {
   key: string;
   label: string;
@@ -256,7 +307,7 @@ export default function PayRunDetailPage() {
           </h2>
           <p className="text-sm text-gray-500">
             {run.pay_calendar?.period_start} → {run.pay_calendar?.period_end}
-            {run.run_type === 'OFF_CYCLE' && run.payment_date ? ` · Payment date ${run.payment_date}` : ''}
+            {['OFF_CYCLE', 'ARREARS'].includes(run.run_type) && run.payment_date ? ` · Payment date ${run.payment_date}` : ''}
           </p>
         </div>
         <span className={`inline-flex rounded-lg px-3 py-1.5 text-sm font-semibold ring-1 ring-inset ${STATUS_COLORS[run.status] || ''}`}>
@@ -267,6 +318,11 @@ export default function PayRunDetailPage() {
       {run.run_type === 'OFF_CYCLE' && (
         <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-950">
           <strong>Off-cycle payout:</strong> monthly salary and attendance are not repeated. Lock the run, add each affected employee’s one-time pay item, then calculate, submit through the configured approval steps, finalize, create a separate bank batch, and reconcile payment. Taxable items use the employee’s tax profile and configured TDS rule. Increment differences are one-time payments; update the salary assignment separately for future monthly payroll.
+        </div>
+      )}
+      {run.run_type === 'ARREARS' && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <strong>Arrears payout:</strong> locking this run loads available generated arrears by employee and reserves them to this run. Review the source period and component lines, then calculate and send the run through configured approvals, payment reconciliation, and payslip steps. Regular monthly salary and attendance are not repeated.
         </div>
       )}
 
@@ -289,12 +345,12 @@ export default function PayRunDetailPage() {
 
       {run.status === 'OPEN' && employees.length === 0 && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          This run is an empty draft. Choose <strong>Lock Inputs &amp; Load Employees</strong> to load employees with a salary assignment effective during this pay period. {run.run_type === 'OFF_CYCLE' ? 'No salary or attendance is calculated unless a one-time pay item is entered for an employee.' : 'Their pay amounts are calculated in the next step.'}
+          This run is an empty draft. Choose <strong>Lock Inputs &amp; Load Employees</strong> to load the employees and pay items for this run. {run.run_type === 'ARREARS' ? 'Generated, unsettled arrears items will be reserved automatically.' : run.run_type === 'OFF_CYCLE' ? 'No salary or attendance is calculated unless a one-time pay item is entered for an employee.' : 'Their pay amounts are calculated in the next step.'}
         </div>
       )}
       {run.status === 'LOCKED' && employees.length > 0 && employees.every((employee) => employee.status === 'PENDING') && (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
-          {run.run_type === 'OFF_CYCLE' ? 'Eligible employees are loaded for one-time pay entry. Add an item only for each employee who should receive this off-cycle payment, then choose Calculate.' : <>Employees and attendance inputs are loaded. Choose <strong>Calculate</strong> to continue, or <strong>Reopen Inputs</strong> to refresh the employee list and locked attendance before calculation.</>}
+          {run.run_type === 'ARREARS' ? <>Generated arrears are reserved for this run. Review the itemized pay lines, then choose <strong>Calculate</strong>.</> : run.run_type === 'OFF_CYCLE' ? 'Eligible employees are loaded for one-time pay entry. Add an item only for each employee who should receive this off-cycle payment, then choose Calculate.' : <>Employees and attendance inputs are loaded. Choose <strong>Calculate</strong> to continue, or <strong>Reopen Inputs</strong> to refresh the employee list and locked attendance before calculation.</>}
         </div>
       )}
       {run.status === 'CALCULATED' && hasFailedCalculations && (
@@ -476,8 +532,75 @@ export default function PayRunDetailPage() {
                     {log.run_status_from && (
                       <p className="text-gray-500">{log.run_status_from} → {log.run_status_to}</p>
                     )}
-                    {log.reason && <p className="text-gray-600 italic mt-1">{log.reason}</p>}
-                    <p className="text-xs text-gray-400 mt-1">By: {log.performed_by_name || log.performed_by}</p>
+                    {log.reason && stripAuditIds(log.reason) && <p className="text-gray-600 italic mt-1">{stripAuditIds(log.reason)}</p>}
+                    {log.action === 'FNF_LEAVE_ENCASHMENT_POSTED' && Array.isArray(log.new_values?.leave_balances) && (
+                      <div className="mt-3 overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                        <table className="w-full min-w-[440px] text-left text-xs">
+                          <thead className="bg-gray-100 text-gray-600">
+                            <tr>
+                              <th className="px-3 py-2 font-semibold">Leave type</th>
+                              <th className="px-3 py-2 font-semibold">Year</th>
+                              <th className="px-3 py-2 text-right font-semibold">Days encashed</th>
+                              <th className="px-3 py-2 text-right font-semibold">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {log.new_values.leave_balances.map((item: any, rowIndex: number) => (
+                              <tr key={`${item.balance_id || item.leave_type_code}-${rowIndex}`}>
+                                <td className="px-3 py-2 text-gray-800">
+                                  {item.leave_type_name || item.leave_type_code || 'Leave'}
+                                  {item.leave_type_name && item.leave_type_code ? ` (${item.leave_type_code})` : ''}
+                                </td>
+                                <td className="px-3 py-2 text-gray-700">{item.year ?? '—'}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-gray-700">{item.days ?? '—'}</td>
+                                <td className="px-3 py-2 text-right tabular-nums font-medium text-gray-900">₹{fmt(item.amount)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="border-t border-gray-200 bg-gray-50 font-semibold text-gray-800">
+                            <tr>
+                              <td className="px-3 py-2" colSpan={2}>Total posted</td>
+                              <td className="px-3 py-2 text-right tabular-nums">{log.new_values.total_encashable_days ?? '—'}</td>
+                              <td className="px-3 py-2 text-right tabular-nums">₹{fmt(log.new_values.total_amount)}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    )}
+                    {(Object.keys(log.old_values || {}).length > 0 || Object.keys(log.new_values || {}).length > 0) && (
+                      <details className="mt-2" open={log.action !== 'FNF_LEAVE_ENCASHMENT_POSTED'}>
+                        <summary className="cursor-pointer text-xs font-medium text-blue-700">{log.action === 'FNF_LEAVE_ENCASHMENT_POSTED' ? 'More audit data' : 'View recorded details'}</summary>
+                        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                          {Object.keys(log.old_values || {}).length > 0 && (
+                            <div className="rounded-lg bg-white p-3 ring-1 ring-gray-200">
+                              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Before</p>
+                              <dl className="space-y-1.5">
+                                {Object.entries(log.old_values).filter(([key]) => !isAuditIdKey(key)).map(([key, value]) => (
+                                  <div key={key} className="flex justify-between gap-3 text-xs">
+                                    <dt className="text-gray-500">{auditLabel(key)}</dt>
+                                    <dd className="max-w-[70%] break-words text-right text-gray-800"><AuditValue value={value} fieldKey={key} /></dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            </div>
+                          )}
+                          {Object.keys(log.new_values || {}).length > 0 && (
+                            <div className="rounded-lg bg-white p-3 ring-1 ring-gray-200">
+                              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Recorded</p>
+                              <dl className="space-y-1.5">
+                                {Object.entries(log.new_values).filter(([key]) => key !== 'leave_balances' && !isAuditIdKey(key)).map(([key, value]) => (
+                                  <div key={key} className="flex justify-between gap-3 text-xs">
+                                    <dt className="text-gray-500">{auditLabel(key)}</dt>
+                                    <dd className="max-w-[70%] break-words text-right text-gray-800"><AuditValue value={value} fieldKey={key} /></dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                    )}
+                    <p className="text-xs text-gray-400 mt-1">By: {log.performed_by_name || 'System'}</p>
                   </div>
                 ))}
               </div>

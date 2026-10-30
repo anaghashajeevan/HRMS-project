@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { calculatePreview, getPayrollEmployees } from '../../../api/payrollApi';
+import SearchableSelect from '../../../components/SearchableSelect';
 
 const inputCls =
   'block w-full rounded-xl border-0 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-blue-500 transition';
@@ -49,12 +50,17 @@ export default function CalculatePreviewPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
           <div className="sm:col-span-2">
             <label className="mb-1 block text-xs font-medium text-gray-600">Employee</label>
-            <select className={inputCls} value={form.employee_id} onChange={(e) => setForm((f) => ({ ...f, employee_id: e.target.value }))}>
-              <option value="">Select employee…</option>
-              {employees.map((emp: any) => (
-                <option key={emp.id} value={emp.id}>{emp.employee_id} — {emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim()}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              className={inputCls}
+              value={form.employee_id}
+              options={employees.map((emp: any) => ({
+                value: emp.id,
+                label: `${emp.employee_id} — ${emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim()}`,
+              }))}
+              placeholder="Search employee ID or name…"
+              noOptionsMessage="No employees match your search."
+              onChange={(employeeId) => setForm((current) => ({ ...current, employee_id: employeeId }))}
+            />
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600">Period Start</label>

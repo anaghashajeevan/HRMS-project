@@ -1301,6 +1301,13 @@ class EmployeeDocumentViewSet(ModelViewSet):
 
         serializer.save(uploaded_by=employee)
 
+    def perform_update(self, serializer):
+        from rest_framework.exceptions import PermissionDenied
+        instance = self.get_object()
+        if hasattr(instance, 'exit_document_record'):
+            raise PermissionDenied('Issued exit documents cannot be edited through the general document repository.')
+        serializer.save()
+
     def perform_destroy(self, instance):
         user = self.request.user
         employee = getattr(user, 'employee', None)
@@ -1308,6 +1315,10 @@ class EmployeeDocumentViewSet(ModelViewSet):
         # Only HR or uploader can delete
         is_hr = user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN')
         is_uploader = instance.uploaded_by_id == (employee.id if employee else None)
+
+        if hasattr(instance, 'exit_document_record'):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Issued exit documents are retained as part of the exit audit record.')
 
         if not (is_hr or is_uploader):
             from rest_framework.exceptions import PermissionDenied

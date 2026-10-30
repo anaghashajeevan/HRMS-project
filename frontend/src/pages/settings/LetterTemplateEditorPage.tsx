@@ -444,6 +444,22 @@ export default function LetterTemplateEditorPage() {
       setAiPrompt(
         'Write an email to {{employee_name}} informing them that their employee ID changed from {{previous_employee_id}} to {{new_employee_id}} on {{employee_id_change_date}}. Include {{employee_id_change_message}}.'
       );
+    } else if (next === 'PAYROLL_APPROVAL_REQUEST') {
+      setAiPrompt(
+        'Write a confidential payroll approval request email to {{recipient_name}}. Tell them a {{run_type}} payroll run for {{period_label}} is waiting for their review at step {{step_number}}: {{step_name}}. Include the preparer {{prepared_by_name}} and a link {{run_url}}. Do not include salary amounts.'
+      );
+    } else if (next === 'PAYROLL_RUN_APPROVED') {
+      setAiPrompt(
+        'Write a payroll status email to {{recipient_name}} confirming the {{run_type}} payroll run for {{period_label}} was approved. Include {{approved_by_name}} and {{run_url}}. Do not include salary amounts.'
+      );
+    } else if (next === 'PAYROLL_RUN_RETURNED') {
+      setAiPrompt(
+        'Write a payroll status email to {{recipient_name}} explaining that the {{run_type}} payroll run for {{period_label}} was returned for correction. Include the return reason {{reason}}, the reviewer {{actor_name}}, and link {{run_url}}. Do not include salary amounts.'
+      );
+    } else if (next === 'PAYROLL_RUN_PAID') {
+      setAiPrompt(
+        'Write a payroll status email to {{recipient_name}} confirming that the {{run_type}} payroll run for {{period_label}} has been marked paid. Direct the employee to {{run_url}} to submit a payslip request, and explain that the payslip is available only after approval through the payslip approval workflow. Do not mention a return or correction, do not imply the payslip is immediately available, and do not include salary amounts or bank details.'
+      );
     }
   }}
   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -476,6 +492,12 @@ export default function LetterTemplateEditorPage() {
     <option value="EMPLOYMENT_STATUS_CHANGED">Employment Status Changed</option>
     <option value="EMPLOYEE_ID_CHANGED">Employee ID Changed</option>
   </optgroup>
+  <optgroup label="Payroll Notifications">
+    <option value="PAYROLL_APPROVAL_REQUEST">Payroll Approval Request</option>
+    <option value="PAYROLL_RUN_APPROVED">Payroll Run Approved</option>
+    <option value="PAYROLL_RUN_RETURNED">Payroll Run Returned</option>
+    <option value="PAYROLL_RUN_PAID">Payroll Run Paid</option>
+  </optgroup>
 </select>
 </div>
                   <div className="md:col-span-2">
@@ -490,6 +512,11 @@ export default function LetterTemplateEditorPage() {
                       placeholder="e.g. Congratulations on your promotion!"
                     />
                   </div>
+                  {templateType.startsWith('PAYROLL_') && (
+                    <p className="md:col-span-2 rounded-lg bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
+                      Payroll email templates support Django placeholders such as {'{{recipient_name}}'}, {'{{run_type}}'}, {'{{period_label}}'}, {'{{run_url}}'}, {'{{prepared_by_name}}'}, {'{{approved_by_name}}'}, {'{{step_number}}'}, {'{{step_name}}'}, and {'{{reason}}'}. Use only the placeholders relevant to this template. Salary amounts and bank details are not included.
+                    </p>
+                  )}
                 </div>
               </div>
 

@@ -128,10 +128,10 @@ class PayrollCalculationService:
         period_end = run.pay_calendar.period_end
         days_in_month = run.pay_calendar.days_in_month
 
-        # Off-cycle runs pay only explicitly entered one-time adjustments; they
-        # never repeat the employee's monthly salary or attendance calculation.
+        # Off-cycle and arrears runs pay only explicit one-time adjustments;
+        # they never repeat monthly salary or attendance calculations.
         run_emp = PayrollRunEmployee.objects.filter(run=run, employee=employee).first()
-        if run.run_type == 'OFF_CYCLE':
+        if run.run_type in ('OFF_CYCLE', 'ARREARS'):
             result = PayrollCalculationService._compute_offcycle(run, employee, run_emp)
             if not result.get('ok'):
                 run_emp, _ = PayrollRunEmployee.objects.update_or_create(
@@ -245,7 +245,7 @@ class PayrollCalculationService:
 
     @staticmethod
     def _compute_offcycle(run, employee, run_employee):
-        """Compute an off-cycle payout without repeating ordinary monthly pay."""
+        """Compute an off-cycle or arrears payout without repeating monthly pay."""
         from ..models import EmployeePayrollProfile, PayrollRunAdjustment
         from .assignment_service import AssignmentService
 
@@ -263,7 +263,12 @@ class PayrollCalculationService:
 
         adjustments = list(PayrollRunAdjustment.objects.filter(run=run, employee=employee))
         if not adjustments:
-            return {'ok': False, 'error': 'Add at least one bonus, increment difference, correction, or reimbursement before calculating this off-cycle run.'}
+            message = (
+                'No unsettled arrears items are attached to this run.'
+                if run.run_type == 'ARREARS' else
+                'Add at least one bonus, increment difference, correction, or reimbursement before calculating this off-cycle run.'
+            )
+            return {'ok': False, 'error': message}
 
         taxable_earnings = sum((
             item.amount for item in adjustments
@@ -323,8 +328,6 @@ class PayrollCalculationService:
         ), None)
         tds_result = None
         if taxable_earnings > 0:
-            if tds_component is None:
-                return {'ok': False, 'error': 'This employee has taxable off-cycle earnings, but their active salary structure has no TDS component. Add/configure TDS before calculating.'}
             taxable_monthly_projection = Decimal('0')
             breakdown = AssignmentService.preview_breakdown(
                 tax_assignment.structure, tax_assignment.ctc_monthly, as_of_date=payment_date,
@@ -340,7 +343,7 @@ class PayrollCalculationService:
                 tax_resident=profile.tax_resident if profile else None,
                 current_run_id=run.id,
                 current_period_basis={
-                    'run_type': 'OFF_CYCLE',
+                    'run_type': run.run_type,
                     'taxable_offcycle_earnings': str(taxable_earnings),
                     'regular_monthly_taxable_projection': str(taxable_monthly_projection),
                     'reference_period_start': str(reference_period_start),
@@ -352,18 +355,33 @@ class PayrollCalculationService:
             if tds_result.get('reason'):
                 return {'ok': False, 'error': f"TDS could not be calculated for this taxable off-cycle pay: {tds_result['reason']}"}
             tds_amount = tds_result['amount'].quantize(QUANTIZE_PAISE, rounding=ROUND_HALF_UP)
-            total_deductions += tds_amount
-            components.append({
-                'component_id': tds_component.component_id,
-                'name': tds_component.component.name,
-                'amount': tds_amount, 'is_earning': False,
-                'is_employer_cost': False, 'rule_reference': tds_result.get('rule_id') or '',
-            })
+            if tds_amount > 0:
+                if tds_component is None:
+                    taxable_item_details = ', '.join(
+                        f'{item.label} (₹{item.amount})'
+                        for item in adjustments
+                        if item.adjustment_type == 'VARIABLE_EARNING' and item.taxable
+                    )
+                    return {
+                        'ok': False,
+                        'error': (
+                            f'TDS of ₹{tds_amount} is due on this employee’s taxable off-cycle pay, '
+                            f'from: {taxable_item_details}. Their active salary structure has no TDS component; '
+                            'add/configure TDS before calculating.'
+                        ),
+                    }
+                total_deductions += tds_amount
+                components.append({
+                    'component_id': tds_component.component_id,
+                    'name': tds_component.component.name,
+                    'amount': tds_amount, 'is_earning': False,
+                    'is_employer_cost': False, 'rule_reference': tds_result.get('rule_id') or '',
+                })
 
         total_deductions = total_deductions.quantize(QUANTIZE_PAISE, rounding=ROUND_HALF_UP)
         net_pay = (gross_pay + total_reimbursements - total_deductions).quantize(QUANTIZE_PAISE, rounding=ROUND_HALF_UP)
         snapshot = {
-            'run_type': 'OFF_CYCLE', 'salary_assignment_id': str(assignment.id),
+            'run_type': run.run_type, 'salary_assignment_id': str(assignment.id),
             'structure_name': assignment.structure.name, 'tax_regime': tax_regime,
             'adjustments': adjustment_snapshot,
             'tds': ({**tds_result, 'amount': str(tds_result['amount'])} if tds_result else None),
@@ -398,6 +416,32 @@ class PayrollCalculationService:
         eligible_days = day_data['eligible_calendar_days']
         payable_days = day_data['payable_days']
         lop_days = day_data['lop_days']
+        is_fnf = bool(run and run.run_type == 'FNF')
+        if is_fnf:
+            # F&F salary/LOP has already been reconciled into the remaining
+            # salary adjustment. Keep monthly attendance counters out of the
+            # settlement result so the same absence isn't presented as a
+            # second deduction.
+            eligible_days = Decimal('0')
+            payable_days = Decimal('0')
+            lop_days = Decimal('0')
+            day_data = {
+                **day_data,
+                'eligible_calendar_days': Decimal('0'),
+                'payable_days': Decimal('0'),
+                'lop_days': Decimal('0'),
+                'paid_leave_days': Decimal('0'),
+                'summary': {'off_day_worked': 0},
+                'leave_breakdown': [],
+            }
+        from ..models import PayrollRunAdjustment
+        run_adjustments = list(PayrollRunAdjustment.objects.filter(
+            run=run, employee=employee,
+        )) if run else []
+        fnf_salary_due = sum((
+            item.amount for item in run_adjustments
+            if item.category == 'FNF_SALARY'
+        ), Decimal('0'))
         # Show the assigned monthly component values as-is. LOP is represented
         # by a separate deduction and off-day work by a separate earning line.
         salary_divisor_days = days_in_month
@@ -488,32 +532,46 @@ class PayrollCalculationService:
             if comp.code == 'HRA':
                 formula_context['hra'] = full_amount
 
-        # CTC is gross earnings plus employer costs. Use Special Allowance as
-        # the balancing component only when the structure explicitly includes it.
+        # An assignment's CTC is the package budget for that employee's
+        # assigned structure. Match the structure preview's behavior: reserve
+        # the non-balancing components first, calculate configured employer
+        # costs, then use the remaining assigned CTC as Special Allowance.
+        # SPECIAL is optional in the structure; when absent, represent the
+        # computed balance as an unlinked payroll line instead of failing the
+        # employee's run or borrowing another employee's structure.
         special_sc = structure_comps.filter(component__code='SPECIAL').first()
-        if special_sc and special_sc.component.id in earnings_full:
-            special = earnings_full[special_sc.component.id]
-            non_special = total_earnings_full - special['full_amount']
-            candidate = max(
-                Decimal('0'),
-                ctc_monthly - non_special,
+        special_component_id = special_sc.component.id if special_sc else None
+        special = earnings_full.get(special_component_id) if special_component_id else None
+        non_special = total_earnings_full - (special['full_amount'] if special else Decimal('0'))
+        candidate = max(Decimal('0'), ctc_monthly - non_special)
+        for _ in range(20):
+            candidate_gross = non_special + candidate
+            employer_cost = PayrollCalculationService._estimate_employer_cost(
+                structure_comps, basic_full, candidate_gross, ctc_monthly,
+                period_end, parser,
             )
-            for _ in range(12):
-                candidate_gross = non_special + candidate
-                er_cost = PayrollCalculationService._estimate_employer_cost(
-                    structure_comps, basic_full, candidate_gross, ctc_monthly,
-                    period_end, parser,
-                )
-                # Employer statutory costs can change with their effective
-                # rules between assignment creation and this pay period. Keep
-                # the assigned CTC balanced using this period's active rules;
-                # SPECIAL is the structure's balancing line for that purpose.
-                next_candidate = max(Decimal('0'), ctc_monthly - non_special - er_cost)
-                if next_candidate == candidate:
-                    break
-                candidate = next_candidate
-            special['full_amount'] = candidate.quantize(QUANTIZE_PAISE, rounding=ROUND_HALF_UP)
-            total_earnings_full = non_special + special['full_amount']
+            next_candidate = max(
+                Decimal('0'), ctc_monthly - non_special - employer_cost,
+            )
+            if next_candidate == candidate:
+                break
+            candidate = next_candidate
+
+        candidate = candidate.quantize(QUANTIZE_PAISE, rounding=ROUND_HALF_UP)
+        if special:
+            special['full_amount'] = candidate
+        elif candidate > 0:
+            earnings_full[None] = {
+                'component_id': None,
+                'code': 'SPECIAL',
+                'name': 'Special Allowance (Balancing)',
+                'full_amount': candidate,
+                'formula_used': '',
+                'is_earning': True,
+                'is_employer_cost': False,
+                'is_taxable': True,
+            }
+        total_earnings_full = non_special + candidate
 
         package_cost = total_earnings_full + PayrollCalculationService._estimate_employer_cost(
             structure_comps, basic_full, total_earnings_full, ctc_monthly,
@@ -538,45 +596,68 @@ class PayrollCalculationService:
         # ------------------------------------------------------------------
         prorated_earnings = []
         off_day_worked = Decimal(str(day_data.get('summary', {}).get('off_day_worked', 0)))
-        eligible_paid_days = max(eligible_days - lop_days, Decimal('0'))
-        non_eligible_days = max(Decimal(str(days_in_month)) - eligible_days, Decimal('0'))
-        unpaid_salary_days = non_eligible_days + lop_days
-        lop_deduction = PayrollCalculationService.prorate_monthly_amount(
-            total_earnings_full, unpaid_salary_days, salary_divisor_days_dec,
-        )
-        off_day_extra_pay = PayrollCalculationService.prorate_monthly_amount(
-            total_earnings_full, off_day_worked, salary_divisor_days_dec,
-        )
-        paid_salary_days = eligible_paid_days + off_day_worked
-        paid_wage_factor = paid_salary_days / salary_divisor_days_dec
-        paid_wage_gross = PayrollCalculationService.prorate_monthly_amount(
-            total_earnings_full, paid_salary_days, salary_divisor_days_dec,
-        )
-        total_earnings_reported = total_earnings_full + off_day_extra_pay
-
-        for comp_id, data in earnings_full.items():
-            data['amount'] = data['full_amount'].quantize(
-                QUANTIZE_PAISE, rounding=ROUND_HALF_UP,
+        if is_fnf:
+            # F&F is a settlement of the remaining balance, not another
+            # monthly salary run. The salary balance is an explicit FNF
+            # adjustment; don't emit monthly structure earnings, attendance
+            # pay, or a second LOP deduction here.
+            off_day_worked = Decimal('0')
+            eligible_paid_days = Decimal('0')
+            non_eligible_days = Decimal('0')
+            unpaid_salary_days = Decimal('0')
+            lop_deduction = Decimal('0')
+            off_day_extra_pay = Decimal('0')
+            paid_salary_days = Decimal('0')
+            paid_wage_factor = Decimal('0')
+            paid_wage_gross = fnf_salary_due
+            total_earnings_reported = Decimal('0')
+        else:
+            eligible_paid_days = max(eligible_days - lop_days, Decimal('0'))
+            non_eligible_days = max(Decimal(str(days_in_month)) - eligible_days, Decimal('0'))
+            unpaid_salary_days = non_eligible_days + lop_days
+            lop_deduction = PayrollCalculationService.prorate_monthly_amount(
+                total_earnings_full, unpaid_salary_days, salary_divisor_days_dec,
             )
-            prorated_earnings.append(data)
+            off_day_extra_pay = PayrollCalculationService.prorate_monthly_amount(
+                total_earnings_full, off_day_worked, salary_divisor_days_dec,
+            )
+            paid_salary_days = eligible_paid_days + off_day_worked
+            paid_wage_factor = paid_salary_days / salary_divisor_days_dec
+            paid_wage_gross = PayrollCalculationService.prorate_monthly_amount(
+                total_earnings_full, paid_salary_days, salary_divisor_days_dec,
+            )
+            total_earnings_reported = total_earnings_full + off_day_extra_pay
 
-        if off_day_extra_pay > 0:
-            prorated_earnings.append({
-                'component_id': None,
-                'code': None,
-                'name': f'Weekend/Holiday Work ({off_day_worked} days)',
-                'amount': off_day_extra_pay,
-                'formula_used': '',
-                'is_earning': True,
-                'is_employer_cost': False,
-            })
+            for comp_id, data in earnings_full.items():
+                data['amount'] = data['full_amount'].quantize(
+                    QUANTIZE_PAISE, rounding=ROUND_HALF_UP,
+                )
+                prorated_earnings.append(data)
+
+            if off_day_extra_pay > 0:
+                prorated_earnings.append({
+                    'component_id': None,
+                    'code': None,
+                    'name': f'Weekend/Holiday Work ({off_day_worked} days)',
+                    'amount': off_day_extra_pay,
+                    'formula_used': '',
+                    'is_earning': True,
+                    'is_employer_cost': False,
+                })
 
         # ------------------------------------------------------------------
         # PASS 4: PF uses assigned Basic; ESI uses full fixed monthly gross.
         # ------------------------------------------------------------------
-        basic_paid = PayrollCalculationService.prorate_monthly_amount(
-            basic_full, paid_salary_days, salary_divisor_days_dec,
-        )
+        if is_fnf:
+            basic_paid = (
+                (basic_full * fnf_salary_due / total_earnings_full).quantize(
+                    QUANTIZE_PAISE, rounding=ROUND_HALF_UP,
+                ) if total_earnings_full > 0 else Decimal('0')
+            )
+        else:
+            basic_paid = PayrollCalculationService.prorate_monthly_amount(
+                basic_full, paid_salary_days, salary_divisor_days_dec,
+            )
 
         # Formula based deductions use the payable wage base, while the salary
         # earnings rows continue to show their full assigned monthly amounts.
@@ -591,16 +672,14 @@ class PayrollCalculationService:
         total_deductions = lop_deduction
         total_employer = Decimal('0')
         tds_breakdown = None
-        from ..models import PayrollRunAdjustment
-        run_adjustments = list(PayrollRunAdjustment.objects.filter(
-            run=run, employee=employee,
-        )) if run else []
         taxable_adjustments = sum((
             item.amount for item in run_adjustments
             if item.adjustment_type == 'VARIABLE_EARNING' and item.taxable
         ), Decimal('0'))
-        # LOP and run-specific variable earnings do not change the fixed ESI base.
-        esi_wage_base = total_earnings_full
+        # Regular ESI uses the assigned monthly wage base. F&F uses only the
+        # unpaid salary balance; previously settled monthly wages are already
+        # represented by the regular run.
+        esi_wage_base = fnf_salary_due if is_fnf else total_earnings_full
         split_pf = any(sc.component.code in ('EPS_ER', 'EPF_ER') for sc in structure_comps)
 
         if lop_deduction > 0:
@@ -619,6 +698,13 @@ class PayrollCalculationService:
             comp = sc.component
             if comp.component_type not in ('DEDUCTION', 'EMPLOYER_COST'):
                 continue
+            if is_fnf and comp.code not in {
+                'PF_EMP', 'PF_ER', 'EPS_ER', 'EPF_ER',
+                'ESI_EMP', 'ESI_ER', 'PT', 'TDS',
+            }:
+                # Monthly loan/other deductions are not repeated in a
+                # settlement. Recoveries must be explicit F&F adjustments.
+                continue
             if comp.code == 'PF_ER' and split_pf:
                 continue
 
@@ -631,7 +717,7 @@ class PayrollCalculationService:
                 # monthly Basic. LOP reduces salary earnings, not this basis.
                 configured_rate = sc.percentage_of_basic if sc.percentage_of_basic > 0 else None
                 pf = StatutoryService.calculate_pf(
-                    basic_full,
+                    basic_paid if is_fnf else basic_full,
                     period_end,
                     employee_rate=configured_rate if comp.code == 'PF_EMP' else None,
                     employer_rate=configured_rate if comp.code == 'PF_ER' else None,

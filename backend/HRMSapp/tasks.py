@@ -8,7 +8,7 @@ from celery import shared_task
 from django.core.mail import EmailMultiAlternatives, send_mail
 from django.template.loader import render_to_string
 from django.template import Context, Template
-from django.utils.html import strip_tags
+from django.utils.html import escape, strip_tags
 from django.conf import settings
 from django.utils import timezone
 
@@ -540,6 +540,100 @@ def _render_notification_template(letter_template, context):
     html_body = Template(letter_template.body_html).render(Context(context))
     text_body = unescape(strip_tags(html_body))
     return subject, html_body, text_body
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def send_payroll_lifecycle_email(self, event, run_id, recipient_id, approval_action_id=None):
+    """Send a payroll lifecycle email from the configured LetterTemplate."""
+    from .models import Employee, LetterTemplate
+    from payrollapp.models import PayrollRun, PayrollRunApprovalAction
+
+    template_types = {
+        'approval_request': 'PAYROLL_APPROVAL_REQUEST',
+        'approved': 'PAYROLL_RUN_APPROVED',
+        'returned': 'PAYROLL_RUN_RETURNED',
+        'paid': 'PAYROLL_RUN_PAID',
+    }
+    template_type = template_types.get(event)
+    if not template_type:
+        logger.warning('Unknown payroll lifecycle email event: %s', event)
+        return {'sent': False, 'reason': 'Unknown event'}
+
+    try:
+        run = PayrollRun.objects.select_related(
+            'pay_calendar', 'prepared_by', 'approved_by', 'returned_by',
+        ).get(id=run_id)
+        recipient = Employee.objects.get(id=recipient_id)
+    except (PayrollRun.DoesNotExist, Employee.DoesNotExist):
+        logger.warning('Payroll lifecycle email target no longer exists: run=%s recipient=%s', run_id, recipient_id)
+        return {'sent': False, 'reason': 'Run or recipient not found'}
+
+    if not recipient.official_email:
+        logger.info('Payroll lifecycle email skipped: employee=%s has no official email', recipient_id)
+        return {'sent': False, 'reason': 'Recipient has no official email'}
+
+    letter_template = _get_notification_template(LetterTemplate, template_type)
+    if not letter_template:
+        logger.warning('Payroll lifecycle email skipped: no active template for %s', template_type)
+        return {'sent': False, 'reason': 'No active template configured'}
+
+    approval_action = None
+    if approval_action_id:
+        approval_action = PayrollRunApprovalAction.objects.filter(
+            id=approval_action_id, run=run,
+        ).first()
+
+    period_label = f'{run.pay_calendar.year}-{run.pay_calendar.month:02d}'
+    context = {
+        'recipient_name': recipient.full_name,
+        'employee_name': recipient.full_name,
+        'employee_id': recipient.employee_id,
+        'run_type': run.get_run_type_display(),
+        'period_label': period_label,
+        'period_start': run.pay_calendar.period_start,
+        'period_end': run.pay_calendar.period_end,
+        'prepared_by_name': run.prepared_by.full_name if run.prepared_by_id else 'Payroll team',
+        'approved_by_name': run.approved_by.full_name if run.approved_by_id else 'Payroll approver',
+        'actor_name': run.returned_by.full_name if run.returned_by_id else 'Payroll approver',
+        'step_number': approval_action.step_number if approval_action else '',
+        'step_name': approval_action.step_name if approval_action else '',
+        'reason': run.return_reason or 'Please review the run and address the reviewer comments.',
+        'run_url': (
+            f"{getattr(settings, 'PORTAL_URL', 'http://localhost:5173')}/payslips"
+            if event == 'paid'
+            else f"{getattr(settings, 'PORTAL_URL', 'http://localhost:5173')}/payroll/runs/{run.id}"
+        ),
+    }
+    subject, html_body, text_body = _render_notification_template(letter_template, context)
+    if event == 'paid':
+        access_note = (
+            'To access your payslip, submit a request from the Payslips page. '
+            'The payslip will be available only after approval through the payslip approval workflow.'
+        )
+        payslip_url = context['run_url']
+        html_body += (
+            f'<p>{escape(access_note)} '
+            f'<a href="{escape(payslip_url)}">Open Payslips</a>.</p>'
+        )
+        text_body = f'{text_body}\n\n{access_note} {payslip_url}'
+    try:
+        email = EmailMultiAlternatives(
+            subject=subject,
+            body=text_body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[recipient.official_email],
+        )
+        email.attach_alternative(html_body, 'text/html')
+        email.send(fail_silently=False)
+    except Exception as exc:
+        logger.exception(
+            'Payroll lifecycle email failed for run=%s event=%s recipient=%s',
+            run_id, event, recipient_id,
+        )
+        raise self.retry(exc=exc)
+
+    logger.info('Payroll lifecycle email sent: run=%s event=%s recipient=%s', run_id, event, recipient_id)
+    return {'sent': True, 'recipient': recipient.official_email}
 
 
 

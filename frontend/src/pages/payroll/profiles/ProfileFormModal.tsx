@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { createProfile, getPayrollEmployees, getProfile, updateProfile } from '../../../api/payrollApi';
+import SearchableSelect from '../../../components/SearchableSelect';
 
 const inputCls =
   'block w-full rounded-xl border-0 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-blue-500 transition';
@@ -130,12 +131,18 @@ export default function ProfileFormModal({ initial, employeeId, employeeLabel, o
           {!initial && !employeeId && (
             <div>
               <label className="mb-1 block text-xs font-medium text-gray-600">Employee *</label>
-              <select className={inputCls} value={form.employee} onChange={(e) => set('employee', e.target.value)}>
-                <option value="">Select employee…</option>
-                {employees.map((emp: any) => (
-                  <option key={emp.id} value={emp.id}>{emp.employee_id} — {emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim()}</option>
-                ))}
-              </select>
+              <SearchableSelect
+                className={inputCls}
+                value={form.employee}
+                options={employees.map((emp: any) => ({
+                  value: emp.id,
+                  label: `${emp.employee_id} — ${emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim()}`,
+                }))}
+                placeholder="Search employee ID or name…"
+                required
+                noOptionsMessage="No employees match your search."
+                onChange={(employeeId) => set('employee', employeeId)}
+              />
             </div>
           )}
 

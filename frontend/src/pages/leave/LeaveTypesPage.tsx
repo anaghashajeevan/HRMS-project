@@ -123,7 +123,9 @@ export default function LeaveTypesPage() {
       carry_forward_expiry_months: 12,
       can_encash: false,
       max_encashment_days: 0,
-      encashment_basis: 'BASIC',
+      encashment_basis: 'FIXED',
+      encashment_divisor_days: 30,
+      max_exit_encashment_days: null,
       requires_document: false,
       min_days_before_apply: 0,
       max_consecutive_days: 0,
@@ -661,7 +663,7 @@ function LeaveTypeModal({ leaveType, onChange, onClose, onSave, saving }: LeaveT
             />
             {leaveType.can_encash && (
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Max Encashment (days/year)">
+                <Field label="Maximum encashment (days per leave year)" hint="This cap applies separately to each frozen leave year. Set above zero to allow encashment.">
                   <input
                     type="number"
                     step="0.5"
@@ -676,10 +678,19 @@ function LeaveTypeModal({ leaveType, onChange, onClose, onSave, saving }: LeaveT
                     onChange={(e) => onChange('encashment_basis', e.target.value as any)}
                     className="input"
                   >
+                    <option value="FIXED">Fixed Monthly Salary (Gross)</option>
                     <option value="BASIC">Basic Salary</option>
                     <option value="GROSS">Gross Salary</option>
                     <option value="CTC">CTC</option>
                   </select>
+                </Field>
+                <Field label="Daily rate divisor" hint="Daily salary = selected monthly salary basis ÷ this value.">
+                  <input type="number" min="1" step="0.5" value={leaveType.encashment_divisor_days || 30}
+                    onChange={(e) => onChange('encashment_divisor_days', Number(e.target.value) as any)} className="input" />
+                </Field>
+                <Field label="Maximum days per exit (optional)" hint="Leave blank for no additional per-exit cap.">
+                  <input type="number" min="0" step="0.5" value={leaveType.max_exit_encashment_days ?? ''}
+                    onChange={(e) => onChange('max_exit_encashment_days', e.target.value === '' ? null : Number(e.target.value) as any)} className="input" />
                 </Field>
               </div>
             )}

@@ -7,6 +7,7 @@ import {
 import Sidebar from '../components/Sidebar';
 import Topbar from '../components/Topbar';
 import DocumentsTab from '../components/DocumentsTab';
+import ExitDocumentsTab from '../components/ExitDocumentsTab';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 import { employeesApi } from '../api/employees';
 import type { EmployeeDetail } from '../types/employee';
@@ -15,7 +16,7 @@ import toast from 'react-hot-toast';
 import { AxiosError } from 'axios';
 import CareerHistoryTab from '../components/CareerHistoryTab';
 
-type TabKey = 'personal' | 'employment' | 'bank' | 'documents' | 'career';
+type TabKey = 'personal' | 'employment' | 'bank' | 'documents' | 'exitDocuments' | 'career';
 
 const statusStyles: Record<string, string> = {
   ACTIVE: 'bg-green-100 text-green-700',
@@ -201,6 +202,7 @@ export default function ProfilePage() {
                   { key: 'employment', label: 'Employment', icon: Briefcase },
                   { key: 'bank', label: 'Bank & Statutory', icon: Landmark },
                   { key: 'documents', label: 'Documents', icon: FileText },
+                  { key: 'exitDocuments', label: 'Exit Documents', icon: FileText },
                   { key: 'career', label: 'Career', icon: TrendingUp },
                 ].map((tab) => (
                   <button
@@ -379,6 +381,7 @@ export default function ProfilePage() {
               {activeTab === 'documents' && (
                 <DocumentsTab employeeId={employee.id} />
               )}
+              {activeTab === 'exitDocuments' && <ExitDocumentsTab />}
               {activeTab === 'career' && (
   <CareerHistoryTab employeeId={employee.id} />
 )}

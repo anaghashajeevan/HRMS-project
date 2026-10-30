@@ -949,6 +949,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
             'pan_number_encrypted', 'aadhaar_number_encrypted', 'uan_number_encrypted',
             'create_user_account', 'password', 'role_ids',
         ]
+        read_only_fields = ['date_of_exit']
 
     def validate_employee_id(self, value):
         value = value.strip()

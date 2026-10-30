@@ -1,5 +1,23 @@
 import api from './axios';
 
+export const getEmployeeExitRequests = (scope: 'approvals' | 'mine' | 'approved' = 'approvals') =>
+  api.get('/payroll/exits/', { params: { scope } });
+export const getExitEligibleEmployees = () => api.get('/payroll/exits/eligible-employees/');
+export const createEmployeeExitRequest = (payload: Record<string, unknown>) => api.post('/payroll/exits/', payload);
+export const decideEmployeeExitRequest = (id: string, decision: 'approve' | 'reject', comments = '') =>
+  api.post(`/payroll/exits/${id}/${decision}/`, { comments });
+export const previewEmployeeExitEncashment = (id: string) => api.get(`/payroll/exits/${id}/encashment-preview/`);
+export const previewEmployeeExitFullFinal = (id: string) => api.get(`/payroll/exits/${id}/full-final-preview/`);
+export const createEmployeeExitFNFRun = (id: string) => api.post(`/payroll/exits/${id}/create-fnf-run/`);
+export const checkEmployeeExitReadiness = (id: string) => api.get(`/payroll/exits/${id}/readiness/`);
+export const getEmployeeExitClearance = (id: string) => api.get(`/payroll/exits/${id}/clearance/`);
+export const addEmployeeExitClearanceItem = (id: string, payload: Record<string, unknown>) => api.post(`/payroll/exits/${id}/clearance/`, payload);
+export const updateEmployeeExitClearanceItem = (id: string, itemId: string, payload: Record<string, unknown>) => api.patch(`/payroll/exits/${id}/clearance/${itemId}/`, payload);
+export const getEmployeeExitDocumentStatus = (id: string) => api.get(`/payroll/exits/${id}/documents/`);
+export const issueEmployeeExitDocument = (id: string, documentType: string) => api.post(`/payroll/exits/${id}/documents/`, { document_type: documentType });
+export const getMyExitDocuments = () => api.get('/payroll/exits/my-documents/');
+export const downloadMyExitDocument = (id: string) => api.get(`/payroll/exits/my-documents/${id}/download/`, { responseType: 'blob' });
+
 // The employee endpoint is paginated (20 rows per page by default), and its
 // status choices are uppercase. Fetch all selectable payroll employees across
 // active and probation statuses instead of relying on one lowercase query.
@@ -104,6 +122,21 @@ export const getCurrentAssignments = (params?: Record<string, string>) =>
 
 export const getLatestAssignments = (params?: Record<string, string>) =>
   api.get('/payroll/assignments/latest/', { params });
+export const getArrears = (status?: 'AVAILABLE' | 'RESERVED' | 'SETTLED') =>
+  api.get('/payroll/arrears/', { params: status ? { status } : undefined });
+export const previewAssignmentArrears = (assignmentId: string) =>
+  api.get(`/payroll/assignments/${assignmentId}/arrears/`);
+export const generateAssignmentArrears = (assignmentId: string, reason: string) =>
+  api.post(`/payroll/assignments/${assignmentId}/arrears/`, { reason });
+export const previewPaidPeriodArrears = (runId: string, employeeId: string, refreshAttendance: boolean) =>
+  api.get(`/payroll/arrears/periods/${runId}/employees/${employeeId}/`, {
+    params: refreshAttendance ? { refresh_attendance: 'true' } : undefined,
+  });
+export const generatePaidPeriodArrears = (
+  runId: string, employeeId: string, reason: string, refreshAttendance: boolean,
+) => api.post(`/payroll/arrears/periods/${runId}/employees/${employeeId}/`, {
+  reason, refresh_attendance: refreshAttendance,
+});
 
 // ─── Payroll Profiles ───
 export const getProfiles = (params?: Record<string, string>) =>

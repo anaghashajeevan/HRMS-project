@@ -1250,7 +1250,7 @@ export default function MyAttendancePage() {
                       canAddSelf={selfConfig?.enabled || false}
                       onClick={() => {
                         if (day.status === 'before_joining' || day.status === 'before_system_start') return;
-                        if (day.is_future || day.status === 'weekend' || day.status === 'holiday') return;
+                        if (day.is_future || day.status === 'holiday') return;
 
                         // Check if EDIT is possible
                         if (selfConfig?.enabled && day.is_manual) {
@@ -1267,7 +1267,7 @@ export default function MyAttendancePage() {
                         }
 
                         // Check if ADD is possible
-                        if (selfConfig?.enabled && (day.status === 'absent' || day.status === 'missing_punch')) {
+                        if (selfConfig?.enabled && (day.status === 'absent' || day.status === 'missing_punch' || day.status === 'weekend')) {
                           setSelectedDate(day.date);
                           setIsEditing(false);
                           setSelfForm({
@@ -1441,9 +1441,9 @@ function DayCard({ day, onClick, canAddSelf = false }: {
 }) {
   const style = STATUS_STYLES[day.status] || STATUS_STYLES.future;
   const isBlocked = day.status === 'before_joining' || day.status === 'before_system_start'
-    || day.is_future || day.status === 'weekend' || day.status === 'holiday';
+    || day.is_future || day.status === 'holiday';
     
-  const canSelfAdd = canAddSelf && !isBlocked && !day.is_manual && (day.status === 'absent' || day.status === 'missing_punch');
+  const canSelfAdd = canAddSelf && !isBlocked && !day.is_manual && (day.status === 'absent' || day.status === 'missing_punch' || day.status === 'weekend');
   const canSelfEdit = canAddSelf && !isBlocked && day.is_manual;
   
   // FIXED: It is clickable if you have permission to ADD or EDIT

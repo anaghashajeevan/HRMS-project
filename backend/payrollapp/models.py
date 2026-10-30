@@ -427,6 +427,11 @@ class PayrollRun(models.Model):
     pay_calendar = models.ForeignKey(
         PayCalendar, on_delete=models.PROTECT, related_name='runs',
     )
+    exit_request = models.ForeignKey(
+        'EmployeeExitRequest', null=True, blank=True, on_delete=models.PROTECT,
+        related_name='fnf_runs',
+        help_text='Exit case this F&F run settles; required for F&F runs.',
+    )
     run_type = models.CharField(
         max_length=20, choices=RUN_TYPE_CHOICES, default='REGULAR',
     )
@@ -684,7 +689,9 @@ class PayrollRunAdjustment(models.Model):
     CATEGORY_CHOICES = [
         ('BONUS', 'Bonus'),
         ('INCREMENT_DIFFERENCE', 'Increment difference'),
+        ('ARREARS', 'Salary arrears'),
         ('EARNING_CORRECTION', 'Earning correction'),
+        ('FNF_SALARY', 'F&F salary balance'),
         ('DEDUCTION_CORRECTION', 'Deduction correction'),
         ('REIMBURSEMENT', 'Reimbursement'),
         ('OTHER', 'Other adjustment'),
@@ -704,6 +711,10 @@ class PayrollRunAdjustment(models.Model):
     source_claim = models.OneToOneField(
         'reimbursementapp.ReimbursementClaim', null=True, blank=True,
         on_delete=models.PROTECT, related_name='payroll_adjustment',
+    )
+    arrears_item = models.OneToOneField(
+        'ArrearsLog', null=True, blank=True, on_delete=models.PROTECT,
+        related_name='payroll_adjustment',
     )
     created_by = models.ForeignKey(
         'HRMSapp.Employee', null=True, blank=True,
@@ -975,7 +986,10 @@ class ArrearsLog(models.Model):
     employee = models.ForeignKey(
         'HRMSapp.Employee', on_delete=models.CASCADE, related_name='arrears',
     )
-    component = models.ForeignKey(SalaryComponent, on_delete=models.PROTECT)
+    component = models.ForeignKey(
+        SalaryComponent, null=True, blank=True, on_delete=models.PROTECT,
+    )
+    component_label = models.CharField(max_length=150, blank=True)
     from_period = models.DateField()
     to_period = models.DateField()
     old_amount = models.DecimalField(max_digits=12, decimal_places=2)
@@ -985,6 +999,19 @@ class ArrearsLog(models.Model):
         PayrollRun, null=True, blank=True,
         on_delete=models.SET_NULL, related_name='arrears_settled',
     )
+    reserved_in_run = models.ForeignKey(
+        PayrollRun, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='arrears_reserved',
+    )
+    source_assignment = models.ForeignKey(
+        EmployeeSalaryAssignment, null=True, blank=True, on_delete=models.PROTECT,
+        related_name='generated_arrears',
+    )
+    source_run = models.ForeignKey(
+        PayrollRun, null=True, blank=True, on_delete=models.PROTECT,
+        related_name='arrears_source_items',
+    )
+    calculation_snapshot = models.JSONField(default=dict, blank=True)
     reason = models.TextField(blank=True)
     created_by = models.ForeignKey(
         'HRMSapp.Employee', null=True, blank=True, on_delete=models.SET_NULL,
@@ -996,4 +1023,114 @@ class ArrearsLog(models.Model):
         ordering = ['-from_period']
 
     def __str__(self):
-        return f"{self.employee} — {self.component.code} ₹{self.arrears_amount}"
+        component_label = self.component.code if self.component_id else self.component_label
+        return f"{self.employee} — {component_label or 'Payroll adjustment'} ₹{self.arrears_amount}"
+
+
+class EmployeeExitRequest(models.Model):
+    """HR initiated exit request. Approved inputs are frozen for later F&F."""
+    STATUS_CHOICES = [
+        ('PENDING_APPROVAL', 'Pending Approval'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    employee = models.ForeignKey('HRMSapp.Employee', on_delete=models.PROTECT, related_name='exit_requests')
+    requested_by = models.ForeignKey('HRMSapp.Employee', null=True, blank=True, on_delete=models.SET_NULL, related_name='created_exit_requests')
+    workflow = models.ForeignKey('HRMSapp.ApprovalWorkflow', on_delete=models.PROTECT, related_name='exit_requests')
+    proposed_exit_date = models.DateField()
+    exit_type = models.CharField(max_length=30)
+    reason = models.TextField(blank=True)
+    settlement_inputs = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=24, choices=STATUS_CHOICES, default='PENDING_APPROVAL')
+    current_step_number = models.PositiveSmallIntegerField(default=1)
+    rejection_reason = models.TextField(blank=True)
+    approved_by = models.ForeignKey('HRMSapp.Employee', null=True, blank=True, on_delete=models.SET_NULL, related_name='approved_exit_requests')
+    approved_at = models.DateTimeField(null=True, blank=True)
+    frozen_snapshot = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'payroll_employee_exit_requests'
+        ordering = ['-created_at']
+
+
+class EmployeeExitApprovalAction(models.Model):
+    """Approval decision trail for an employee exit request."""
+    STATUS_CHOICES = [('PENDING', 'Pending'), ('APPROVED', 'Approved'), ('REJECTED', 'Rejected'), ('CANCELLED', 'Cancelled')]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request = models.ForeignKey(EmployeeExitRequest, on_delete=models.CASCADE, related_name='approval_actions')
+    workflow = models.ForeignKey('HRMSapp.ApprovalWorkflow', null=True, blank=True, on_delete=models.SET_NULL)
+    step_number = models.PositiveSmallIntegerField()
+    step_name = models.CharField(max_length=100)
+    assigned_to = models.ForeignKey('HRMSapp.Employee', on_delete=models.PROTECT, related_name='exit_approvals_assigned')
+    acted_by = models.ForeignKey('HRMSapp.Employee', null=True, blank=True, on_delete=models.SET_NULL, related_name='exit_approvals_acted')
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='PENDING')
+    comments = models.TextField(blank=True)
+    acted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'payroll_employee_exit_approval_actions'
+        ordering = ['step_number', 'created_at']
+        constraints = [models.UniqueConstraint(fields=['request', 'step_number', 'assigned_to'], name='unique_exit_request_step_approver')]
+
+
+class EmployeeExitClearanceItem(models.Model):
+    """Persistent stage-2 clearance task, linked to existing module records where possible."""
+    CATEGORY_CHOICES = [
+        ('ASSET', 'Asset return'), ('REIMBURSEMENT', 'Reimbursement'),
+        ('HANDOVER', 'Work handover'), ('OTHER', 'Other clearance'),
+    ]
+    STATUS_CHOICES = [('PENDING', 'Pending'), ('COMPLETED', 'Completed'), ('WAIVED', 'Exception approved')]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request = models.ForeignKey(EmployeeExitRequest, on_delete=models.CASCADE, related_name='clearance_items')
+    source_key = models.CharField(max_length=120)
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    responsible_person = models.CharField(max_length=150, blank=True)
+    due_date = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    resolution_notes = models.TextField(blank=True)
+    exception_reason = models.TextField(blank=True)
+    created_by = models.ForeignKey('HRMSapp.Employee', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    resolved_by = models.ForeignKey('HRMSapp.Employee', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'payroll_employee_exit_clearance_items'
+        ordering = ['status', 'due_date', 'created_at']
+        constraints = [models.UniqueConstraint(fields=['request', 'source_key'], name='unique_exit_clearance_source')]
+
+    def __str__(self):
+        return f'{self.request.employee} - {self.title} ({self.status})'
+
+
+class EmployeeExitDocument(models.Model):
+    """Issued exit document metadata; the file itself lives in EmployeeDocument."""
+    DOCUMENT_TYPES = [
+        ('EXPERIENCE', 'Experience Certificate'),
+        ('RELIEVING_LETTER', 'Relieving Letter'),
+        ('FNF_STATEMENT', 'Full & Final Settlement Statement'),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request = models.ForeignKey(EmployeeExitRequest, on_delete=models.PROTECT, related_name='issued_documents')
+    employee = models.ForeignKey('HRMSapp.Employee', on_delete=models.PROTECT, related_name='exit_documents')
+    employee_document = models.OneToOneField('HRMSapp.EmployeeDocument', on_delete=models.PROTECT, related_name='exit_document_record')
+    document_type = models.CharField(max_length=30, choices=DOCUMENT_TYPES)
+    issued_by = models.ForeignKey('HRMSapp.Employee', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    issued_at = models.DateTimeField(auto_now_add=True)
+    download_count = models.PositiveIntegerField(default=0)
+    last_downloaded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'payroll_employee_exit_documents'
+        ordering = ['-issued_at']
+        constraints = [models.UniqueConstraint(fields=['request', 'document_type'], name='unique_exit_document_type')]
+
+    def __str__(self):
+        return f'{self.employee} - {self.get_document_type_display()}'

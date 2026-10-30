@@ -1320,7 +1320,7 @@ export default function EmployeeAttendanceDetailPage() {
                       canAddManual={canAddManual}
                       onClick={() => {
                         if (!canAddManual) return;
-                        if (day.status === 'before_joining' || day.status === 'before_system_start' || day.is_future || day.status === 'weekend' || day.status === 'holiday') return;
+                        if (day.status === 'before_joining' || day.status === 'before_system_start' || day.is_future || day.status === 'holiday') return;
                         
                         // Edit manual entry
                         if (day.is_manual) {
@@ -1337,7 +1337,7 @@ export default function EmployeeAttendanceDetailPage() {
                         }
                         
                         // Add manual entry
-                        if (day.status === 'absent' || day.status === 'missing_punch') {
+                        if (day.status === 'absent' || day.status === 'missing_punch' || day.status === 'weekend') {
                           setSelectedDate(day.date);
                           setIsEditing(false);
                           setManualForm({ status: 'Manual Present', punch_in: '09:30', punch_out: '18:30', reason: '' });
@@ -1454,9 +1454,9 @@ function MiniStat({ label, value, color }: { label: string; value: number; color
 
 function DayCard({ day, onClick, canAddManual = false }: { day: DayEntry; onClick?: () => void; canAddManual?: boolean }) {
   const style = STATUS_STYLES[day.status] || STATUS_STYLES.future;
-  const isBlocked = day.status === 'before_joining' || day.status === 'before_system_start' || day.status === 'future' || day.status === 'weekend' || day.status === 'holiday';
+  const isBlocked = day.status === 'before_joining' || day.status === 'before_system_start' || day.status === 'future' || day.status === 'holiday';
   
-  const canSelfAdd = canAddManual && !isBlocked && !day.is_manual && (day.status === 'absent' || day.status === 'missing_punch');
+  const canSelfAdd = canAddManual && !isBlocked && !day.is_manual && (day.status === 'absent' || day.status === 'missing_punch' || day.status === 'weekend');
   const canSelfEdit = canAddManual && !isBlocked && day.is_manual;
 
   // FIXED: It is clickable if you have permission to ADD or EDIT

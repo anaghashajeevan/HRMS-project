@@ -30,6 +30,7 @@ def generate_payslip_pdf(run_employee_id):
     employee = row.employee
     calendar = row.run.pay_calendar
     is_offcycle = row.run.run_type == 'OFF_CYCLE'
+    is_fnf = row.run.run_type == 'FNF'
 
     profile = employee.payroll_profiles.filter(is_active=True).order_by('-effective_from').first()
     account = (profile.bank_account if profile else '') or getattr(employee, 'bank_account_encrypted', '') or ''
@@ -51,8 +52,8 @@ def generate_payslip_pdf(run_employee_id):
         fontSize=8, leading=10, spaceAfter=0,
     )
     story = [
-        Paragraph('OFF-CYCLE PAYSLIP' if is_offcycle else 'PAYSLIP', title),
-        Paragraph(f"{'Payment period' if is_offcycle else 'Pay period'}: {month_calendar.month_name[calendar.month]} {calendar.year}", styles['Heading2']),
+        Paragraph('FULL & FINAL SETTLEMENT STATEMENT' if is_fnf else 'OFF-CYCLE PAYSLIP' if is_offcycle else 'PAYSLIP', title),
+        Paragraph(f"{'Settlement period' if is_fnf else 'Payment period' if is_offcycle else 'Pay period'}: {month_calendar.month_name[calendar.month]} {calendar.year}", styles['Heading2']),
         Spacer(1, 5 * mm),
     ]
 
@@ -112,7 +113,7 @@ def generate_payslip_pdf(run_employee_id):
         ('PADDING', (0, 0), (-1, -1), 7),
     ]))
     story.extend([detail_table, Spacer(1, 3 * mm), Paragraph(
-        'Off-cycle items are separate one-time payments; monthly salary and attendance are not repeated.' if is_offcycle else 'Salary structure components are shown at their assigned monthly amounts; unpaid days appear as a separate deduction.',
+        'Full & final settlement items reflect the approved exit case and payroll calculation.' if is_fnf else 'Off-cycle items are separate one-time payments; monthly salary and attendance are not repeated.' if is_offcycle else 'Salary structure components are shown at their assigned monthly amounts; unpaid days appear as a separate deduction.',
         styles['Italic'],
     ), Spacer(1, 5 * mm), Paragraph(
         'This is a computer-generated payslip. Bank account details are masked for security.',

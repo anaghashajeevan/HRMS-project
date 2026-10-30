@@ -648,6 +648,12 @@ const MODULE_CONFIG: Record<ModuleType, {
     defaultName: 'Standard Payslip Request Approval',
     helpText: 'Employee requests for paid payroll months move through these steps in order. Every assigned approver at a step must approve. The employee can download the payslip after all steps approve; a rejection must include a reason.',
   },
+  EXIT: {
+    label: 'Employee Exits',
+    description: 'For HR initiated employee exit requests and approved last working dates',
+    defaultName: 'Standard Employee Exit Approval',
+    helpText: 'HR submits an exit request for an employee. The configured approvers review the exit date and settlement inputs. The employee exit date is recorded only after the final approval.',
+  },
 };
 
 export default function ApprovalWorkflowSettingsPage() {

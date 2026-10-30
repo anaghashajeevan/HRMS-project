@@ -1,5 +1,5 @@
 from django.shortcuts import render
-from django.http import HttpResponse
+from django.http import FileResponse, HttpResponse
 
 # Create your views here.
 """
@@ -36,6 +36,8 @@ from .models import (
     EmployeePayrollProfile, PayrollRunAdjustment, PayrollRunEmployee,
     PayrollRunComponentDetail, PayrollAuditLog, PayslipRequest, PayslipRequestApprovalAction,
     PaymentBatch, PaymentBatchLine, PayrollRunApprovalAction,
+    EmployeeExitRequest, ArrearsLog,
+    EmployeeExitClearanceItem, EmployeeExitDocument,
 )
 from .serializers import (
     SalaryComponentSerializer, SalaryComponentMiniSerializer,
@@ -50,11 +52,487 @@ from .serializers import (
     EmployeePayrollProfileListSerializer,
     PreviewBreakdownSerializer, PayrollRunAdjustmentSerializer,
     PayslipRequestSerializer, PayslipRequestCreateSerializer,
+    EmployeeExitRequestSerializer,
 )
 from .services.assignment_service import AssignmentService, AssignmentError
 from .services.payslip_service import generate_payslip_pdf
+from .services.exit_service import submit_exit_request, decide_exit_request, validate_exit_data, refresh_settlement_snapshot, ExitRequestError
+from .services.leave_encashment_service import preview_exit_encashment, LeaveEncashmentError
+from .services.full_final_service import preview_full_final, FullFinalError
+from .services.arrears_service import (
+    preview_assignment_arrears, generate_assignment_arrears, list_arrears, ArrearsError,
+    preview_paid_run_arrears, generate_paid_run_arrears,
+)
+from .services.exit_clearance_service import clearance_payload, log_clearance_change
+from .services.exit_document_service import (
+    exit_document_status, issue_exit_document, employee_exit_document_payload,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class EmployeeExitRequestListCreateView(APIView):
+    """HR register and submission endpoint for employee exit requests."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        employee = getattr(request.user, 'employee', None)
+        scope = request.query_params.get('scope', 'approvals')
+        if scope == 'mine':
+            if employee is None:
+                return Response([])
+            qs = EmployeeExitRequest.objects.filter(requested_by=employee)
+        elif scope == 'approved':
+            if not is_hr_or_system_admin(request.user):
+                return Response({'detail': 'HR Admin access is required for the approved exit register.'}, status=403)
+            qs = EmployeeExitRequest.objects.filter(status='APPROVED')
+        elif scope == 'approvals':
+            if employee is None:
+                return Response([])
+            qs = EmployeeExitRequest.objects.filter(
+                status='PENDING_APPROVAL',
+                approval_actions__assigned_to=employee,
+                approval_actions__step_number=F('current_step_number'),
+                approval_actions__status='PENDING',
+            )
+        else:
+            return Response({'detail': 'scope must be approvals, mine, or approved.'}, status=400)
+        qs = qs.select_related('employee', 'requested_by', 'approved_by', 'workflow').prefetch_related('approval_actions__assigned_to', 'approval_actions__acted_by').distinct()
+        return Response(EmployeeExitRequestSerializer(qs, many=True, context={'request': request}).data)
+
+    def post(self, request):
+        is_hr = is_hr_or_system_admin(request.user)
+        actor_employee = getattr(request.user, 'employee', None)
+        can_manage_exit = request.user.has_role('MANAGER') or request.user.has_role('REPORTING_MANAGER')
+        if not is_hr and not (can_manage_exit and actor_employee):
+            return Response({'detail': 'HR Admin or the employee’s reporting manager can initiate an exit.'}, status=403)
+        serializer = EmployeeExitRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        if not is_hr and serializer.validated_data['employee'].reporting_manager_id != actor_employee.id:
+            return Response({'detail': 'Managers can initiate exits only for their direct reports.'}, status=403)
+        try:
+            exit_request = submit_exit_request(
+                employee_id=serializer.validated_data['employee'].id,
+                actor=request.user,
+                proposed_exit_date=serializer.validated_data['proposed_exit_date'],
+                exit_type=serializer.validated_data['exit_type'],
+                reason=serializer.validated_data.get('reason', ''),
+                settlement_inputs=serializer.validated_data.get('settlement_inputs', {}),
+            )
+        except EmployeeExitRequest.DoesNotExist:
+            return Response({'detail': 'Employee not found.'}, status=404)
+        except ExitRequestError as exc:
+            return Response({'detail': str(exc)}, status=400)
+        return Response(EmployeeExitRequestSerializer(exit_request, context={'request': request}).data, status=201)
+
+
+class EmployeeExitEligibleEmployeesView(APIView):
+    """Small, unpaginated employee list for the exit request selector."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from HRMSapp.models import Employee
+
+        employees = Employee.objects.filter(
+            status__in=['ACTIVE', 'PROBATION'], is_deleted=False,
+        ).order_by('employee_id')
+        if not is_hr_or_system_admin(request.user):
+            actor = getattr(request.user, 'employee', None)
+            if not actor or not (request.user.has_role('MANAGER') or request.user.has_role('REPORTING_MANAGER')):
+                return Response({'detail': 'HR Admin or reporting manager access is required.'}, status=403)
+            employees = employees.filter(reporting_manager=actor)
+        rows = [{
+            'id': str(employee.id), 'employee_id': employee.employee_id,
+            'full_name': employee.full_name,
+        } for employee in employees]
+        return Response(rows)
+
+
+class EmployeeExitRequestDecisionView(APIView):
+    """Approve or reject a pending step in an exit workflow."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, request_id, decision):
+        if decision not in ('approve', 'reject'):
+            return Response({'detail': 'Decision must be approve or reject.'}, status=400)
+        try:
+            exit_request = decide_exit_request(
+                request_id=request_id, actor=request.user,
+                decision=decision, comments=str(request.data.get('comments', '')),
+            )
+        except EmployeeExitRequest.DoesNotExist:
+            return Response({'detail': 'Exit request not found.'}, status=404)
+        except ExitRequestError as exc:
+            return Response({'detail': str(exc)}, status=400)
+        return Response(EmployeeExitRequestSerializer(exit_request, context={'request': request}).data)
+
+
+class EmployeeExitClearanceView(APIView):
+    """Stage-2 handover, linked-module clearance, and reasoned exception handling."""
+    permission_classes = [IsAuthenticated]
+
+    def _get_request(self, request_id):
+        try:
+            return EmployeeExitRequest.objects.select_related('employee').get(pk=request_id)
+        except EmployeeExitRequest.DoesNotExist:
+            return None
+
+    def get(self, request, request_id):
+        if not is_hr_or_system_admin(request.user):
+            return Response({'detail': 'HR Admin access is required to manage exit clearance.'}, status=403)
+        exit_request = self._get_request(request_id)
+        if not exit_request:
+            return Response({'detail': 'Exit request not found.'}, status=404)
+        if exit_request.status != 'APPROVED':
+            return Response({'detail': 'Clearance is available after final exit approval.'}, status=400)
+        return Response(clearance_payload(exit_request, request.user))
+
+    def post(self, request, request_id):
+        if not is_hr_or_system_admin(request.user):
+            return Response({'detail': 'HR Admin access is required to add exit clearance items.'}, status=403)
+        exit_request = self._get_request(request_id)
+        if not exit_request:
+            return Response({'detail': 'Exit request not found.'}, status=404)
+        if exit_request.status != 'APPROVED':
+            return Response({'detail': 'Clearance tasks can be added after final exit approval.'}, status=400)
+        title = str(request.data.get('title') or '').strip()
+        if not title:
+            return Response({'detail': 'A handover task title is required.'}, status=400)
+        category = request.data.get('category', 'HANDOVER')
+        if category not in ('HANDOVER', 'OTHER'):
+            return Response({'detail': 'Manual items must be Work handover or Other clearance.'}, status=400)
+        item = EmployeeExitClearanceItem.objects.create(
+            request=exit_request, source_key=f'manual:{timezone.now().timestamp()}:{uuid4()}',
+            category=category, title=title[:200], description=str(request.data.get('description') or ''),
+            responsible_person=str(request.data.get('responsible_person') or '')[:150],
+            due_date=request.data.get('due_date') or None,
+            created_by=getattr(request.user, 'employee', None),
+        )
+        log_clearance_change(item, request.user, 'EXIT_CLEARANCE_ITEM_ADDED')
+        return Response(clearance_payload(exit_request), status=201)
+
+
+class EmployeeExitClearanceItemView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, request_id, item_id):
+        if not is_hr_or_system_admin(request.user):
+            return Response({'detail': 'HR Admin access is required to resolve exit clearance items.'}, status=403)
+        try:
+            item = EmployeeExitClearanceItem.objects.select_related('request__employee').get(
+                pk=item_id, request_id=request_id, request__status='APPROVED',
+            )
+        except EmployeeExitClearanceItem.DoesNotExist:
+            return Response({'detail': 'Exit clearance item not found.'}, status=404)
+        action = request.data.get('action')
+        if action not in ('complete', 'waive', 'reopen'):
+            return Response({'detail': 'Action must be complete, waive, or reopen.'}, status=400)
+        if action == 'waive' and not is_hr_or_system_admin(request.user):
+            return Response({'detail': 'Only HR or System Admin can approve a clearance exception.'}, status=403)
+        reason = str(request.data.get('reason') or '').strip()
+        if action == 'waive' and not reason:
+            return Response({'detail': 'A reason is required to approve an exception.'}, status=400)
+        if action == 'complete' and item.source_key.startswith('asset:'):
+            from assetapp.models import AssetAllocation
+            allocation = AssetAllocation.objects.filter(pk=item.source_key.removeprefix('asset:')).first()
+            if allocation and allocation.status == 'ALLOCATED':
+                return Response({'detail': 'Record the asset return in Asset Management first, then refresh this checklist.'}, status=400)
+        if action == 'complete' and item.source_key.startswith('reimbursement:'):
+            from reimbursementapp.models import ReimbursementClaim
+            claim = ReimbursementClaim.objects.select_related('batch').filter(
+                pk=item.source_key.removeprefix('reimbursement:'),
+            ).first()
+            if claim and claim.status != 'REJECTED' and claim.batch.status not in ('SENT', 'CLOSED'):
+                return Response({'detail': 'Resolve the reimbursement through the Reimbursements workflow first, then refresh this checklist.'}, status=400)
+        old_status = item.status
+        item.status = {'complete': 'COMPLETED', 'waive': 'WAIVED', 'reopen': 'PENDING'}[action]
+        item.resolution_notes = reason if action == 'complete' else str(request.data.get('notes') or '')
+        item.exception_reason = reason if action == 'waive' else ''
+        item.resolved_by = getattr(request.user, 'employee', None) if action != 'reopen' else None
+        item.save(update_fields=['status', 'resolution_notes', 'exception_reason', 'resolved_by', 'updated_at'])
+        log_clearance_change(item, request.user, 'EXIT_CLEARANCE_EXCEPTION_APPROVED' if action == 'waive' else 'EXIT_CLEARANCE_ITEM_UPDATED', reason or old_status)
+        return Response(clearance_payload(item.request))
+
+
+class EmployeeExitDocumentsView(APIView):
+    """HR document eligibility and controlled issuance for one approved exit."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, request_id):
+        if not is_hr_or_system_admin(request.user):
+            return Response({'detail': 'HR Admin access is required to issue exit documents.'}, status=403)
+        try:
+            exit_request = EmployeeExitRequest.objects.select_related('employee__position').get(pk=request_id)
+        except EmployeeExitRequest.DoesNotExist:
+            return Response({'detail': 'Exit request not found.'}, status=404)
+        return Response(exit_document_status(exit_request, request.user))
+
+    def post(self, request, request_id):
+        if not is_hr_or_system_admin(request.user):
+            return Response({'detail': 'HR Admin access is required to issue exit documents.'}, status=403)
+        document_type = str(request.data.get('document_type') or '').strip().upper()
+        try:
+            record = issue_exit_document(request_id, document_type, request.user)
+        except EmployeeExitRequest.DoesNotExist:
+            return Response({'detail': 'Exit request not found.'}, status=404)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=400)
+        except Exception as exc:
+            logger.exception('Could not issue exit document for request %s', request_id)
+            return Response({'detail': 'The exit document could not be generated. Check the document configuration and try again.'}, status=400)
+        return Response(employee_exit_document_payload(record), status=201)
+
+
+class MyExitDocumentsView(APIView):
+    """Employee self-service list and secure download for their issued exit documents."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        employee = getattr(request.user, 'employee', None)
+        if not employee:
+            return Response({'results': []})
+        records = EmployeeExitDocument.objects.filter(employee=employee).select_related(
+            'request', 'employee_document',
+        ).order_by('-issued_at')
+        return Response({'results': [employee_exit_document_payload(record) for record in records]})
+
+
+class MyExitDocumentDownloadView(APIView):
+    """Download only the signed-in employee's issued exit document."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def get(self, request, document_id):
+        employee = getattr(request.user, 'employee', None)
+        if not employee:
+            return Response({'detail': 'Your account is not linked to an employee profile.'}, status=403)
+        try:
+            record = EmployeeExitDocument.objects.select_for_update().select_related(
+                'employee_document',
+            ).get(pk=document_id, employee=employee)
+        except EmployeeExitDocument.DoesNotExist:
+            return Response({'detail': 'Exit document not found.'}, status=404)
+        if not record.employee_document.file_path:
+            return Response({'detail': 'The document file is unavailable.'}, status=404)
+        record.download_count += 1
+        record.last_downloaded_at = timezone.now()
+        record.save(update_fields=['download_count', 'last_downloaded_at'])
+        filename = record.employee_document.file_path.name.rsplit('/', 1)[-1]
+        return FileResponse(record.employee_document.file_path.open('rb'), as_attachment=True, filename=filename, content_type='application/pdf')
+
+
+class EmployeeExitEncashmentPreviewView(APIView):
+    """Calculate a non-posting encashment preview from frozen approved inputs."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, request_id):
+        try:
+            exit_request = EmployeeExitRequest.objects.select_related('employee').get(pk=request_id)
+        except EmployeeExitRequest.DoesNotExist:
+            return Response({'detail': 'Exit request not found.'}, status=404)
+        actor_employee = getattr(request.user, 'employee', None)
+        authorized = is_hr_or_system_admin(request.user) or exit_request.requested_by_id == getattr(actor_employee, 'id', None)
+        if actor_employee and not authorized:
+            authorized = exit_request.approval_actions.filter(assigned_to=actor_employee).exists()
+        if not authorized:
+            return Response({'detail': 'You are not authorized to view this exit settlement preview.'}, status=403)
+        try:
+            return Response(preview_exit_encashment(exit_request))
+        except LeaveEncashmentError as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+
+class EmployeeExitFullFinalPreviewView(APIView):
+    """Calculate the read-only F&F breakdown for HR review."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, request_id):
+        try:
+            exit_request = EmployeeExitRequest.objects.select_related('employee').get(pk=request_id)
+        except EmployeeExitRequest.DoesNotExist:
+            return Response({'detail': 'Exit request not found.'}, status=404)
+        actor_employee = getattr(request.user, 'employee', None)
+        authorized = is_hr_or_system_admin(request.user) or exit_request.requested_by_id == getattr(actor_employee, 'id', None)
+        if actor_employee and not authorized:
+            authorized = exit_request.approval_actions.filter(assigned_to=actor_employee).exists()
+        if not authorized:
+            return Response({'detail': 'You are not authorized to view this F&F review.'}, status=403)
+        try:
+            return Response(preview_full_final(exit_request))
+        except (FullFinalError, LeaveEncashmentError) as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+
+class EmployeeExitFNFRunCreateView(APIView):
+    """Create an exit-linked, single-employee F&F pay run for payroll review."""
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, request_id):
+        if not is_hr_or_system_admin(request.user):
+            return Response({'detail': 'HR Admin access is required to create an F&F run.'}, status=403)
+        try:
+            exit_request = EmployeeExitRequest.objects.select_for_update().select_related('employee').get(pk=request_id)
+        except EmployeeExitRequest.DoesNotExist:
+            return Response({'detail': 'Exit request not found.'}, status=404)
+        if exit_request.status != 'APPROVED':
+            return Response({'detail': 'Only approved exit requests can create an F&F payroll run.'}, status=400)
+        if exit_request.proposed_exit_date > timezone.localdate():
+            return Response({'detail': 'Create the F&F run on or after the approved last working date. You can review the estimate before then.'}, status=400)
+        if ArrearsLog.objects.filter(
+            employee=exit_request.employee, settled_in_run__isnull=True,
+            from_period__lte=exit_request.proposed_exit_date,
+            reserved_in_run__isnull=False,
+        ).exists():
+            return Response({
+                'detail': 'This employee has arrears reserved in another payroll run. Complete or reverse that run before creating the F&F run.'
+            }, status=400)
+        readiness = validate_exit_data(exit_request)
+        if not readiness['can_approve']:
+            return Response({
+                'detail': 'Resolve pending leave and unfinished payroll activity before creating the F&F run.',
+                'readiness': readiness,
+            }, status=400)
+        stage2 = clearance_payload(exit_request, request.user)
+        pending_clearance = [item['title'] for item in stage2['items'] if item['status'] == 'PENDING']
+        if pending_clearance:
+            return Response({
+                'detail': 'Complete outstanding exit clearance tasks or record an approved, reasoned exception before creating the F&F run.',
+                'pending_clearance': pending_clearance,
+            }, status=400)
+        try:
+            refresh_settlement_snapshot(exit_request, request.user)
+            preview = preview_full_final(exit_request)
+        except (ExitRequestError, FullFinalError, LeaveEncashmentError) as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+        arrears_snapshot = exit_request.frozen_snapshot.get('outstanding_arrears') or []
+        arrears_ids = [item.get('arrears_id') for item in arrears_snapshot if item.get('arrears_id')]
+        arrears_to_reserve = list(ArrearsLog.objects.select_for_update().filter(
+            id__in=arrears_ids, employee=exit_request.employee,
+            settled_in_run__isnull=True, reserved_in_run__isnull=True,
+        ))
+        if len(arrears_to_reserve) != len(arrears_ids):
+            return Response({'detail': 'The outstanding arrears changed while preparing F&F. Refresh the preview and try again.'}, status=409)
+
+        exit_date = exit_request.proposed_exit_date
+        pay_calendar = PayCalendar.objects.filter(
+            year=exit_date.year, month=exit_date.month,
+        ).first()
+        if not pay_calendar:
+            return Response({'detail': 'Create a payroll calendar for the approved last working date month before creating the F&F run.'}, status=400)
+        assignment_covers_exit = EmployeeSalaryAssignment.objects.filter(
+            employee=exit_request.employee,
+            effective_from__lte=exit_date,
+        ).filter(Q(effective_to__gte=exit_date) | Q(effective_to__isnull=True)).exists()
+        if not assignment_covers_exit:
+            return Response({'detail': 'No current salary assignment covers the approved last working date. Correct the assignment and use the controlled exit snapshot correction before creating the F&F run.'}, status=400)
+
+        try:
+            run = RunLifecycleService.create_run(
+                pay_calendar_id=pay_calendar.id, run_type='FNF', user=request.user,
+                exit_request=exit_request,
+            )
+        except RunLifecycleError as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+        actor = getattr(request.user, 'employee', None)
+        adjustments = []
+        for line in preview['lines']:
+            amount = Decimal(line['amount'])
+            if amount <= 0 or line['code'] == 'OUTSTANDING_ARREARS':
+                continue
+            if line['code'] == 'RECOVERIES':
+                adjustments.append({
+                    'adjustment_type': 'DEDUCTION', 'label': line['label'],
+                    'amount': abs(amount), 'taxable': False, 'category': 'OTHER',
+                })
+            elif line['code'] in ('SALARY_THROUGH_EXIT', 'LEAVE_ENCASHMENT', 'OTHER_DUES', 'GRATUITY'):
+                adjustments.append({
+                    'adjustment_type': 'VARIABLE_EARNING', 'label': line['label'],
+                    'amount': amount, 'taxable': line.get('taxable', True),
+                    'category': 'FNF_SALARY' if line['code'] == 'SALARY_THROUGH_EXIT' else 'OTHER',
+                })
+
+        for item in adjustments:
+            adjustment = PayrollRunAdjustment.objects.create(
+                run=run, employee=exit_request.employee,
+                category=item.pop('category'), reason=f"F&F exit request {exit_request.id}",
+                created_by=actor, **item,
+            )
+            PayrollAuditLog.objects.create(
+                run=run, employee=exit_request.employee,
+                action='FNF_ADJUSTMENT_ADDED',
+                reason=adjustment.reason, performed_by=actor,
+                new_values={
+                    'adjustment_id': str(adjustment.id),
+                    'label': adjustment.label,
+                    'adjustment_type': adjustment.adjustment_type,
+                    'amount': str(adjustment.amount),
+                    'taxable': adjustment.taxable,
+                },
+            )
+
+        for arrears_item in arrears_to_reserve:
+            arrears_item.reserved_in_run = run
+            arrears_item.save(update_fields=['reserved_in_run'])
+            amount = abs(arrears_item.arrears_amount)
+            if amount <= 0:
+                continue
+            is_earning = arrears_item.arrears_amount > 0
+            label = (
+                f"Arrears · {arrears_item.component.code if arrears_item.component_id else arrears_item.component_label} · "
+                f"{arrears_item.from_period:%b %Y}"
+            )
+            adjustment = PayrollRunAdjustment.objects.create(
+                run=run, employee=exit_request.employee,
+                arrears_item=arrears_item,
+                adjustment_type='VARIABLE_EARNING' if is_earning else 'DEDUCTION',
+                category='ARREARS' if is_earning else 'DEDUCTION_CORRECTION',
+                label=label, amount=amount,
+                taxable=is_earning and bool((arrears_item.calculation_snapshot or {}).get('is_taxable', False)),
+                reference_period_start=arrears_item.from_period,
+                reference_period_end=arrears_item.to_period,
+                reason=arrears_item.reason or f'F&F exit request {exit_request.id}',
+                created_by=actor,
+            )
+            PayrollAuditLog.objects.create(
+                run=run, employee=exit_request.employee,
+                action='FNF_ADJUSTMENT_ADDED',
+                reason='Outstanding arrears included in F&F settlement.',
+                performed_by=actor,
+                new_values={
+                    'label': adjustment.label,
+                    'adjustment_type': adjustment.adjustment_type,
+                    'amount': str(adjustment.amount),
+                    'taxable': adjustment.taxable,
+                    'period_start': str(arrears_item.from_period),
+                    'period_end': str(arrears_item.to_period),
+                },
+            )
+
+        return Response(
+            PayrollRunDetailSerializer(run, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class EmployeeExitReadinessView(APIView):
+    """Check pending leave and payroll items before final exit approval."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, request_id):
+        try:
+            exit_request = EmployeeExitRequest.objects.select_related('employee').get(pk=request_id)
+        except EmployeeExitRequest.DoesNotExist:
+            return Response({'detail': 'Exit request not found.'}, status=404)
+        actor_employee = getattr(request.user, 'employee', None)
+        authorized = is_hr_or_system_admin(request.user) or exit_request.requested_by_id == getattr(actor_employee, 'id', None)
+        if actor_employee and not authorized:
+            authorized = exit_request.approval_actions.filter(assigned_to=actor_employee).exists()
+        if not authorized:
+            return Response({'detail': 'You are not authorized to view this exit request.'}, status=403)
+        return Response(validate_exit_data(exit_request))
 
 
 # ==============================================================================
@@ -334,15 +812,9 @@ class EmployeeSalaryAssignmentViewSet(ModelViewSet):
             }, status=400)
 
         calculated_fixed_salary = Decimal(salary_preview['fixed_salary_monthly'])
-        supplied_fixed_salary = serializer.validated_data.get('fixed_salary_monthly')
-        if supplied_fixed_salary is not None and abs(supplied_fixed_salary - calculated_fixed_salary) > Decimal('0.01'):
-            return Response({
-                'fixed_salary_monthly': (
-                    f"The selected structure calculates fixed gross salary as ₹{calculated_fixed_salary} "
-                    f"for this CTC, not ₹{supplied_fixed_salary}. Adjust the structure or CTC."
-                )
-            }, status=400)
-        fixed_salary_monthly = supplied_fixed_salary or calculated_fixed_salary
+        # The backend preview above is authoritative. A stale client preview
+        # must not block a valid assignment or override the salary structure.
+        fixed_salary_monthly = calculated_fixed_salary
 
         try:
             assignment = AssignmentService.assign_salary(
@@ -371,6 +843,20 @@ class EmployeeSalaryAssignmentViewSet(ModelViewSet):
             '-effective_from',
         )
         return Response(EmployeeSalaryAssignmentSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=['get', 'post'], url_path='arrears')
+    def arrears(self, request, pk=None):
+        """Preview or generate arrears for periods affected by this assignment."""
+        assignment = self.get_object()
+        try:
+            if request.method == 'GET':
+                return Response(preview_assignment_arrears(assignment))
+            result = generate_assignment_arrears(
+                assignment, request.user, request.data.get('reason', ''),
+            )
+            return Response(result, status=status.HTTP_201_CREATED)
+        except ArrearsError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['get'], url_path='current')
     def current(self, request):
@@ -833,6 +1319,61 @@ from .serializers import (
 )
 from .models import PayrollRun, PayrollAuditLog, PayCalendar
 
+class ArrearsLogListView(APIView):
+    """HR register of generated, reserved, and settled arrears items."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def get(self, request):
+        state = request.query_params.get('status', '').upper()
+        qs = list_arrears()
+        if state == 'AVAILABLE':
+            qs = qs.filter(settled_in_run__isnull=True, reserved_in_run__isnull=True)
+        elif state == 'RESERVED':
+            qs = qs.filter(settled_in_run__isnull=True, reserved_in_run__isnull=False)
+        elif state == 'SETTLED':
+            qs = qs.filter(settled_in_run__isnull=False)
+        return Response([{
+            'id': str(item.id),
+            'employee_name': item.employee.full_name,
+            'employee_code': item.employee.employee_id,
+            'component': item.component.name if item.component_id else item.component_label,
+            'component_code': item.component.code if item.component_id else '',
+            'period_start': item.from_period,
+            'period_end': item.to_period,
+            'old_amount': item.old_amount,
+            'new_amount': item.new_amount,
+            'arrears_amount': item.arrears_amount,
+            'reason': item.reason,
+            'status': 'SETTLED' if item.settled_in_run_id else 'RESERVED' if item.reserved_in_run_id else 'AVAILABLE',
+            'reserved_run_status': item.reserved_in_run.status if item.reserved_in_run_id else None,
+            'settled_run_status': item.settled_in_run.status if item.settled_in_run_id else None,
+            'created_at': item.created_at,
+        } for item in qs])
+
+
+class ArrearsPeriodCorrectionView(APIView):
+    """Recalculate a single employee in a paid regular period and generate differences."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def get(self, request, run_id, employee_id):
+        refresh_attendance = request.query_params.get('refresh_attendance', '').lower() in ('1', 'true', 'yes')
+        try:
+            return Response(preview_paid_run_arrears(run_id, employee_id, refresh_attendance))
+        except ArrearsError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def post(self, request, run_id, employee_id):
+        refresh_attendance = bool(request.data.get('refresh_attendance', False))
+        try:
+            result = generate_paid_run_arrears(
+                run_id, employee_id, request.user,
+                request.data.get('reason', ''), refresh_attendance,
+            )
+            return Response(result, status=status.HTTP_201_CREATED)
+        except ArrearsError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
 class PayRunListCreateView(APIView):
     """GET  /runs/        — list all pay runs
        POST /runs/        — create a new pay run
@@ -1033,7 +1574,7 @@ def _build_salary_payment_pdf(batch, lines):
     payment_date = (batch.run.payment_date or period.pay_date).strftime('%d %b %Y')
 
     story = [
-        Table([[logo_cell, Paragraph(f'<b>{escape(company_name)}</b><br/><font size="13">{"OFF-CYCLE PAYMENT BATCH" if batch.run.run_type == "OFF_CYCLE" else "SALARY PAYMENT BATCH"}</font>', styles['Title'])]], colWidths=[30*mm, 152*mm]),
+        Table([[logo_cell, Paragraph(f'<b>{escape(company_name)}</b><br/><font size="13">{"FULL &amp; FINAL PAYMENT BATCH" if batch.run.run_type == "FNF" else "OFF-CYCLE PAYMENT BATCH" if batch.run.run_type == "OFF_CYCLE" else "SALARY PAYMENT BATCH"}</font>', styles['Title'])]], colWidths=[30*mm, 152*mm]),
         Spacer(1, 3*mm),
         Paragraph(
             f'<b>Payroll month:</b> {calendar.month_name[period.month]} {period.year}'
@@ -1228,7 +1769,7 @@ class PayRunPaymentBatchView(APIView):
         actor = getattr(request.user, 'employee', None)
         batch = PaymentBatch.objects.create(
             run=run,
-            batch_number=f'{"PAY-OC" if run.run_type == "OFF_CYCLE" else "PAY"}-{run.pay_calendar.year}{run.pay_calendar.month:02d}-{uuid4().hex[:8].upper()}',
+            batch_number=f'{"PAY-FNF" if run.run_type == "FNF" else "PAY-ARR" if run.run_type == "ARREARS" else "PAY-OC" if run.run_type == "OFF_CYCLE" else "PAY"}-{run.pay_calendar.year}{run.pay_calendar.month:02d}-{uuid4().hex[:8].upper()}',
             payment_mode=payment_mode,
             total_amount=sum((row.net_pay for row, *_ in line_data), Decimal('0.00')),
             created_by=actor,
@@ -1299,7 +1840,7 @@ class PaymentBatchExportView(APIView):
                 writer.writerow([
                     line.account_holder_name, line.bank_account, line.ifsc_code,
                     f'{line.amount:.2f}',
-                    f'{"Off-cycle payroll" if batch.run.run_type == "OFF_CYCLE" else "Salary"} {batch.run.pay_calendar.year}-{batch.run.pay_calendar.month:02d}',
+                    f'{"Full & final settlement" if batch.run.run_type == "FNF" else "Off-cycle payroll" if batch.run.run_type == "OFF_CYCLE" else "Salary"} {batch.run.pay_calendar.year}-{batch.run.pay_calendar.month:02d}',
                     line.run_employee.employee.employee_id,
                 ])
             batch.file_generated = True
@@ -1941,6 +2482,8 @@ class RunAdjustmentListCreateView(APIView):
             run = PayrollRun.objects.get(id=run_id)
         except PayrollRun.DoesNotExist:
             return Response({'detail': 'Pay run not found.'}, status=404)
+        if run.run_type == 'ARREARS':
+            return Response({'detail': 'Arrears run items are loaded automatically from generated, unsettled arrears when inputs are locked.'}, status=400)
         can_add_before_calculation = run.status == 'LOCKED'
         can_add_to_returned_run = run.status == 'CALCULATED' and bool(run.returned_by_id)
         if not (can_add_before_calculation or can_add_to_returned_run):
@@ -1993,6 +2536,8 @@ class RunAdjustmentDetailView(APIView):
             return Response({'detail': 'Pay items can only be removed before calculation or while a run is returned for correction.'}, status=400)
         if row.source_claim_id:
             return Response({'detail': 'A reimbursement imported from an approved claim cannot be removed here.'}, status=400)
+        if row.arrears_item_id:
+            return Response({'detail': 'Generated arrears cannot be removed from a run. Reverse the run to release them, or correct the source assignment and regenerate before settlement.'}, status=400)
         actor = getattr(request.user, 'employee', None)
         PayrollAuditLog.objects.create(
             run=run, employee=row.employee, action='RUN_ADJUSTMENT_REMOVED',

@@ -24,6 +24,7 @@ class LeaveTypeSerializer(serializers.ModelSerializer):
             'accrual_type', 'accrual_type_display', 'yearly_quota', 'accrual_per_period',
             'can_carry_forward', 'max_carry_forward', 'carry_forward_expiry_months',
             'can_encash', 'max_encashment_days', 'encashment_basis',
+            'encashment_divisor_days', 'max_exit_encashment_days',
             'requires_document', 'min_days_before_apply',
             'max_consecutive_days', 'can_apply_half_day', 'allowed_during_probation',
             'requires_manager_approval', 'requires_hr_approval',
@@ -33,6 +34,17 @@ class LeaveTypeSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        can_encash = attrs.get('can_encash', getattr(self.instance, 'can_encash', False))
+        divisor = attrs.get('encashment_divisor_days', getattr(self.instance, 'encashment_divisor_days', 30))
+        yearly_cap = attrs.get('max_encashment_days', getattr(self.instance, 'max_encashment_days', 0))
+        exit_cap = attrs.get('max_exit_encashment_days', getattr(self.instance, 'max_exit_encashment_days', None))
+        if can_encash and divisor <= 0:
+            raise serializers.ValidationError({'encashment_divisor_days': 'The divisor must be greater than zero.'})
+        if yearly_cap < 0 or (exit_cap is not None and exit_cap < 0):
+            raise serializers.ValidationError('Encashment caps cannot be negative.')
+        return attrs
 
 
 class LeaveTypeMiniSerializer(serializers.ModelSerializer):

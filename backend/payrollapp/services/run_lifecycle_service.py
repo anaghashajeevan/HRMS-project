@@ -17,11 +17,13 @@ import logging
 from datetime import date
 from decimal import Decimal
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from HRMSapp.models import Employee
 from ..models import (
-    PayrollRun, PayrollRunEmployee, PayrollRunComponentDetail,
+    PayrollRun, PayrollRunEmployee, PayrollRunComponentDetail, PayrollRunAdjustment,
+    ArrearsLog,
     PayCalendar, EmployeeSalaryAssignment, PayrollAuditLog,
 )
 from .payroll_calculation_service import PayrollCalculationService, FORMULA_VERSION
@@ -73,9 +75,20 @@ class RunLifecycleService:
     # ──────────────────────────────────────────
     @classmethod
     @transaction.atomic
-    def create_run(cls, pay_calendar_id, run_type, user, payment_date=None):
+    def create_run(cls, pay_calendar_id, run_type, user, payment_date=None, exit_request=None):
         """Create a new PayrollRun in OPEN status."""
         cal = PayCalendar.objects.select_for_update().get(id=pay_calendar_id)
+
+        if run_type == 'FNF':
+            if exit_request is None or exit_request.status != 'APPROVED':
+                raise RunLifecycleError('An approved exit request is required for an F&F run.')
+            if exit_request.proposed_exit_date.year != cal.year or exit_request.proposed_exit_date.month != cal.month:
+                raise RunLifecycleError('The pay calendar must match the approved last working date month.')
+            existing_fnf = PayrollRun.objects.filter(exit_request=exit_request).exclude(status='REVERSED').first()
+            if existing_fnf:
+                raise RunLifecycleError(f'An F&F run already exists for this exit (status: {existing_fnf.status}).')
+        elif exit_request is not None:
+            raise RunLifecycleError('An exit request can only be linked to an F&F run.')
 
         # Check for duplicate REGULAR run in same calendar
         if run_type == 'REGULAR':
@@ -91,6 +104,7 @@ class RunLifecycleService:
         run = PayrollRun.objects.create(
             pay_calendar=cal,
             run_type=run_type,
+            exit_request=exit_request,
             payment_date=payment_date,
             status='OPEN',
             formula_version='1.0',
@@ -99,7 +113,10 @@ class RunLifecycleService:
 
         cls._audit(run, user, 'RUN_CREATED', None, 'OPEN',
                    reason=f'{run_type} run created',
-                   new_values={'payment_date': str(payment_date) if payment_date else None})
+                   new_values={
+                       'payment_date': str(payment_date) if payment_date else None,
+                       'exit_request_id': str(exit_request.id) if exit_request else None,
+                   })
 
         return run
 
@@ -140,6 +157,13 @@ class RunLifecycleService:
 
         run.save()
 
+        if action == 'approve' and target == 'APPROVED' and run.prepared_by_id:
+            cls._notify_run_preparer(run)
+        elif action == 'return' and run.prepared_by_id:
+            cls._schedule_lifecycle_email('returned', run.id, run.prepared_by_id)
+        elif action == 'mark-paid':
+            cls._notify_run_employees_paid(run)
+
         # Audit
         cls._audit(run, user, f'STATUS_{action.upper().replace("-", "_")}',
                    old_status, target, reason=reason)
@@ -159,8 +183,15 @@ class RunLifecycleService:
         period_start = cal.period_start
         period_end = cal.period_end
 
+        if run.run_type == 'FNF' and not run.exit_request_id:
+            raise RunLifecycleError('This F&F run is not linked to an approved exit request.')
+
+        if run.run_type == 'ARREARS':
+            cls._handle_lock_arrears(run, user)
+            return
+
         # Lock the calendar
-        if run.run_type != 'OFF_CYCLE' and cal.status != 'LOCKED':
+        if run.run_type != 'OFF_CYCLE' and cal.status == 'OPEN':
             cal.status = 'LOCKED'
             cal.input_locked_at = timezone.now()
             cal.save(update_fields=['status', 'input_locked_at'])
@@ -172,6 +203,8 @@ class RunLifecycleService:
             # effective_to is null (open) OR effective_to >= period_start
             **{}  # handled below
         ).select_related('employee', 'structure')
+        if run.run_type == 'FNF':
+            eligible_assignments = eligible_assignments.filter(employee_id=run.exit_request.employee_id)
 
         # Manual filter for effective_to
         assignments = []
@@ -228,7 +261,7 @@ class RunLifecycleService:
                     'paid_leave_days': Decimal('0'), 'day_map': {}, 'summary': {},
                     'leave_breakdown': [],
                 }
-                if run.run_type == 'OFF_CYCLE'
+                if run.run_type in ('OFF_CYCLE', 'FNF')
                 else DayReconciliationService.reconcile(
                     employee, period_start, period_end,
                     saturday_is_working=cal.saturday_is_working,
@@ -266,6 +299,13 @@ class RunLifecycleService:
                 employee_id=emp_id,
                 salary_assignment=assignment,
                 days_in_month=cal.days_in_month,
+                # Keep the locked attendance snapshot and the row summary in
+                # sync even when salary calculation later fails (for example,
+                # because a structure formula is invalid).
+                eligible_calendar_days=day_data['eligible_calendar_days'],
+                payable_days=day_data['payable_days'],
+                lop_days=day_data['lop_days'],
+                paid_leave_days=day_data['paid_leave_days'],
                 salary_divisor_days=day_data['salary_divisor_days'],
                 status='PENDING',
                 input_snapshot={'locked_inputs': locked_inputs},
@@ -279,6 +319,110 @@ class RunLifecycleService:
         PayrollRunEmployee.objects.bulk_create(bulk)
 
         logger.info(f'Run {run.id}: locked with {len(bulk)} employees (type={run.run_type})')
+
+    @classmethod
+    def _handle_lock_arrears(cls, run, user):
+        """Load only unsettled arrears items and reserve them for this run."""
+        cal = run.pay_calendar
+        items = list(ArrearsLog.objects.select_for_update().filter(
+            settled_in_run__isnull=True,
+        ).filter(
+            Q(reserved_in_run__isnull=True) | Q(reserved_in_run=run),
+        ).select_related('employee', 'component').order_by(
+            'employee__employee_id', 'from_period', 'component_label',
+        ))
+        if not items:
+            raise RunLifecycleError('There are no unsettled arrears items available for this run.')
+
+        PayrollRunEmployee.objects.filter(run=run).delete()
+        employees = {}
+        for item in items:
+            employees.setdefault(item.employee_id, item.employee)
+        employee_totals = {}
+        for item in items:
+            employee_totals[item.employee_id] = employee_totals.get(item.employee_id, Decimal('0')) + item.arrears_amount
+        payable_employee_ids = {employee_id for employee_id, total in employee_totals.items() if total > 0}
+        if not payable_employee_ids:
+            raise RunLifecycleError(
+                'There are no positive net arrears available to pay. Overpayment recovery must be handled through a payroll deduction.'
+            )
+        unpaid_recovery_employees = [
+            employees[employee_id].full_name for employee_id, total in employee_totals.items()
+            if total <= 0
+        ]
+        # Payment batches are outgoing employee payments. Leave zero/negative
+        # net recovery groups available for a separate deduction workflow.
+        items = [item for item in items if item.employee_id in payable_employee_ids]
+        employees = {employee_id: employee for employee_id, employee in employees.items()
+                     if employee_id in payable_employee_ids}
+
+        assignment_map = {}
+        for employee_id, employee in employees.items():
+            assignment = EmployeeSalaryAssignment.objects.filter(
+                employee_id=employee_id, effective_from__lte=cal.period_end,
+            ).order_by('-effective_from').first()
+            if assignment is None:
+                assignment = EmployeeSalaryAssignment.objects.filter(
+                    employee_id=employee_id,
+                ).order_by('-effective_from').first()
+            if assignment is None:
+                raise RunLifecycleError(
+                    f'{employee.full_name} has arrears but no salary assignment to apply the payroll tax profile.'
+                )
+            assignment_map[employee_id] = assignment
+
+        PayrollRunEmployee.objects.bulk_create([
+            PayrollRunEmployee(
+                run=run, employee=employee,
+                salary_assignment=assignment_map[employee_id],
+                days_in_month=cal.days_in_month,
+                input_snapshot={'run_type': 'ARREARS', 'locked_at': timezone.now().isoformat()},
+                status='PENDING',
+            ) for employee_id, employee in employees.items()
+        ], batch_size=500)
+        for item in items:
+            if item.reserved_in_run_id is None:
+                item.reserved_in_run = run
+                item.save(update_fields=['reserved_in_run'])
+            amount = abs(item.arrears_amount)
+            if amount == 0:
+                continue
+            if not PayrollRunAdjustment.objects.filter(arrears_item=item).exists():
+                is_earning = item.arrears_amount > 0
+                label = f"Arrears · {item.component.code if item.component_id else item.component_label} · {item.from_period:%b %Y}"
+                PayrollRunAdjustment.objects.create(
+                    run=run,
+                    employee=item.employee,
+                    arrears_item=item,
+                    adjustment_type='VARIABLE_EARNING' if is_earning else 'DEDUCTION',
+                    category='ARREARS' if is_earning else 'DEDUCTION_CORRECTION',
+                    label=label,
+                    amount=amount,
+                    taxable=is_earning and bool((item.calculation_snapshot or {}).get('is_taxable', False)),
+                    reference_period_start=item.from_period,
+                    reference_period_end=item.to_period,
+                    reason=item.reason or 'Retroactive salary correction',
+                    created_by=cls._actor_employee(user),
+                )
+        PayrollAuditLog.objects.create(
+            run=run,
+            action='ARREARS_ITEMS_RESERVED',
+            reason='Unsettled arrears items loaded into this run for payroll review.',
+            performed_by=cls._actor_employee(user),
+            new_values={
+                'item_count': len(items),
+                'employee_count': len(employees),
+                'total_arrears': str(sum((item.arrears_amount for item in items), Decimal('0'))),
+                'items': [{
+                    'employee_code': item.employee.employee_id,
+                    'component': item.component.code if item.component_id else item.component_label,
+                    'from_period': str(item.from_period),
+                    'to_period': str(item.to_period),
+                    'amount': str(item.arrears_amount),
+                } for item in items],
+                'recovery_only_employees_not_loaded': unpaid_recovery_employees,
+            },
+        )
 
     @classmethod
     def _handle_reopen(cls, run, user, reason):
@@ -300,6 +444,18 @@ class RunLifecycleService:
             raise RunLifecycleError('A run with a payment batch cannot be reopened.')
         if run.pay_calendar.status == 'CLOSED':
             raise RunLifecycleError('This pay calendar is closed and cannot be reopened.')
+
+        if run.run_type == 'ARREARS':
+            reserved_items = list(ArrearsLog.objects.select_for_update().filter(
+                reserved_in_run=run, settled_in_run__isnull=True,
+            ))
+            if reserved_items:
+                PayrollRunAdjustment.objects.filter(
+                    run=run, arrears_item__in=reserved_items,
+                ).delete()
+                ArrearsLog.objects.filter(id__in=[item.id for item in reserved_items]).update(
+                    reserved_in_run=None,
+                )
 
         # Keep run adjustments (for example, manually entered variable pay) intact.
         # The employee rows contain only locked snapshots and are rebuilt on the
@@ -467,6 +623,17 @@ class RunLifecycleService:
                 re.save(update_fields=['status', 'error_message'])
                 error_count += 1
 
+        if run.run_type == 'ARREARS':
+            nonpayable = PayrollRunEmployee.objects.filter(
+                run=run, status='CALCULATED', net_pay__lte=0,
+            ).select_related('employee')
+            if nonpayable.exists():
+                names = ', '.join(row.employee.full_name for row in nonpayable[:5])
+                raise RunLifecycleError(
+                    f'Net arrears after configured deductions are zero or negative for {names}. '
+                    'No payment can be issued; recover amounts owed back through a payroll deduction.'
+                )
+
         run.total_gross = total_gross
         run.total_deductions = total_deductions
         run.total_net = total_net
@@ -564,6 +731,98 @@ class RunLifecycleService:
             raise RunLifecycleError('Use Recalculate for a returned run so refreshed attendance is recorded in its history.')
         if PayrollRunEmployee.objects.filter(run=run, status='ERROR').exists():
             raise RunLifecycleError('Use Retry Calculation while employee calculation errors remain.')
+        if run.run_type == 'FNF':
+            if not run.exit_request_id:
+                raise RunLifecycleError('This F&F run is not linked to an exit request.')
+            from ..models import PayrollRunAdjustment
+            from .exit_service import refresh_settlement_snapshot
+            from .full_final_service import preview_full_final
+
+            exit_request = run.exit_request
+            refresh_settlement_snapshot(exit_request, user, for_run=run)
+            settlement = preview_full_final(exit_request)
+            if exit_request.frozen_snapshot.get('reserved_arrears_count'):
+                raise RunLifecycleError(
+                    'This employee has arrears reserved in another payroll run. Complete or reverse that run before refreshing F&F.'
+                )
+            source_reason = f'F&F exit request {exit_request.id}'
+            desired = []
+            for line in settlement['lines']:
+                amount = Decimal(line['amount'])
+                if amount <= 0 or line['code'] == 'OUTSTANDING_ARREARS':
+                    continue
+                if line['code'] == 'RECOVERIES':
+                    desired.append({
+                        'adjustment_type': 'DEDUCTION', 'category': 'OTHER',
+                        'label': line['label'], 'amount': abs(amount), 'taxable': False,
+                    })
+                elif line['code'] in ('SALARY_THROUGH_EXIT', 'LEAVE_ENCASHMENT', 'OTHER_DUES', 'GRATUITY'):
+                    desired.append({
+                        'adjustment_type': 'VARIABLE_EARNING',
+                        'category': 'FNF_SALARY' if line['code'] == 'SALARY_THROUGH_EXIT' else 'OTHER',
+                        'label': line['label'], 'amount': amount,
+                        'taxable': line.get('taxable', True),
+                    })
+
+            for arrears_item in ArrearsLog.objects.filter(
+                reserved_in_run=run, settled_in_run__isnull=True,
+            ).select_related('component').order_by('from_period', 'created_at'):
+                amount = arrears_item.arrears_amount
+                if amount == 0:
+                    continue
+                is_earning = amount > 0
+                label = (
+                    f"Arrears · {arrears_item.component.code if arrears_item.component_id else arrears_item.component_label} · "
+                    f"{arrears_item.from_period:%b %Y}"
+                )
+                desired.append({
+                    'adjustment_type': 'VARIABLE_EARNING' if is_earning else 'DEDUCTION',
+                    'category': 'ARREARS' if is_earning else 'DEDUCTION_CORRECTION',
+                    'label': label, 'amount': abs(amount),
+                    'taxable': is_earning and bool((arrears_item.calculation_snapshot or {}).get('is_taxable', False)),
+                    'arrears_item': arrears_item,
+                })
+
+            existing = list(PayrollRunAdjustment.objects.filter(
+                run=run, employee=exit_request.employee, reason=source_reason,
+            ))
+            old_values = [{
+                'adjustment_type': item.adjustment_type, 'category': item.category,
+                'label': item.label, 'amount': str(item.amount), 'taxable': item.taxable,
+            } for item in existing]
+            remaining = list(existing)
+            for values in desired:
+                matched = next((item for item in remaining
+                                if item.adjustment_type == values['adjustment_type']
+                                and item.label == values['label']), None)
+                if matched:
+                    for field in ('category', 'amount', 'taxable'):
+                        setattr(matched, field, values[field])
+                    update_fields = ['category', 'amount', 'taxable']
+                    if 'arrears_item' in values:
+                        matched.arrears_item = values['arrears_item']
+                        update_fields.append('arrears_item')
+                    matched.save(update_fields=update_fields)
+                    remaining.remove(matched)
+                else:
+                    PayrollRunAdjustment.objects.create(
+                        run=run, employee=exit_request.employee,
+                        reason=source_reason, created_by=getattr(user, 'employee', None),
+                        **values,
+                    )
+            for obsolete in remaining:
+                obsolete.delete()
+            audit_desired = [{
+                **{key: value for key, value in values.items() if key != 'arrears_item'},
+                'amount': str(values['amount']),
+            } for values in desired]
+            PayrollAuditLog.objects.create(
+                run=run, employee=exit_request.employee,
+                action='FNF_SETTLEMENT_ADJUSTMENTS_REFRESHED',
+                reason=reason.strip(), performed_by=getattr(user, 'employee', None),
+                old_values={'adjustments': old_values},
+                new_values={'adjustments': audit_desired},
+            )
         cls._handle_calculate(run, user, reason.strip())
 
     @classmethod
@@ -753,6 +1012,61 @@ class RunLifecycleService:
                     'approval_action_id': str(action.id),
                 },
             )
+            RunLifecycleService._schedule_lifecycle_email(
+                'approval_request', run.id, action.assigned_to_id, approval_action_id=action.id,
+            )
+
+    @staticmethod
+    def _schedule_lifecycle_email(event, run_id, recipient_id, approval_action_id=None):
+        from HRMSapp.tasks import send_payroll_lifecycle_email
+
+        def enqueue():
+            try:
+                send_payroll_lifecycle_email.delay(
+                    event, str(run_id), str(recipient_id),
+                    str(approval_action_id) if approval_action_id else None,
+                )
+            except Exception:
+                logger.exception(
+                    'Could not queue payroll lifecycle email: event=%s run=%s recipient=%s',
+                    event, run_id, recipient_id,
+                )
+
+        transaction.on_commit(enqueue)
+
+    @classmethod
+    def _notify_run_preparer(cls, run):
+        from HRMSapp.models import Notification
+
+        title = 'Payroll run approved'
+        message = f'The {run.get_run_type_display().lower()} payroll run for {run.pay_calendar} was approved.'
+        Notification.objects.create(
+            recipient=run.prepared_by,
+            notification_type='APPROVAL_APPROVED',
+            title=title,
+            message=message,
+            link=f'/payroll/runs/{run.id}',
+            metadata={'run_id': str(run.id), 'status': 'APPROVED'},
+        )
+        cls._schedule_lifecycle_email('approved', run.id, run.prepared_by_id)
+
+    @classmethod
+    def _notify_run_employees_paid(cls, run):
+        from HRMSapp.models import Notification
+
+        employees = PayrollRunEmployee.objects.filter(
+            run=run, status='CALCULATED',
+        ).select_related('employee')
+        for row in employees:
+            Notification.objects.create(
+                recipient=row.employee,
+                notification_type='SYSTEM',
+                title='Payroll marked paid',
+                message=f'Payroll for {run.pay_calendar} has been marked paid. To access your payslip, submit a request from Payslips; it will be available after approval.',
+                link='/payslips',
+                metadata={'run_id': str(run.id), 'run_type': run.run_type, 'status': 'PAID'},
+            )
+            cls._schedule_lifecycle_email('paid', run.id, row.employee_id)
 
     @classmethod
     def _handle_finalize(cls, run, user, reason):
@@ -772,6 +1086,111 @@ class RunLifecycleService:
             raise RunLifecycleError(
                 'Create a bank payment batch and reconcile every payment line with a UTR before marking this run paid.'
             )
+
+        if run.run_type == 'REGULAR':
+            from leaveapp.services.compoff_payroll_service import post_paid_compoff_for_run
+            post_paid_compoff_for_run(run, user)
+
+        if run.run_type in ('ARREARS', 'FNF'):
+            arrears_items = list(ArrearsLog.objects.select_for_update().filter(
+                reserved_in_run=run, settled_in_run__isnull=True,
+            ))
+            if run.run_type == 'ARREARS' and not arrears_items:
+                raise RunLifecycleError('This arrears run has no reserved unsettled arrears items to settle.')
+            if arrears_items:
+                total_arrears = sum((item.arrears_amount for item in arrears_items), Decimal('0'))
+                for item in arrears_items:
+                    item.settled_in_run = run
+                    item.reserved_in_run = None
+                    item.save(update_fields=['settled_in_run', 'reserved_in_run'])
+                PayrollAuditLog.objects.create(
+                    run=run,
+                    action='ARREARS_ITEMS_SETTLED',
+                    reason='Arrears items settled after all payroll payment lines were reconciled.',
+                    performed_by=cls._actor_employee(user),
+                    new_values={
+                        'item_count': len(arrears_items),
+                        'employee_count': len({item.employee_id for item in arrears_items}),
+                        'total_arrears': str(total_arrears),
+                        'items': [{
+                            'employee_code': item.employee.employee_id,
+                            'component': item.component.code if item.component_id else item.component_label,
+                            'from_period': str(item.from_period),
+                            'to_period': str(item.to_period),
+                            'amount': str(item.arrears_amount),
+                        } for item in arrears_items],
+                    },
+                )
+
+        if run.run_type == 'FNF':
+            if not run.exit_request_id:
+                raise RunLifecycleError('This F&F run is not linked to an exit request.')
+            from leaveapp.models import LeaveBalance
+            from .leave_encashment_service import preview_exit_encashment
+
+            exit_request = run.exit_request
+            encashment = preview_exit_encashment(exit_request)
+            balances = {}
+            posted_lines = []
+            for line in encashment['lines']:
+                balance = balances.get(line['balance_id'])
+                if balance is None:
+                    balance = LeaveBalance.objects.select_for_update().filter(
+                        id=line['balance_id'], employee=exit_request.employee,
+                    ).first()
+                    if balance is None:
+                        raise RunLifecycleError(
+                            f"The frozen leave balance for {line['leave_type_code']} ({line['year']}) no longer exists."
+                        )
+                    balances[line['balance_id']] = balance
+
+                days = Decimal(line['encashable_days'])
+                if balance.available < days:
+                    raise RunLifecycleError(
+                        f"The current {line['leave_type_code']} balance is below the {days} days approved for encashment. "
+                        'Correct the leave balance through the approved leave adjustment workflow before retrying payment.'
+                    )
+                balance.encashed += days
+                balance.save(update_fields=['encashed', 'updated_at'])
+                posted_lines.append({
+                    'balance_id': line['balance_id'],
+                    'leave_type_code': line['leave_type_code'],
+                    'leave_type_name': line['leave_type_name'],
+                    'year': line['year'],
+                    'days': str(days),
+                    'amount': line['amount'],
+                })
+
+            if posted_lines:
+                PayrollAuditLog.objects.create(
+                    run=run, employee=exit_request.employee,
+                    action='FNF_LEAVE_ENCASHMENT_POSTED',
+                    reason='Leave encashment posted after all F&F payment lines were reconciled.',
+                    performed_by=cls._actor_employee(user),
+                    new_values={
+                        'exit_request_id': str(exit_request.id),
+                        'leave_balances': posted_lines,
+                        'total_encashable_days': encashment['total_encashable_days'],
+                        'total_amount': encashment['total_amount'],
+                    },
+                )
+
+            employee = exit_request.employee
+            if employee.status != 'TERMINATED':
+                old_status = employee.status
+                employee.status = 'TERMINATED'
+                employee.save(update_fields=['status'])
+                PayrollAuditLog.objects.create(
+                    run=run, employee=employee, action='EMPLOYEE_EXIT_COMPLETED',
+                    reason='F&F payment reconciled; employee exit completed.',
+                    performed_by=cls._actor_employee(user),
+                    old_values={'status': old_status},
+                    new_values={
+                        'status': 'TERMINATED',
+                        'date_of_exit': exit_request.proposed_exit_date.isoformat(),
+                        'exit_request_id': str(exit_request.id),
+                    },
+                )
 
         batch_ids = PayrollRunAdjustment.objects.filter(
             run=run, source_claim__isnull=False,
@@ -808,6 +1227,21 @@ class RunLifecycleService:
 
         if not reason:
             raise RunLifecycleError('A reason is required for reversal.')
+
+        if run.run_type == 'REGULAR':
+            from leaveapp.services.compoff_payroll_service import reverse_paid_compoff_for_run
+            reverse_paid_compoff_for_run(run, user)
+
+        arrears_item_ids = list(ArrearsLog.objects.select_for_update().filter(
+            Q(reserved_in_run=run) | Q(settled_in_run=run),
+        ).values_list('id', flat=True))
+        if arrears_item_ids:
+            PayrollRunAdjustment.objects.filter(
+                run=run, arrears_item_id__in=arrears_item_ids,
+            ).delete()
+            ArrearsLog.objects.filter(id__in=arrears_item_ids).update(
+                reserved_in_run=None, settled_in_run=None,
+            )
 
         # Create reversal run
         reversal = PayrollRun.objects.create(
@@ -900,6 +1334,8 @@ class RunLifecycleService:
     def exclude_employee(cls, run_id, run_employee_id, user, reason):
         """Mark a PayrollRunEmployee as EXCLUDED."""
         run = PayrollRun.objects.get(id=run_id)
+        if run.run_type == 'ARREARS':
+            raise RunLifecycleError('Employees with generated arrears cannot be excluded from their settlement run.')
         if run.status not in ('OPEN', 'LOCKED', 'CALCULATED'):
             raise RunLifecycleError(
                 f'Cannot exclude employees when run is {run.status}.'

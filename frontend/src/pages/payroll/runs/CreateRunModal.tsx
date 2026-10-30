@@ -13,7 +13,6 @@ const localToday = () => {
 const RUN_TYPES = [
   { value: 'REGULAR', label: 'Regular monthly salary' },
   { value: 'OFF_CYCLE', label: 'Off-cycle bonus / increment / correction' },
-  { value: 'FNF', label: 'Full & final settlement' },
   { value: 'ARREARS', label: 'Arrears' },
 ];
 
@@ -35,7 +34,7 @@ export default function CreateRunModal({ onClose, onCreated }: Props) {
   }, []);
 
   const selectableCalendars = calendars.filter((calendar) =>
-    calendar.status === 'OPEN' || (form.run_type === 'OFF_CYCLE' && calendar.status !== 'CLOSED'),
+    calendar.status === 'OPEN' || (['OFF_CYCLE', 'ARREARS'].includes(form.run_type) && calendar.status !== 'CLOSED'),
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -44,7 +43,7 @@ export default function CreateRunModal({ onClose, onCreated }: Props) {
     setSaving(true);
     setError('');
     try {
-      await createPayRun(form.run_type === 'OFF_CYCLE'
+      await createPayRun(['OFF_CYCLE', 'ARREARS'].includes(form.run_type)
         ? form
         : { pay_calendar: form.pay_calendar, run_type: form.run_type });
       onCreated();
@@ -85,9 +84,10 @@ export default function CreateRunModal({ onClose, onCreated }: Props) {
               {RUN_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
             </select>
             {form.run_type === 'OFF_CYCLE' && <p className="mt-2 text-xs leading-5 text-gray-500">Use for a separate one-time payment. After locking, add the affected employee’s bonus, increment difference, or correction. It does not repeat monthly salary or attendance.</p>}
+            {form.run_type === 'ARREARS' && <p className="mt-2 text-xs leading-5 text-gray-500">This run loads generated, unsettled arrears items when inputs are locked. It does not repeat regular monthly salary or attendance. Generate and review arrears first from Payroll → Arrears.</p>}
           </div>
-          {form.run_type === 'OFF_CYCLE' && <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">Off-cycle payment / tax date *</label>
+          {['OFF_CYCLE', 'ARREARS'].includes(form.run_type) && <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">Payment / tax date *</label>
             <input required type="date" className={inputCls} value={form.payment_date} onChange={(e) => setForm((f) => ({ ...f, payment_date: e.target.value }))} />
             <p className="mt-1 text-xs text-gray-500">Enter when the bonus is expected to be paid (defaults to today). TDS uses this month and financial year; the selected pay calendar remains the bonus reference period. The run creation time is recorded separately.</p>
           </div>}

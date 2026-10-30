@@ -4,7 +4,7 @@ from .models import (
     StatutoryRule, PayCalendar, EmployeeSalaryAssignment,
     EmployeePayrollProfile, PayrollRun, PayrollRunEmployee,
     PayrollRunComponentDetail, PaymentBatch, PaymentBatchLine,
-    PayslipRequest, PayslipRequestApprovalAction, PayrollAuditLog, ArrearsLog, PayrollRunApprovalAction,
+    PayslipRequest, PayslipRequestApprovalAction, PayrollAuditLog, ArrearsLog, PayrollRunApprovalAction,EmployeeExitRequest,
 )
 
 
@@ -143,7 +143,29 @@ class PayrollAuditLogAdmin(admin.ModelAdmin):
 
 @admin.register(ArrearsLog)
 class ArrearsLogAdmin(admin.ModelAdmin):
-    list_display = ('employee', 'component', 'from_period', 'to_period',
-                    'arrears_amount', 'settled_in_run')
-    list_filter = ('component',)
-    search_fields = ('employee__employee_id', 'employee__first_name')
+    list_display = ('employee', 'component_display', 'from_period', 'to_period',
+                    'arrears_amount', 'settlement_state', 'source_run')
+    list_filter = ('component', 'from_period')
+    search_fields = ('employee__employee_id', 'employee__first_name', 'component_label')
+    readonly_fields = ('calculation_snapshot', 'created_at')
+
+    @admin.display(description='Component')
+    def component_display(self, obj):
+        return obj.component.code if obj.component_id else obj.component_label
+
+    @admin.display(description='Settlement')
+    def settlement_state(self, obj):
+        if obj.settled_in_run_id:
+            return f'Settled ({obj.settled_in_run})'
+        if obj.reserved_in_run_id:
+            return f'Reserved ({obj.reserved_in_run})'
+        return 'Available'
+
+@admin.register(EmployeeExitRequest)
+class EmployeeExitRequestAdmin(admin.ModelAdmin):
+    list_display = ('employee', 'exit_type', 'proposed_exit_date', 'status',
+                    'current_step_number', 'requested_by', 'approved_by', 'created_at')
+    list_filter = ('status', 'exit_type')
+    search_fields = ('employee__employee_id', 'exit_type')
+    readonly_fields = ('approved_by', 'approved_at', 'frozen_snapshot',
+                       'created_at', 'updated_at')

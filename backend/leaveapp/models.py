@@ -28,6 +28,13 @@ class LeaveType(models.Model):
         ('ON_DEMAND', 'On demand only'),
     ]
 
+    ENCASHMENT_BASIS_CHOICES = [
+        ('FIXED', 'Fixed Monthly Salary (Gross)'),
+        ('BASIC', 'Basic Salary'),
+        ('GROSS', 'Gross Salary'),
+        ('CTC', 'CTC'),
+    ]
+
     GENDER_CHOICES = [
         ('ALL', 'All employees'),
         ('MALE', 'Male only'),
@@ -55,7 +62,17 @@ class LeaveType(models.Model):
     # Encashment
     can_encash = models.BooleanField(default=False)
     max_encashment_days = models.DecimalField(max_digits=5, decimal_places=1, default=0)
-    encashment_basis = models.CharField(max_length=20, default='BASIC')
+    encashment_basis = models.CharField(
+        max_length=20, choices=ENCASHMENT_BASIS_CHOICES, default='FIXED',
+    )
+    encashment_divisor_days = models.DecimalField(
+        max_digits=5, decimal_places=2, default=30,
+        help_text='Monthly salary divisor used to calculate the daily encashment rate.',
+    )
+    max_exit_encashment_days = models.DecimalField(
+        max_digits=6, decimal_places=1, null=True, blank=True,
+        help_text='Optional total cap for this leave type across all balances in one exit settlement.',
+    )
 
     # Application rules
     requires_document = models.BooleanField(default=False)
@@ -521,6 +538,9 @@ class CompOffCreditLog(models.Model):
     worked_hours = models.DecimalField(max_digits=5, decimal_places=2)
     reason = models.CharField(max_length=200)
     credited_at = models.DateTimeField(auto_now_add=True)
+    paid_in_payroll_run_id = models.CharField(max_length=36, blank=True, default='')
+    paid_comp_off_days = models.DecimalField(max_digits=4, decimal_places=1, default=0)
+    paid_at = models.DateTimeField(null=True, blank=True)
     
     class Meta:
         db_table = 'compoff_credit_logs'

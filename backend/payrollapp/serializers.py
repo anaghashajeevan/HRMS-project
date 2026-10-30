@@ -18,6 +18,7 @@ from .models import (
     PayrollRunComponentDetail, PaymentBatch, PaymentBatchLine,
     PayslipRequest, PayslipRequestApprovalAction, PayrollAuditLog, ArrearsLog, PayrollRunAdjustment,
     PayrollRunApprovalAction,
+    EmployeeExitRequest, EmployeeExitApprovalAction,
 )
 
 
@@ -355,6 +356,9 @@ class EmployeeSalaryAssignmentCreateSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'ctc_monthly': {'required': False},
             'effective_from': {'required': False},
+            # Fixed gross is derived by the server from the selected structure;
+            # never trust a cached or client-edited preview value.
+            'fixed_salary_monthly': {'read_only': True},
         }
 
     def validate_employee(self, employee):
@@ -699,6 +703,7 @@ class PayrollRunListSerializer(serializers.ModelSerializer):
         model = PayrollRun
         fields = [
             'id', 'pay_calendar', 'pay_calendar_display', 'run_type', 'payment_date',
+            'exit_request',
             'status', 'formula_version', 'totals',
             'prepared_by', 'prepared_by_name',
             'approved_by', 'finalized_by',
@@ -743,6 +748,7 @@ class PayrollRunDetailSerializer(serializers.ModelSerializer):
         model = PayrollRun
         fields = [
             'id', 'pay_calendar', 'pay_calendar_display', 'run_type', 'payment_date',
+            'exit_request',
             'status', 'formula_version', 'totals',
             'prepared_by', 'prepared_by_name',
             'approved_by', 'approved_by_name',
@@ -931,9 +937,9 @@ class PayrollRunAdjustmentSerializer(serializers.ModelSerializer):
             'id', 'run', 'employee', 'employee_name', 'employee_code',
             'adjustment_type', 'category', 'label', 'amount', 'taxable',
             'reference_period_start', 'reference_period_end', 'source_claim',
-            'reason', 'created_by', 'created_at',
+            'arrears_item', 'reason', 'created_by', 'created_at',
         ]
-        read_only_fields = ['id', 'run', 'source_claim', 'created_by', 'created_at']
+        read_only_fields = ['id', 'run', 'source_claim', 'arrears_item', 'created_by', 'created_at']
 
     def validate_amount(self, value):
         if value <= 0:
@@ -1025,11 +1031,50 @@ class PayslipRequestSerializer(serializers.ModelSerializer):
 class PayRunCreateSerializer(serializers.Serializer):
     pay_calendar = serializers.UUIDField()
     run_type = serializers.ChoiceField(
-        choices=['REGULAR', 'OFF_CYCLE', 'FNF', 'ARREARS']
+        choices=['REGULAR', 'OFF_CYCLE', 'ARREARS']
     )
     payment_date = serializers.DateField(required=False, allow_null=True)
 
     def validate(self, attrs):
-        if attrs.get('run_type') == 'OFF_CYCLE' and not attrs.get('payment_date'):
-            raise serializers.ValidationError({'payment_date': 'A payment date is required for an off-cycle run.'})
+        if attrs.get('run_type') in ('OFF_CYCLE', 'ARREARS') and not attrs.get('payment_date'):
+            raise serializers.ValidationError({'payment_date': 'A payment date is required for an off-cycle or arrears run.'})
         return attrs
+
+
+class EmployeeExitApprovalActionSerializer(serializers.ModelSerializer):
+    assigned_to_name = serializers.CharField(source='assigned_to.full_name', read_only=True)
+    acted_by_name = serializers.CharField(source='acted_by.full_name', read_only=True)
+
+    class Meta:
+        model = EmployeeExitApprovalAction
+        fields = ['id', 'step_number', 'step_name', 'assigned_to', 'assigned_to_name', 'acted_by', 'acted_by_name', 'status', 'comments', 'acted_at', 'created_at']
+        read_only_fields = fields
+
+
+class EmployeeExitRequestSerializer(serializers.ModelSerializer):
+    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+    employee_code = serializers.CharField(source='employee.employee_id', read_only=True)
+    requested_by_name = serializers.CharField(source='requested_by.full_name', read_only=True)
+    approved_by_name = serializers.CharField(source='approved_by.full_name', read_only=True)
+    approval_actions = EmployeeExitApprovalActionSerializer(many=True, read_only=True)
+    can_decide = serializers.SerializerMethodField()
+    fnf_run = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EmployeeExitRequest
+        fields = ['id', 'employee', 'employee_name', 'employee_code', 'requested_by', 'requested_by_name', 'workflow', 'proposed_exit_date', 'exit_type', 'reason', 'settlement_inputs', 'status', 'current_step_number', 'rejection_reason', 'approved_by', 'approved_by_name', 'approved_at', 'frozen_snapshot', 'approval_actions', 'can_decide', 'fnf_run', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'requested_by', 'workflow', 'status', 'current_step_number', 'rejection_reason', 'approved_by', 'approved_at', 'frozen_snapshot', 'approval_actions', 'created_at', 'updated_at']
+
+    def get_can_decide(self, obj):
+        employee = getattr(getattr(self.context.get('request'), 'user', None), 'employee', None)
+        if employee is None or obj.status != 'PENDING_APPROVAL':
+            return False
+        return obj.approval_actions.filter(
+            assigned_to=employee, step_number=obj.current_step_number, status='PENDING',
+        ).exists()
+
+    def get_fnf_run(self, obj):
+        run = obj.fnf_runs.exclude(status='REVERSED').order_by('-created_at').first()
+        if not run:
+            return None
+        return {'id': str(run.id), 'status': run.status, 'run_type': run.run_type}

@@ -355,6 +355,7 @@ import SalaryStructuresPage from './pages/payroll/structures/SalaryStructuresPag
 import StatutoryRulesPage from './pages/payroll/statutory/StatutoryRulesPage';
 import PayCalendarPage from './pages/payroll/calendar/PayCalendarPage';
 import AssignmentsPage from './pages/payroll/assignments/AssignmentsPage';
+import ArrearsPage from './pages/payroll/arrears/ArrearsPage';
 import PayrollProfilesPage from './pages/payroll/profiles/PayrollProfilesPage';
 import PayRunsPage from './pages/payroll/runs/PayRunsPage';
 import PayRunDetailPage from './pages/payroll/runs/PayRunDetailPage';
@@ -362,6 +363,7 @@ import CalculatePreviewPage from './pages/payroll/preview/CalculatePreviewPage';
 import PayrollSettingsPage from './pages/payroll/settings/PayrollSettingsPage';
 import PayslipsPage from './pages/payroll/payslips/PayslipsPage';
 import StatutoryExportsPage from './pages/payroll/statutory/StatutoryExportsPage';
+import EmployeeExitsPage from './pages/payroll/exits/EmployeeExitsPage';
 
 export default function App() {
   return (
@@ -1132,9 +1134,11 @@ export default function App() {
   <Route path="statutory" element={<StatutoryRulesPage />} />
   <Route path="calendar" element={<PayCalendarPage />} />
   <Route path="assignments" element={<AssignmentsPage />} />
+  <Route path="arrears" element={<ArrearsPage />} />
   <Route path="profiles" element={<PayrollProfilesPage />} />
   <Route path="runs" element={<PayRunsPage />} />
   <Route path="runs/:id" element={<PayRunDetailPage />} />
+  <Route path="exits" element={<ProtectedRoute><EmployeeExitsPage /></ProtectedRoute>} />
   <Route path="preview" element={<CalculatePreviewPage />} />
   <Route path="settings" element={<PayrollSettingsPage />} />
   <Route path="statutory-exports" element={<StatutoryExportsPage />} />

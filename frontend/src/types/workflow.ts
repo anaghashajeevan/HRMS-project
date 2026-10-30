@@ -12,7 +12,7 @@ export type ApproverType =
   | 'LEAVE_APPLICATION'   
   | 'LEAVE_APPROVAL'; 
 
-export type ModuleType = 'LIFECYCLE' | 'LEAVE'|'POLICY'| 'CALENDAR' | 'PAYROLL' | 'PAYSLIP';
+export type ModuleType = 'LIFECYCLE' | 'LEAVE'|'POLICY'| 'CALENDAR' | 'PAYROLL' | 'PAYSLIP' | 'EXIT';
 
 export interface WorkflowStep {
   id?: string;
@@ -73,7 +73,11 @@ export type LetterTemplateType =
   | 'PROBATION_REMINDER'
   | 'PROBATION_PERIOD_CHANGED'
   | 'EMPLOYMENT_STATUS_CHANGED'
-  | 'EMPLOYEE_ID_CHANGED';
+  | 'EMPLOYEE_ID_CHANGED'
+  | 'PAYROLL_APPROVAL_REQUEST'
+  | 'PAYROLL_RUN_APPROVED'
+  | 'PAYROLL_RUN_RETURNED'
+  | 'PAYROLL_RUN_PAID';
 
 export type CreationMethod = 'AI' | 'MANUAL' | 'AI_EDITED';
 

@@ -1600,13 +1600,7 @@ export default function EmployeeForm() {
                     Probation: {selectedProbationPolicy.probation_months} months. A reminder will be sent {selectedProbationPolicy.reminder_days_before} days before the last day.
                   </div>
                 )}
-                {isEditMode && (
-                  <Field label="Date of Exit">
-                    <input type="date" value={form.date_of_exit || ''}
-                      onChange={(e) => update('date_of_exit', e.target.value || null)}
-                      className={inputCls()} />
-                  </Field>
-                )}
+                {isEditMode && <p className="md:col-span-2 text-sm text-gray-500">Employee exit dates are set through Payroll → Employee Exits after approval.</p>}
               </div>
             </SectionCard>
 

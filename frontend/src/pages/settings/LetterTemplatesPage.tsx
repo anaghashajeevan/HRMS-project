@@ -25,6 +25,10 @@ const templateTypeColors: Record<LetterTemplateType, string> = {
   PROBATION_PERIOD_CHANGED: 'bg-orange-100 text-orange-800',
   EMPLOYMENT_STATUS_CHANGED: 'bg-cyan-100 text-cyan-800',
   EMPLOYEE_ID_CHANGED: 'bg-sky-100 text-sky-800',
+  PAYROLL_APPROVAL_REQUEST: 'bg-indigo-100 text-indigo-800',
+  PAYROLL_RUN_APPROVED: 'bg-green-100 text-green-800',
+  PAYROLL_RUN_RETURNED: 'bg-amber-100 text-amber-800',
+  PAYROLL_RUN_PAID: 'bg-teal-100 text-teal-800',
 };
 
 const templateTypeLabels: Record<LetterTemplateType, string> = {
@@ -42,6 +46,10 @@ const templateTypeLabels: Record<LetterTemplateType, string> = {
   PROBATION_PERIOD_CHANGED: 'Probation Period Changed',
   EMPLOYMENT_STATUS_CHANGED: 'Employment Status Changed',
   EMPLOYEE_ID_CHANGED: 'Employee ID Changed',
+  PAYROLL_APPROVAL_REQUEST: 'Payroll Approval Request',
+  PAYROLL_RUN_APPROVED: 'Payroll Run Approved',
+  PAYROLL_RUN_RETURNED: 'Payroll Run Returned',
+  PAYROLL_RUN_PAID: 'Payroll Run Paid',
 };
 
 export default function LetterTemplatesPage() {

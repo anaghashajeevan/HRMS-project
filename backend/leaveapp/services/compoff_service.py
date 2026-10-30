@@ -117,6 +117,15 @@ class CompOffService:
                 employee=employee,
                 credit_date=day,
             ).first()
+
+            if existing_log and existing_log.paid_in_payroll_run_id:
+                return {
+                    'credited': False,
+                    'reason': 'This comp-off credit has already been settled through payroll; reverse that payroll run before correcting it.',
+                    'worked_hours': worked_hours,
+                    'comp_off_days': 0,
+                    'existing_credit': float(existing_log.comp_off_days),
+                }
             
             if existing_log and not force:
                 logger.info(

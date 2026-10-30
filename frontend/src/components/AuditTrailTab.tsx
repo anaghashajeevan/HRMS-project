@@ -36,9 +36,44 @@ export default function AuditTrailTab({ employeeId }: Props) {
       minute: '2-digit',
     });
 
-  const truncate = (val: string | null, max = 60) => {
+  const truncate = (val: string | null, max = 180) => {
     if (!val) return '—';
     return val.length > max ? val.substring(0, max) + '...' : val;
+  };
+
+  const displayAuditValue = (raw: string | null) => {
+    if (!raw) return '—';
+    let value: unknown = raw;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      // Keep ordinary text values as entered.
+    }
+
+    const isUuid = (item: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item);
+    const humanize = (item: unknown): string => {
+      if (item == null || item === '') return '—';
+      if (typeof item === 'boolean') return item ? 'Yes' : 'No';
+      if (typeof item === 'string' && isUuid(item)) return '';
+      if (Array.isArray(item)) return item.map(humanize).filter(Boolean).join(' · ') || '—';
+      if (typeof item === 'object') {
+        return Object.entries(item as Record<string, unknown>)
+          .filter(([key]) => !/(^id$|_id$|uuid)/i.test(key))
+          .map(([key, nested]) => {
+            const label = key.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+            const result = humanize(nested);
+            return result ? `${label}: ${result}` : '';
+          })
+          .filter(Boolean)
+          .join(' · ') || '—';
+      }
+      return String(item)
+        .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+    };
+
+    return truncate(humanize(value));
   };
 
   return (
@@ -87,21 +122,18 @@ export default function AuditTrailTab({ employeeId }: Props) {
                   </div>
 
                   <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
-  <code className="rounded bg-red-50 px-2 py-0.5 text-xs text-red-700 line-through">
-    {truncate(log.old_value_display || log.old_value) || '(empty)'}
-  </code>
-  <ArrowRight className="h-3 w-3 text-gray-400" />
-  <code className="rounded bg-green-50 px-2 py-0.5 text-xs text-green-700">
-    {truncate(log.new_value_display || log.new_value) || '(empty)'}
-  </code>
-</div>
+                    <span className="rounded bg-red-50 px-2 py-0.5 text-xs text-red-700 line-through">
+                      {displayAuditValue(log.old_value_display || log.old_value) || '(empty)'}
+                    </span>
+                    <ArrowRight className="h-3 w-3 text-gray-400" />
+                    <span className="rounded bg-green-50 px-2 py-0.5 text-xs text-green-700">
+                      {displayAuditValue(log.new_value_display || log.new_value) || '(empty)'}
+                    </span>
+                  </div>
 
                   <div className="flex items-center gap-1 text-xs text-gray-500">
                     <User className="h-3 w-3" />
                     Changed by <span className="font-medium">{log.modified_by_name}</span>
-                    {log.modified_by_id && (
-                      <span className="text-gray-400">({log.modified_by_id})</span>
-                    )}
                   </div>
                 </div>
               </div>

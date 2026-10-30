@@ -22,6 +22,8 @@ export interface LeaveType {
   can_encash: boolean;
   max_encashment_days: number;
   encashment_basis: string;
+  encashment_divisor_days: number;
+  max_exit_encashment_days: number | null;
   requires_document: boolean;
   min_days_before_apply: number;
   max_consecutive_days: number;
