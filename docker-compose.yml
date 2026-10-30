@@ -627,6 +627,18 @@ services:
       - hrms_network
       - sso_portal_network
 
+  # Deliberately contains no HRMS files or upstream proxy.  It preserves old
+  # :9001 bookmarks by redirecting them to the SSO portal, while the actual
+  # HRMS frontend remains reachable only through the portal's internal proxy.
+  sso_redirect:
+    image: nginx:1.27-alpine
+    container_name: hrms_sso_redirect
+    restart: unless-stopped
+    ports:
+      - "9001:80"
+    volumes:
+      - ./frontend/sso-redirect.nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
 
 # ==============================================================================
 # Networks & Volumes

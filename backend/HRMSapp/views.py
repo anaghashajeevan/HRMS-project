@@ -191,9 +191,14 @@ class NexusSsoLoginView(APIView):
         employee.first_name = first_name
         employee.last_name = last_name
         employee.official_email = email
+        requested_employee_id = str(request.data.get('employee_id') or '').strip()[:20]
+        if requested_employee_id and requested_employee_id != employee.employee_id:
+            if Employee.objects.exclude(pk=employee.pk).filter(employee_id=requested_employee_id).exists():
+                return Response({'detail': 'This Employee ID is already used in HRMS.'}, status=status.HTTP_409_CONFLICT)
+            employee.employee_id = requested_employee_id
         if nexus_user.get('phone_number'):
             employee.phone_number = str(nexus_user['phone_number'])[:20]
-        employee.save(update_fields=['first_name', 'last_name', 'official_email', 'phone_number'])
+        employee.save(update_fields=['employee_id', 'first_name', 'last_name', 'official_email', 'phone_number'])
 
         # SSO proves identity and application assignment only. HRMS owns all
         # role assignments, including SYSTEM_ADMIN.
@@ -4026,7 +4031,15 @@ class DashboardStatsView(APIView):
         # HR / SYSTEM ADMIN DASHBOARD
         # ==========================================================================
         if is_hr:
-            employees = Employee.objects.filter(is_deleted=False)
+            # Keep dashboard headcount consistent with the employee directory:
+            # an SSO-linked employee disappears from the visible roster as
+            # soon as their portal assignment is revoked.  Locally managed
+            # employees (and records without an account) remain included.
+            employees = Employee.objects.filter(is_deleted=False).filter(
+                Q(user_account__isnull=True)
+                | Q(user_account__sso_user_id__isnull=True)
+                | Q(user_account__is_active=True)
+            )
             total_emp = employees.count()
             
             new_hires_this_month = employees.filter(date_of_joining__gte=month_start, date_of_joining__lte=today).count()
