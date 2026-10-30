@@ -616,14 +616,16 @@ services:
         condition: service_healthy
       whatsapp_gateway:
         condition: service_started
-    ports:
-      - "9001:80"
+      # HRMS is intentionally not published to the LAN.  The SSO portal
+      # exposes it at http://192.168.1.56:7000/hrms/ after portal login.
+      # Keeping this port internal prevents direct-IP access to HRMS.
     volumes:
       # ✅ MOUNT MEDIA & STATIC VOLUMES SO NGINX CAN SERVE THEM DIRECTLY
       - backend_media:/app/media:ro
       - backend_static:/app/staticfiles:ro
     networks:
       - hrms_network
+      - sso_portal_network
 
 
 # ==============================================================================
@@ -633,6 +635,11 @@ services:
 networks:
   hrms_network:
     driver: bridge
+  # Created by the SSO portal compose project.  It lets the portal reverse
+  # proxy HRMS without publishing HRMS itself to the host network.
+  sso_portal_network:
+    external: true
+    name: sso-portal_default
 
 volumes:
   redis_data:

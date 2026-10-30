@@ -365,7 +365,7 @@ import StatutoryExportsPage from './pages/payroll/statutory/StatutoryExportsPage
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/hrms">
       <AuthProvider>
         <Toaster
           position="top-right"

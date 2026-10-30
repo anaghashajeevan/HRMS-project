@@ -71,22 +71,10 @@ class NexusSsoLoginView(APIView):
     authentication_classes = []
 
     @staticmethod
-    def _apply_portal_admin_mapping(user, is_portal_admin):
-        """Map an explicitly HRMS-authorized portal admin to local HRMS admin."""
-        if not is_portal_admin:
-            return
-        role, _ = Role.objects.get_or_create(
-            code='system_admin',
-            defaults={
-                'role_name': 'SYSTEM_ADMIN',
-                'description': 'Full HRMS administration.',
-                'level': 100,
-                'is_active': True,
-                'sso_managed': False,
-            },
-        )
-        if role.is_active:
-            user.roles.add(role)
+    def _record_portal_admin_claim(user, is_portal_admin):
+        """Record the SSO claim for audit only; HRMS owns every HRMS role."""
+        user.sso_is_portal_admin = bool(is_portal_admin)
+        user.save(update_fields=['sso_is_portal_admin'])
 
     @classmethod
     def _sso_role_names(cls, nexus_user):
@@ -207,10 +195,9 @@ class NexusSsoLoginView(APIView):
             employee.phone_number = str(nexus_user['phone_number'])[:20]
         employee.save(update_fields=['first_name', 'last_name', 'official_email', 'phone_number'])
 
-        # HRMS roles are local business authorization.  SSO proves identity
-        # and application assignment. The one agreed exception is an
-        # explicitly assigned portal administrator, mapped to SYSTEM_ADMIN.
-        self._apply_portal_admin_mapping(user, bool(nexus_user.get('is_portal_admin')))
+        # SSO proves identity and application assignment only. HRMS owns all
+        # role assignments, including SYSTEM_ADMIN.
+        self._record_portal_admin_claim(user, bool(nexus_user.get('is_portal_admin')))
 
         # Mark the local account as SSO-authenticated without changing its
         # employee link.
@@ -261,12 +248,6 @@ class NexusSsoLoginView(APIView):
                 is_ldap_user=True,
                 sso_user_id=sso_user_id or None,
             )
-            default_role, _ = Role.objects.get_or_create(
-                code='employee',
-                defaults={'role_name': 'EMPLOYEE', 'description': 'Default HRMS employee role.', 'level': 10, 'is_active': True},
-            )
-            if default_role.is_active:
-                user.roles.add(default_role)
         return user
 
 
@@ -303,7 +284,7 @@ class NexusSsoDirectorySyncView(APIView):
         user.sso_user_id = sso_user_id
         user.is_active = bool(request.data.get('is_active', True))
         user.save(update_fields=['email', 'sso_user_id', 'is_active'])
-        NexusSsoLoginView._apply_portal_admin_mapping(user, bool(request.data.get('is_portal_admin')))
+        NexusSsoLoginView._record_portal_admin_claim(user, bool(request.data.get('is_portal_admin')))
         return Response({'id': str(user.id), 'employee_id': str(employee.id), 'active': user.is_active}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 

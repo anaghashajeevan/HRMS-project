@@ -1051,9 +1051,10 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
                 user_account.email = instance.official_email
                 user_account.save(update_fields=['email'])
             if role_ids is not None:
-                user_account.roles.set(
-                    Role.objects.filter(id__in=role_ids, is_active=True)
-                )
+                # HRMS owns all authorization. SSO only supplies identity and
+                # HRMS application access, so every active local role is
+                # editable here, including SYSTEM_ADMIN.
+                user_account.roles.set(Role.objects.filter(id__in=role_ids, is_active=True))
 
         # Create user account if requested (and doesn't exist)
         if create_account and password and not hasattr(instance, 'user_account'):

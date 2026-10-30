@@ -481,6 +481,9 @@ class UserAccount(AbstractBaseUser, PermissionsMixin):
     # Immutable external identity from NexusOne. Email may be renamed in the
     # identity provider, so it must not be the only SSO matching key.
     sso_user_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    # The only HRMS role controlled by the upstream portal. All other HRMS
+    # roles remain local to HRMS.
+    sso_is_portal_admin = models.BooleanField(default=False)
 
     # AD/LDAP + MFA
     is_ldap_user = models.BooleanField(default=False)

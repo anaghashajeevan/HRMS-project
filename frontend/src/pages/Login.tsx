@@ -23,7 +23,6 @@ export default function Login() {
   const { logo } = useCompanyLogo();
   const { login, loginWithNexus } = useAuth();
   const handledSsoCode = useRef<string | null>(null);
-  const ssoStartRequested = useRef(false);
   const navigate = useNavigate();
   const location = useLocation();
   const ssoCode = new URLSearchParams(location.search).get('code');
@@ -71,20 +70,14 @@ export default function Login() {
 
   useEffect(() => {
     if (ssoCode || ssoPaused) return;
-    // React StrictMode deliberately runs effects twice during development.
-    // Starting two authorization requests races the single state cookie: the
-    // provider can return the first state after the second request has
-    // replaced it, which makes a valid sign-in look expired.
-    if (ssoStartRequested.current) return;
-    ssoStartRequested.current = true;
-
-    setIsSubmitting(true);
-    authApi.nexusAuthorize()
-      .then(({ authorize_url }) => { window.location.replace(authorize_url); })
+    // A URL typed directly into HRMS must never create an app session. Send
+    // the browser to NexusOne, where the user can launch HRMS from its
+    // authorized application tile. That launch supplies the one-time code
+    // handled by the effect above.
+    authApi.nexusLoginUrl()
+      .then(({ login_url }) => { window.location.replace(login_url); })
       .catch((error: AxiosError<{ detail?: string }>) => {
-        setErrors({ general: error.response?.data?.detail || 'Single sign-on could not be started.' });
-        setIsSubmitting(false);
-        ssoStartRequested.current = false;
+        setErrors({ general: error.response?.data?.detail || 'NexusOne sign-in is unavailable.' });
       });
   }, [ssoCode, ssoPaused]);
 

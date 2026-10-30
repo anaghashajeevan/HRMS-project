@@ -2,7 +2,7 @@ import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 
 // Use the HRMS host's reverse proxy in production. A browser opened through
 // NexusOne must not call its own localhost address.
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/hrms/api/v1';
 
 
 
@@ -20,7 +20,10 @@ const api = axios.create({
 // ---------- Request Interceptor: attach access token ----------
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('access_token');
+    // An HRMS login must belong to the tab that completed the SSO hand-off.
+    // localStorage is shared by every tab for this origin, which allowed a
+    // second tab opened directly at the HRMS IP to reuse an existing session.
+    const token = sessionStorage.getItem('access_token');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -59,10 +62,10 @@ api.interceptors.response.use(
       requestUrl.includes('/auth/token/refresh/');
 
     if (error.response?.status === 401 && !originalRequest._retry && !isAuthenticationRequest) {
-      const refresh = localStorage.getItem('refresh_token');
+      const refresh = sessionStorage.getItem('refresh_token');
 
       if (!refresh) {
-        localStorage.clear();
+        sessionStorage.clear();
         window.location.href = '/login';
         return Promise.reject(error);
       }
@@ -88,8 +91,8 @@ api.interceptors.response.use(
         const { data } = await axios.post(`${API_BASE_URL}/auth/token/refresh/`, {
           refresh,
         });
-        localStorage.setItem('access_token', data.access);
-        if (data.refresh) localStorage.setItem('refresh_token', data.refresh);
+        sessionStorage.setItem('access_token', data.access);
+        if (data.refresh) sessionStorage.setItem('refresh_token', data.refresh);
 
         if (originalRequest.headers) {
           originalRequest.headers.Authorization = `Bearer ${data.access}`;
@@ -98,7 +101,7 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (err) {
         processQueue(err, null);
-        localStorage.clear();
+        sessionStorage.clear();
         window.location.href = '/login';
         return Promise.reject(err);
       } finally {
