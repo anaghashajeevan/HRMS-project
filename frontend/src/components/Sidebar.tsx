@@ -1728,7 +1728,7 @@ import {
   Clock,
   Activity,
   MessageCircle,Gift,
-  Package,Image
+  Package,Image, ArrowLeft
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCompanyLogo } from '../hooks/useCompanyLogo';
@@ -2363,7 +2363,20 @@ export default function Sidebar() {
             logo mark stays legible against the dark sidebar background.
             "HRMS" (the product name) is shown separately from the company
             logo, since the logo image already carries the company name. */}
-        <div className="flex h-20 flex-shrink-0 items-center gap-3 border-b border-white/10 px-5">
+        <div className="flex h-20 flex-shrink-0 items-center gap-3 border-b border-white/10 px-4">
+          <button
+            type="button"
+            onClick={() =>
+              window.location.assign(
+                `${window.location.protocol}//${window.location.hostname}:7000`
+              )
+            }
+            className="relative z-10 flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-lg text-indigo-100 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+            aria-label="Go to My applications"
+            title="Go to My applications"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
           <div className="flex h-11 flex-shrink-0 items-center justify-center rounded-xl bg-white px-2.5 py-1.5 shadow-md shadow-black/30 ring-1 ring-black/5">
             {logo.logo_url ? (
               <img
