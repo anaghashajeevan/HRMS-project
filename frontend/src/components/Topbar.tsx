@@ -130,7 +130,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { 
-  Bell, ChevronDown, LogOut, User as UserIcon, Settings, Key, 
+  Bell, ChevronDown, Home, User as UserIcon, Settings, Key, 
   CheckCircle2, AlertCircle, Mail, FileText, HelpCircle, Inbox
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -140,7 +140,7 @@ import ChangePasswordModal from './ChangePasswordModal';
 import { notificationsApi } from '../api/workflow';
 
 export default function Topbar() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -186,14 +186,8 @@ export default function Topbar() {
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-      toast.success('Logged out successfully');
-      navigate('/login', { replace: true });
-    } catch {
-      toast.error('Logout failed');
-    }
+  const returnToPortal = () => {
+    window.location.assign(`${window.location.protocol}//${window.location.hostname}:7000`);
   };
 
   const handleMarkRead = async (id: string, link?: string) => {
@@ -382,11 +376,11 @@ export default function Topbar() {
               <div className="my-1 border-t border-gray-100"></div>
 
               <button
-                onClick={handleLogout}
-                className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                onClick={returnToPortal}
+                className="flex w-full items-center gap-2 px-4 py-2 text-sm text-indigo-600 hover:bg-indigo-50"
               >
-                <LogOut className="h-4 w-4" />
-                Sign Out
+                <Home className="h-4 w-4" />
+                Back to home
               </button>
             </div>
           )}
