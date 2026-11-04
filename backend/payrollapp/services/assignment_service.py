@@ -70,7 +70,7 @@ class AssignmentService:
     def assign_salary(
         employee, structure, ctc_annual, ctc_monthly,
         effective_from, reason='', created_by=None, effective_to=None,
-        fixed_salary_monthly=None,
+        fixed_salary_monthly=None, increment_interval_months=None,
     ):
         """
         Create a new salary assignment with overlap handling.
@@ -126,6 +126,7 @@ class AssignmentService:
             effective_from=effective_from,
             effective_to=effective_to,
             reason=reason,
+            increment_interval_months=increment_interval_months,
             created_by=created_by,
         )
 
@@ -141,6 +142,7 @@ class AssignmentService:
                 'ctc_monthly': str(ctc_monthly),
                 'fixed_salary_monthly': str(fixed_salary_monthly) if fixed_salary_monthly is not None else None,
                 'effective_from': str(effective_from),
+                'increment_interval_months': increment_interval_months,
             },
             reason=reason,
             performed_by=created_by,

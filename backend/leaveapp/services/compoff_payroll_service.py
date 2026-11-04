@@ -16,7 +16,7 @@ def _off_day_dates(row):
 
 @transaction.atomic
 def post_paid_compoff_for_run(run, actor=None):
-    """Consume comp-off credits that correspond to dates paid as extra days."""
+    """Settle paid off-day work and retain selected Comp-Off credits after payment."""
     if run.run_type != 'REGULAR':
         return {'posted_days': '0.0', 'items': []}
 
@@ -27,21 +27,55 @@ def post_paid_compoff_for_run(run, actor=None):
     if not compoff_type:
         return {'posted_days': '0.0', 'items': [], 'warning': 'COMP_OFF leave type is not configured.'}
 
+    rows = list(PayrollRunEmployee.objects.filter(
+        run=run, status='CALCULATED',
+    ).select_related('employee'))
     logs = []
-    for row in PayrollRunEmployee.objects.filter(run=run, status='CALCULATED').select_related('employee'):
+    allocations = {}
+    for row in rows:
         dates = _off_day_dates(row)
         if not dates:
             continue
+        allocation = (row.input_snapshot or {}).get('off_day_allocation') or {}
+        # Existing runs without an explicit split preserve the old behavior:
+        # every eligible off-day is paid out.
+        paid_dates = (
+            set(allocation.get('paid_dates') or [])
+            if 'paid_dates' in allocation else dates
+        )
+        comp_off_dates = (
+            set(allocation.get('comp_off_dates') or [])
+            if 'comp_off_dates' in allocation else (dates - paid_dates)
+        )
+        allocations[row.employee_id] = {
+            'row': row, 'paid_dates': paid_dates, 'comp_off_dates': comp_off_dates,
+        }
         logs.extend(CompOffCreditLog.objects.select_for_update().filter(
             employee=row.employee, credit_date__in=dates,
         ).order_by('credit_date'))
 
     postings = []
+    saved_items = []
     by_balance = defaultdict(list)
     for log in logs:
         if log.paid_in_payroll_run_id:
             continue
-        by_balance[(log.employee_id, log.credit_date.year)].append(log)
+        allocation = allocations.get(log.employee_id, {})
+        credit_date = log.credit_date.isoformat()
+        if credit_date in allocation.get('paid_dates', set()):
+            by_balance[(log.employee_id, log.credit_date.year)].append(log)
+        elif credit_date in allocation.get('comp_off_dates', set()):
+            log.paid_in_payroll_run_id = str(run.id)
+            log.paid_comp_off_days = Decimal('0')
+            log.paid_at = timezone.now()
+            log.save(update_fields=['paid_in_payroll_run_id', 'paid_comp_off_days', 'paid_at'])
+            saved_items.append({
+                'employee_id': log.employee_id,
+                'employee_code': log.employee.employee_id,
+                'credit_date': log.credit_date.isoformat(),
+                'year': log.credit_date.year,
+                'retained_days': str(log.comp_off_days),
+            })
 
     for (employee_id, year), entries in by_balance.items():
         balance = LeaveBalance.objects.select_for_update().filter(
@@ -71,21 +105,62 @@ def post_paid_compoff_for_run(run, actor=None):
         if balance:
             balance.save(update_fields=['encashed', 'updated_at'])
 
-    if postings:
+    if postings or saved_items:
         PayrollAuditLog.objects.create(
             run=run,
-            action='COMPOFF_CASH_OUT_POSTED',
-            reason='Comp-off credits were consumed after corresponding regular payroll payments were reconciled.',
+            action='COMPOFF_PAYROLL_ALLOCATION_POSTED',
+            reason='Extra worked days were settled as salary or retained as Comp-Off after payroll payment.',
             performed_by=getattr(actor, 'employee', None),
             new_values={
                 'credit_count': len(postings),
                 'posted_days': str(sum((Decimal(item['posted_days']) for item in postings), Decimal('0'))),
                 'items': postings,
+                'retained_credit_count': len(saved_items),
+                'retained_days': str(sum((Decimal(item['retained_days']) for item in saved_items), Decimal('0'))),
+                # Employee primary keys are UUIDs; JSONField requires JSON-native values.
+                'retained_items': [
+                    {**item, 'employee_id': str(item['employee_id'])}
+                    for item in saved_items
+                ],
             },
         )
+
+    if saved_items:
+        from HRMSapp.models import Notification
+
+        retained_by_employee = defaultdict(Decimal)
+        for item in saved_items:
+            retained_by_employee[item['employee_id']] += Decimal(item['retained_days'])
+        employee_by_id = {row.employee_id: row.employee for row in rows}
+        for employee_id, days in retained_by_employee.items():
+            employee = employee_by_id[employee_id]
+            if days <= 0:
+                continue
+            Notification.objects.create(
+                recipient=employee,
+                notification_type='SYSTEM',
+                title=f'Comp-Off retained: {days.normalize()} day(s)',
+                message=(
+                    f'{days.normalize()} Comp-Off day(s) from eligible weekend or holiday work '
+                    f'were retained in your leave balance for {run.pay_calendar}, instead of being '
+                    'paid as extra salary. These days can be requested as leave under your Comp-Off policy.'
+                ),
+                link='/leave',
+                metadata={
+                    'payroll_run_id': str(run.id),
+                    'period': f'{run.pay_calendar.year}-{run.pay_calendar.month:02d}',
+                    'comp_off_days': str(days),
+                    'credit_dates': [
+                        item['credit_date'] for item in saved_items
+                        if item['employee_id'] == employee_id
+                    ],
+                },
+            )
     return {
         'posted_days': str(sum((Decimal(item['posted_days']) for item in postings), Decimal('0'))),
         'items': postings,
+        'retained_days': str(sum((Decimal(item['retained_days']) for item in saved_items), Decimal('0'))),
+        'retained_items': saved_items,
     }
 
 

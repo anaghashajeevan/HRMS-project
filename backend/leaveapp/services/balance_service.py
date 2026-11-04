@@ -333,7 +333,7 @@ class LeaveBalanceService:
         monthly_types = LeaveType.objects.filter(is_active=True, accrual_type='MONTHLY')
         employees = Employee.objects.filter(
             is_deleted=False,
-            status__in=['ACTIVE', 'PROBATION'],
+            status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'],
         )
 
         accrued_count = 0

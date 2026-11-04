@@ -15,6 +15,27 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+@shared_task
+def update_completed_resignation_statuses():
+    """Move employees to RELIEVED after their approved last working day."""
+    from .models import Employee
+
+    today = timezone.localdate()
+    employees = Employee.objects.filter(
+        is_deleted=False,
+        date_of_exit__lt=today,
+        status__in=['NOTICE_PERIOD', 'ACTIVE', 'PROBATION'],
+        exit_requests__status='APPROVED',
+    ).distinct().order_by('employee_id')
+    changed = 0
+    for employee in employees.iterator():
+        employee.status = 'RELIEVED'
+        employee.save(update_fields=['status'])
+        changed += 1
+    logger.info('Moved %s employees to RELIEVED after their last working day.', changed)
+    return {'updated': changed, 'as_of': today.isoformat()}
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def scan_document_expiries(self):
     """
@@ -288,7 +309,7 @@ def test_email(recipient_email):
 @shared_task
 def scan_probation_reminders():
     """Send each probation cycle's advance reminder once per recipient."""
-    from .models import ProbationCycle, UserAccount, LetterTemplate
+    from .models import ProbationCycle, UserAccount, LetterTemplate, Notification
 
     today = timezone.localdate()
     cycles = ProbationCycle.objects.filter(
@@ -314,6 +335,29 @@ def scan_probation_reminders():
             is_active=True,
             roles__role_name__in=['HR_ADMIN', 'SYSTEM_ADMIN'],
         ).select_related('employee').distinct()
+        hr_employees = [user.employee for user in admins if user.employee_id]
+        reminder_key = f'probation-completion:{cycle.id}'
+        for hr_employee in hr_employees:
+            if Notification.objects.filter(
+                recipient=hr_employee, metadata__reminder_key=reminder_key,
+            ).exists():
+                continue
+            Notification.objects.create(
+                recipient=hr_employee,
+                notification_type='SYSTEM',
+                title=f'Probation completing soon: {employee.full_name}',
+                message=(
+                    f"{employee.full_name} ({employee.employee_id})'s probation is scheduled to complete "
+                    f"on {cycle.end_date:%d %B %Y}. Please review the probation outcome this week."
+                ),
+                link='/employees',
+                metadata={
+                    'reminder_key': reminder_key,
+                    'employee_id': str(employee.id),
+                    'probation_cycle_id': str(cycle.id),
+                    'probation_end_date': cycle.end_date.isoformat(),
+                },
+            )
         for user in admins:
             linked_employee = getattr(user, 'employee', None)
             address = (linked_employee.official_email if linked_employee else None) or user.email
@@ -363,6 +407,83 @@ def scan_probation_reminders():
             update_fields.append('reminder_sent_at')
         cycle.save(update_fields=update_fields)
 
+    return {'sent': sent}
+
+
+@shared_task
+def scan_salary_increment_reminders():
+    """Notify HR during the week before an employee's configured increment review date."""
+    import calendar
+    from .models import Employee, Notification
+    from payrollapp.models import EmployeeSalaryAssignment
+
+    today = timezone.localdate()
+    window_end = today + timedelta(days=7)
+    hr_employees = list(
+        Employee.objects.filter(
+            user_account__is_active=True,
+            user_account__roles__role_name__in=['HR_ADMIN', 'SYSTEM_ADMIN'],
+        ).distinct()
+    )
+    assignments = EmployeeSalaryAssignment.objects.filter(
+        effective_from__lte=today,
+        effective_to__isnull=True,
+        increment_interval_months__gt=0,
+        employee__status__in=['ACTIVE', 'PROBATION'],
+    ).select_related('employee')
+    sent = 0
+    for assignment in assignments:
+        employee = assignment.employee
+        interval = assignment.increment_interval_months
+        joined = employee.date_of_joining
+        elapsed_months = max(0, (today.year - joined.year) * 12 + today.month - joined.month)
+        interval_number = max(1, (elapsed_months + interval - 1) // interval)
+
+        cycle = employee.probation_cycles.filter(is_current=True).order_by('-start_date').first()
+        probation_end = cycle.end_date if cycle else None
+        if probation_end and probation_end >= today:
+            continue
+        while True:
+            total_months = interval_number * interval
+            year = joined.year + (joined.month - 1 + total_months) // 12
+            month = (joined.month - 1 + total_months) % 12 + 1
+            due_date = date(year, month, min(joined.day, calendar.monthrange(year, month)[1]))
+            if due_date < today:
+                interval_number += 1
+                continue
+            if not probation_end or due_date > probation_end:
+                break
+            interval_number += 1
+
+        if not today <= due_date <= window_end:
+            continue
+
+        reminder_key = f'salary-increment:{employee.id}:{due_date.isoformat()}'
+        years = interval_number * interval / 12
+        for recipient in hr_employees:
+            if Notification.objects.filter(
+                recipient=recipient, metadata__reminder_key=reminder_key,
+            ).exists():
+                continue
+            Notification.objects.create(
+                recipient=recipient,
+                notification_type='SYSTEM',
+                title=f'Salary increment review due: {employee.full_name}',
+                message=(
+                    f"{employee.full_name} ({employee.employee_id}) will complete {years:g} year(s) of service "
+                    f"on {due_date:%d %B %Y}. The configured {interval}-month increment review interval is due; "
+                    'please review the salary assignment.'
+                ),
+                link='/payroll/assignments',
+                metadata={
+                    'reminder_key': reminder_key,
+                    'employee_id': str(employee.id),
+                    'salary_assignment_id': str(assignment.id),
+                    'increment_interval_months': interval,
+                    'review_due_date': due_date.isoformat(),
+                },
+            )
+            sent += 1
     return {'sent': sent}
 
 

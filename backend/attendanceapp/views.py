@@ -75,7 +75,7 @@ def _get_hrms_active_employees():
     from HRMSapp.models import Employee as HRMSEmployee
     return HRMSEmployee.objects.filter(
         is_deleted=False,
-        status__in=['ACTIVE', 'PROBATION'],
+        status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'],
     ).select_related('structure_location').order_by('employee_id')
 
 

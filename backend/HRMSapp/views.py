@@ -500,7 +500,7 @@ class EmployeeViewSet(ModelViewSet):
         user = self.request.user
         qs = Employee.objects.filter(is_deleted=False).select_related(
             'position', 'position__department', 'reporting_manager', 'structure_location','department', 'location', 'cost_center',
-        )
+        ).prefetch_related('exit_requests')
 
         # 1. System / HR admins see all employees
         if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
@@ -673,7 +673,7 @@ class EmployeeViewSet(ModelViewSet):
     @action(detail=False, methods=['get'], url_path='managers')
     def managers(self, request):
         """Get list of employees filtered by role (e.g., REPORTING_MANAGER or HOD)."""
-        qs = Employee.objects.filter(is_deleted=False, status__in=['ACTIVE', 'PROBATION'])
+        qs = Employee.objects.filter(is_deleted=False, status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'])
 
         # 👇 Check if frontend is asking for a specific role (e.g., ?role=REPORTING_MANAGER)
         role_filter = request.query_params.get('role', '').strip().upper()
@@ -1387,7 +1387,7 @@ class ApprovalWorkflowViewSet(ModelViewSet):
         # Specific employees (with their roles for identification)
         employees = Employee.objects.filter(
             is_deleted=False,
-            status__in=['ACTIVE', 'PROBATION'],
+            status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'],
             user_account__isnull=False,
         ).select_related('user_account').prefetch_related('user_account__roles').order_by('first_name')
         

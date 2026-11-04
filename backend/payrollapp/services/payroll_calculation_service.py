@@ -45,7 +45,7 @@ class PayrollCalculationService:
     @staticmethod
     def preview_calculate(
         employee, period_start, period_end, days_in_month=None, run=None,
-        frozen_day_data=None, assignment_override=None,
+        frozen_day_data=None, assignment_override=None, off_day_paid_days=None,
     ):
         """
         Calculate payroll for one employee without persisting results.
@@ -109,6 +109,7 @@ class PayrollCalculationService:
             days_in_month=days_in_month,
             period_end=period_end,
             run=run,
+            off_day_paid_days=off_day_paid_days,
         )
 
     # ==========================================================================
@@ -174,11 +175,17 @@ class PayrollCalculationService:
             return run_emp
 
         # Compute regular monthly, arrears, and F&F runs through the salary engine.
-        locked_inputs = (run_emp.input_snapshot or {}).get('locked_inputs', {}) if run_emp else {}
+        previous_snapshot = (run_emp.input_snapshot or {}) if run_emp else {}
+        locked_inputs = previous_snapshot.get('locked_inputs', {})
+        previous_allocation = previous_snapshot.get('off_day_allocation') or {}
         result = PayrollCalculationService.preview_calculate(
             employee, period_start, period_end, days_in_month, run=run,
             frozen_day_data=locked_inputs.get('day_data'),
             assignment_override=run_emp.salary_assignment if run_emp else None,
+            off_day_paid_days=(
+                previous_allocation.get('paid_days')
+                if previous_allocation else None
+            ),
         )
 
         if not result.get('ok'):
@@ -199,6 +206,16 @@ class PayrollCalculationService:
             return run_emp
 
         # Create/update run employee
+        result_snapshot = result['input_snapshot']
+        if previous_allocation:
+            result_snapshot['off_day_allocation'] = {
+                **result_snapshot.get('off_day_allocation', {}),
+                **{
+                    key: value for key, value in previous_allocation.items()
+                    if key not in {'total_worked_days', 'paid_days', 'comp_off_work_days', 'paid_dates', 'comp_off_dates'}
+                },
+            }
+
         run_emp, _ = PayrollRunEmployee.objects.update_or_create(
             run=run,
             employee=employee,
@@ -218,7 +235,7 @@ class PayrollCalculationService:
                 'total_ctc': result['total_ctc'],
                 'net_pay': result['net_pay'],
                 'input_snapshot': {
-                    **result['input_snapshot'],
+                    **result_snapshot,
                     **({'locked_inputs': locked_inputs} if locked_inputs else {}),
                 },
                 'status': 'CALCULATED',
@@ -402,7 +419,7 @@ class PayrollCalculationService:
     # ==========================================================================
 
     @staticmethod
-    def _compute(employee, assignment, day_data, days_in_month, period_end, run=None):
+    def _compute(employee, assignment, day_data, days_in_month, period_end, run=None, off_day_paid_days=None):
         """
         Internal: pure computation. No DB writes.
         Returns a dict with everything needed to persist or preview.
@@ -596,12 +613,17 @@ class PayrollCalculationService:
         # ------------------------------------------------------------------
         prorated_earnings = []
         off_day_worked = Decimal(str(day_data.get('summary', {}).get('off_day_worked', 0)))
+        off_day_paid = off_day_worked if off_day_paid_days is None else Decimal(str(off_day_paid_days))
+        off_day_paid = max(Decimal('0'), min(off_day_paid, off_day_worked))
+        off_day_comp_off = off_day_worked - off_day_paid
         if is_fnf:
             # F&F is a settlement of the remaining balance, not another
             # monthly salary run. The salary balance is an explicit FNF
             # adjustment; don't emit monthly structure earnings, attendance
             # pay, or a second LOP deduction here.
             off_day_worked = Decimal('0')
+            off_day_paid = Decimal('0')
+            off_day_comp_off = Decimal('0')
             eligible_paid_days = Decimal('0')
             non_eligible_days = Decimal('0')
             unpaid_salary_days = Decimal('0')
@@ -619,9 +641,9 @@ class PayrollCalculationService:
                 total_earnings_full, unpaid_salary_days, salary_divisor_days_dec,
             )
             off_day_extra_pay = PayrollCalculationService.prorate_monthly_amount(
-                total_earnings_full, off_day_worked, salary_divisor_days_dec,
+                total_earnings_full, off_day_paid, salary_divisor_days_dec,
             )
-            paid_salary_days = eligible_paid_days + off_day_worked
+            paid_salary_days = eligible_paid_days + off_day_paid
             paid_wage_factor = paid_salary_days / salary_divisor_days_dec
             paid_wage_gross = PayrollCalculationService.prorate_monthly_amount(
                 total_earnings_full, paid_salary_days, salary_divisor_days_dec,
@@ -638,7 +660,7 @@ class PayrollCalculationService:
                 prorated_earnings.append({
                     'component_id': None,
                     'code': None,
-                    'name': f'Weekend/Holiday Work ({off_day_worked} days)',
+                    'name': f'Weekend/Holiday Work ({off_day_paid} days)',
                     'amount': off_day_extra_pay,
                     'formula_used': '',
                     'is_earning': True,
@@ -781,7 +803,8 @@ class PayrollCalculationService:
                         'eligible_calendar_days': str(eligible_days),
                         'lop_days': str(lop_days),
                         'attendance_payable_days': str(payable_days),
-                        'off_day_worked': str(off_day_worked),
+                        'off_day_worked': str(off_day_paid),
+                        'off_day_attended_days': str(off_day_worked),
                         'salary_calendar_day_equivalent': str(paid_salary_days),
                         'calendar_day_divisor': str(salary_divisor_days_dec),
                     },
@@ -886,12 +909,17 @@ class PayrollCalculationService:
             'non_eligible_days': str(non_eligible_days),
             'unpaid_salary_days': str(unpaid_salary_days),
             'off_day_worked': str(off_day_worked),
+            'off_day_paid_days': str(off_day_paid),
+            'off_day_comp_off_days': str(off_day_comp_off),
             'off_day_extra_pay': str(off_day_extra_pay),
             'variable_earnings': str(total_variable_earnings),
             'esi_wage_base': str(esi_wage_base),
             'prorate_factor': str(paid_wage_factor),
             'attendance_summary': day_data['summary'],
             'leaves': day_data['leave_breakdown'],
+            'off_day_allocation': PayrollCalculationService._off_day_allocation(
+                day_data, off_day_worked, off_day_paid,
+            ),
             'formula_version': FORMULA_VERSION,
             'frozen_at': timezone.now().isoformat(),
         }
@@ -924,6 +952,24 @@ class PayrollCalculationService:
             'net_pay': net_pay,
             'components': all_components,
             'input_snapshot': snapshot,
+        }
+
+    @staticmethod
+    def _off_day_allocation(day_data, total_days, paid_days):
+        day_map = day_data.get('day_map') or {}
+        worked_dates = sorted(
+            str(day) for day, status in day_map.items()
+            if status == 'off_day_worked'
+        )
+        paid_count = max(0, min(int(Decimal(str(paid_days))), len(worked_dates)))
+        paid_dates = worked_dates[:paid_count]
+        comp_off_dates = worked_dates[paid_count:]
+        return {
+            'total_worked_days': str(total_days),
+            'paid_days': str(paid_count),
+            'comp_off_work_days': str(len(comp_off_dates)),
+            'paid_dates': paid_dates,
+            'comp_off_dates': comp_off_dates,
         }
 
     # ==========================================================================

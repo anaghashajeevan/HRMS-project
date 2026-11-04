@@ -153,15 +153,19 @@ export default function StructureFormModal({ initial, onClose, onSaved }: Props)
                     value={row.amount}
                     onChange={(e) => updateRow(i, 'amount', e.target.value)}
                   />
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder={isEsi ? '% (e.g. 0.75)' : '% of Basic'}
-                    title={isEsi ? 'ESI rate applied to fixed monthly salary, subject to the active ESI wage ceiling.' : 'Percentage of Basic salary.'}
-                    className="w-28 rounded-lg border-0 bg-white px-3 py-2 text-sm ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-blue-500"
-                    value={row.percentage_of_basic}
-                    onChange={(e) => updateRow(i, 'percentage_of_basic', e.target.value)}
-                  />
+                  <div className="flex w-28 items-center rounded-lg bg-white ring-1 ring-inset ring-gray-200 focus-within:ring-2 focus-within:ring-blue-500">
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder={isEsi ? 'e.g. 0.75' : 'of Basic'}
+                      title={isEsi ? 'ESI rate applied to fixed monthly salary, subject to the active ESI wage ceiling.' : 'Percentage of Basic salary.'}
+                      aria-label={isEsi ? 'Percentage rate' : 'Percentage of Basic'}
+                      className="min-w-0 flex-1 rounded-l-lg border-0 bg-transparent px-3 py-2 text-sm focus:ring-0"
+                      value={row.percentage_of_basic}
+                      onChange={(e) => updateRow(i, 'percentage_of_basic', e.target.value)}
+                    />
+                    <span className="pr-3 text-sm text-gray-500">%</span>
+                  </div>
                   <input
                     type="number"
                     placeholder="#"

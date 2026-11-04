@@ -212,7 +212,7 @@ class CompOffService:
         else:
             employees = Employee.objects.filter(
                 is_deleted=False,
-                status__in=['ACTIVE', 'PROBATION'],
+                status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'],
             )
         
         results = {

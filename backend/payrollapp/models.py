@@ -305,6 +305,10 @@ class EmployeeSalaryAssignment(models.Model):
         max_length=200, blank=True,
         help_text="e.g. 'Annual increment', 'Joining', 'Promotion'",
     )
+    increment_interval_months = models.PositiveSmallIntegerField(
+        null=True, blank=True, default=12,
+        help_text='Months between salary increment review reminders; measured from the employee joining date.',
+    )
     created_by = models.ForeignKey(
         'HRMSapp.Employee', null=True, blank=True,
         on_delete=models.SET_NULL, related_name='created_salary_assignments',

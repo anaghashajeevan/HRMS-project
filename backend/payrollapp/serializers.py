@@ -329,7 +329,7 @@ class EmployeeSalaryAssignmentSerializer(serializers.ModelSerializer):
             'structure', 'structure_name',
             'ctc_annual', 'ctc_monthly', 'fixed_salary_monthly',
             'effective_from', 'effective_to',
-            'is_current', 'reason',
+            'is_current', 'reason', 'increment_interval_months',
             'created_by', 'created_by_name',
             'created_at', 'updated_at',
         ]
@@ -351,7 +351,7 @@ class EmployeeSalaryAssignmentCreateSerializer(serializers.ModelSerializer):
             'employee', 'structure',
             'ctc_annual', 'ctc_monthly', 'fixed_salary_monthly',
             'effective_from', 'effective_to',
-            'reason',
+            'reason', 'increment_interval_months',
         ]
         extra_kwargs = {
             'ctc_monthly': {'required': False},

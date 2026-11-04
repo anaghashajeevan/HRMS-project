@@ -449,8 +449,18 @@ class EmployeeManagerMiniSerializer(serializers.ModelSerializer):
 # LIST SERIALIZER (lightweight — for table view)
 # ------------------------------------------------------------------------------
 
+def _employee_status_label(employee):
+    label = employee.get_status_display()
+    if employee.status in ('ACTIVE', 'PROBATION') and any(
+        exit_request.status == 'PENDING_APPROVAL'
+        for exit_request in employee.exit_requests.all()
+    ):
+        return f'{label} (Resignation Requested)'
+    return label
+
 class EmployeeListSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
+    status_label = serializers.SerializerMethodField()
     position_title = serializers.CharField(source='position.title', read_only=True, default=None)
     department_name = serializers.SerializerMethodField()
     manager_name = serializers.SerializerMethodField()
@@ -469,12 +479,16 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             'official_email',
             'phone_number',
             'status',
+            'status_label',
             'position_title',
             'department_name','location_name', 
             'manager_name',
             'date_of_joining','role_names','role_codes','work_mode', 'work_mode_display', 'can_self_attend',
         ]
         read_only_fields = fields
+
+    def get_status_label(self, obj):
+        return _employee_status_label(obj)
 
     def get_manager_name(self, obj):
         if obj.reporting_manager:
@@ -619,6 +633,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
 
 class EmployeeDetailSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
+    status_label = serializers.SerializerMethodField()
     position = JobPositionMiniSerializer(read_only=True)
     reporting_manager = EmployeeManagerMiniSerializer(read_only=True)
     structure_location = CompanyStructureMiniSerializer(read_only=True)
@@ -642,7 +657,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
         model = Employee
         fields = [
             # Identification
-            'id', 'employee_id', 'status',
+            'id', 'employee_id', 'status', 'status_label',
 
             # Personal
             'first_name', 'last_name', 'full_name',
@@ -667,6 +682,9 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at','work_mode', 'can_self_attend',
         ]
         read_only_fields = fields
+
+    def get_status_label(self, obj):
+        return _employee_status_label(obj)
 
     # ---------- 🆕 Hierarchy Methods ----------
     def get_department_detail(self, obj):

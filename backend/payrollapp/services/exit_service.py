@@ -324,12 +324,16 @@ def decide_exit_request(*, request_id, actor, decision, comments=''):
         'approved_at': request.approved_at.isoformat(),
     }
     request.employee.date_of_exit = request.proposed_exit_date
-    request.employee.save(update_fields=['date_of_exit'])
+    old_employee_status = request.employee.status
+    request.employee.status = 'NOTICE_PERIOD'
+    request.employee.save(update_fields=['date_of_exit', 'status'])
+    if old_employee_status == 'PROBATION':
+        request.employee.probation_cycles.filter(is_current=True).update(is_current=False)
     request.save(update_fields=['status', 'approved_by', 'approved_at', 'frozen_snapshot', 'updated_at'])
     PayrollAuditLog.objects.create(
         employee=request.employee, action='EXIT_REQUEST_APPROVED',
-        old_values={'date_of_exit': None},
-        new_values={'exit_request_id': str(request.id), 'date_of_exit': request.proposed_exit_date.isoformat(), 'snapshot_counts': {
+        old_values={'date_of_exit': None, 'status': old_employee_status},
+        new_values={'exit_request_id': str(request.id), 'date_of_exit': request.proposed_exit_date.isoformat(), 'status': 'NOTICE_PERIOD', 'snapshot_counts': {
             'leave_balances': len(request.frozen_snapshot['leave_balances']),
             'completed_payroll_runs': len(request.frozen_snapshot['completed_payroll']),
         }},

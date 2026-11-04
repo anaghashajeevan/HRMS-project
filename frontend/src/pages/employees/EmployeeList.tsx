@@ -238,6 +238,9 @@ import toast from 'react-hot-toast';
 const statusStyles: Record<string, string> = {
   ACTIVE: 'bg-green-100 text-green-700',
   PROBATION: 'bg-amber-100 text-amber-700',
+  NOTICE_PERIOD: 'bg-sky-100 text-sky-700',
+  RELIEVED: 'bg-violet-100 text-violet-700',
+  INACTIVE: 'bg-slate-100 text-slate-700',
   SUSPENDED: 'bg-orange-100 text-orange-700',
   TERMINATED: 'bg-red-100 text-red-700',
 };
@@ -345,8 +348,11 @@ export default function EmployeeList() {
                 <option value="">All Status</option>
                 <option value="ACTIVE">Active</option>
                 <option value="PROBATION">Probation</option>
+                <option value="NOTICE_PERIOD">Notice Period</option>
+                <option value="RELIEVED">Relieved</option>
+                <option value="INACTIVE">Inactive</option>
                 <option value="SUSPENDED">Suspended</option>
-                <option value="TERMINATED">Terminated</option>
+                <option value="TERMINATED">Terminated (Dismissed)</option>
               </select>
             </div>
           </div>
@@ -438,7 +444,7 @@ export default function EmployeeList() {
                             statusStyles[emp.status] || 'bg-gray-100 text-gray-700'
                           }`}
                         >
-                          {emp.status}
+                          {emp.status_label || emp.status}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">

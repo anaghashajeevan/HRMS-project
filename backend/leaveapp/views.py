@@ -217,7 +217,7 @@ class LeaveBalanceViewSet(ModelViewSet):
         # Get all active employees
         employees = Employee.objects.filter(
             is_deleted=False,
-            status__in=['ACTIVE', 'PROBATION'],
+            status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'],
         )
 
         results = {
@@ -1035,4 +1035,4 @@ class CompOffLogsView(APIView):
         return Response({
             'count': len(data),
             'logs': data,
-        })    
+        })

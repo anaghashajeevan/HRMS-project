@@ -363,6 +363,7 @@ import CalculatePreviewPage from './pages/payroll/preview/CalculatePreviewPage';
 import PayrollSettingsPage from './pages/payroll/settings/PayrollSettingsPage';
 import PayslipsPage from './pages/payroll/payslips/PayslipsPage';
 import StatutoryExportsPage from './pages/payroll/statutory/StatutoryExportsPage';
+import StatutoryHistoryPage from './pages/payroll/statutory/StatutoryHistoryPage';
 import EmployeeExitsPage from './pages/payroll/exits/EmployeeExitsPage';
 
 export default function App() {
@@ -403,6 +404,11 @@ export default function App() {
           <Route
             path="/payslips"
             element={<ProtectedRoute><PayslipsPage /></ProtectedRoute>}
+          />
+
+          <Route
+            path="/my-statutory-contributions"
+            element={<ProtectedRoute><StatutoryHistoryPage /></ProtectedRoute>}
           />
 
           {/* ==================== EMPLOYEES ==================== */}

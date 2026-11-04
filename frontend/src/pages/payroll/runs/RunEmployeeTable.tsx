@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { EyeIcon, XCircleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
-import { createRunAdjustment, deleteRunAdjustment, excludeRunEmployee, getRunAdjustments, getRunEmployee } from '../../../api/payrollApi';
+import { createRunAdjustment, deleteRunAdjustment, excludeRunEmployee, getRunAdjustments, getRunEmployee, updateRunEmployeeOffDayAllocation } from '../../../api/payrollApi';
 
 const fmt = (v: number | string | null) =>
   v != null ? Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
@@ -33,6 +33,8 @@ export default function RunEmployeeTable({ employees, runId, runStatus, runType 
   const [referencePeriodStart, setReferencePeriodStart] = useState('');
   const [referencePeriodEnd, setReferencePeriodEnd] = useState('');
   const [adjustmentSaving, setAdjustmentSaving] = useState(false);
+  const [offDayPaidDays, setOffDayPaidDays] = useState('0');
+  const [offDayAllocationSaving, setOffDayAllocationSaving] = useState(false);
   const [adjustments, setAdjustments] = useState<any[]>([]);
   const isFnfRun = runType === 'FNF';
   const isArrearsRun = runType === 'ARREARS';
@@ -63,7 +65,7 @@ export default function RunEmployeeTable({ employees, runId, runStatus, runType 
       : sum
   ), 0);
   const tdsPayableDays = Math.max(Number(detail?.eligible_calendar_days || 0) - Number(detail?.lop_days || 0), 0)
-    + Number(lockedDayData?.summary?.off_day_worked || 0);
+    + Number(detail?.input_snapshot?.off_day_paid_days ?? lockedDayData?.summary?.off_day_worked ?? 0);
   const tdsDivisor = Number(detail?.salary_divisor_days || detail?.days_in_month || 0);
   const tdsCurrentPeriodTaxable = tds?.current_period_taxable_salary != null
     ? Number(tds.current_period_taxable_salary)
@@ -91,7 +93,45 @@ export default function RunEmployeeTable({ employees, runId, runStatus, runType 
     try {
       const res = await getRunEmployee(runId, empRecordId);
       setDetail(res.data);
+      const totalOffDays = Number(res.data?.input_snapshot?.locked_inputs?.day_data?.summary?.off_day_worked || 0);
+      const savedPaidDays = res.data?.input_snapshot?.off_day_allocation?.paid_days
+        ?? res.data?.input_snapshot?.off_day_paid_days
+        ?? totalOffDays;
+      setOffDayPaidDays(String(savedPaidDays));
     } catch {} finally { setDetailLoading(false); }
+  };
+
+  const saveOffDayAllocation = async () => {
+    if (!detail) return;
+    const totalOffDays = Number(lockedDayData?.summary?.off_day_worked || 0);
+    const paidDays = Number(offDayPaidDays || 0);
+    if (!Number.isInteger(paidDays) || paidDays < 0 || paidDays > totalOffDays) {
+      alert(`Enter a whole number from 0 to ${totalOffDays}.`);
+      return;
+    }
+    const compOffDates = (Object.entries(lockedDayData?.day_map || {}) as [string, string][])
+      .filter(([, status]) => status === 'off_day_worked')
+      .map(([day]) => day)
+      .sort()
+      .slice(paidDays);
+    const creditMap = detail.off_day_credit_days_by_date || {};
+    const eligibleCompOffDays = compOffDates.reduce(
+      (sum: number, day: string) => sum + Number(creditMap[day] || 0), 0,
+    );
+    if (compOffDates.length > 0 && eligibleCompOffDays <= 0) {
+      alert('No eligible Comp-Off credits are recorded for the days being saved. Check the attendance hours and Comp-Off eligibility before saving this split.');
+      return;
+    }
+    setOffDayAllocationSaving(true);
+    try {
+      const response = await updateRunEmployeeOffDayAllocation(runId, detail.id, paidDays);
+      setDetail(response.data);
+      onReload();
+    } catch (error: any) {
+      alert(error?.response?.data?.detail || 'Could not update the extra-work allocation.');
+    } finally {
+      setOffDayAllocationSaving(false);
+    }
   };
 
   const handleExclude = async (empRecordId: string) => {
@@ -309,10 +349,86 @@ export default function RunEmployeeTable({ employees, runId, runStatus, runType 
                   </div>
                   {detail.input_snapshot?.locked_inputs?.day_data?.summary && (
                     <p className="mt-2 text-xs text-gray-500">
-                      Weekend/holiday attendance counted as extra paid days: {detail.input_snapshot.locked_inputs.day_data.summary.off_day_worked || 0}
+                      Weekend/holiday attendance recorded as extra workdays: {detail.input_snapshot.locked_inputs.day_data.summary.off_day_worked || 0}
                     </p>
                   )}
                 </div>}
+
+                {runType === 'REGULAR' && Number(lockedDayData?.summary?.off_day_worked || 0) > 0 && (() => {
+                  const totalOffDays = Number(lockedDayData.summary.off_day_worked || 0);
+                  const paidDays = Math.min(totalOffDays, Math.max(0, Number(offDayPaidDays || 0)));
+                  const savedWorkDays = totalOffDays - paidDays;
+                  const compOffDates = (Object.entries(lockedDayData.day_map || {}) as [string, string][])
+                    .filter(([, status]) => status === 'off_day_worked')
+                    .map(([day]) => day)
+                    .sort()
+                    .slice(paidDays);
+                  const creditMap = detail.off_day_credit_days_by_date || {};
+                  const eligibleCompOffDays = compOffDates.reduce(
+                    (sum: number, day: string) => sum + Number(creditMap[day] || 0), 0,
+                  );
+                  const canEditAllocation = runStatus === 'CALCULATED' && detail.status === 'CALCULATED';
+                  const allocation = detail.input_snapshot?.off_day_allocation || {};
+                  const persistedPaidDays = Number(allocation.paid_days ?? detail.input_snapshot?.off_day_paid_days ?? totalOffDays);
+                  const hasChanges = paidDays !== persistedPaidDays;
+                  return (
+                    <section className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 ring-1 ring-emerald-100">
+                      <h4 className="text-xs font-semibold uppercase text-emerald-800">Extra worked days: salary or Comp-Off</h4>
+                      <p className="mt-1 text-xs leading-5 text-gray-600">Choose how many verified weekend or holiday workdays to pay with this run. The remaining eligible Comp-Off credits stay in the employee’s leave balance. The same workday is never paid and credited twice.</p>
+                      <label className="mt-3 flex items-center gap-2 text-sm font-medium text-gray-800">
+                        <input
+                          type="checkbox"
+                          checked={paidDays > 0}
+                          disabled={!canEditAllocation || offDayAllocationSaving}
+                          onChange={(event) => setOffDayPaidDays(event.target.checked ? String(totalOffDays) : '0')}
+                          className="rounded border-gray-300 text-emerald-600"
+                        />
+                        Add extra worked days to salary
+                      </label>
+                      {paidDays > 0 && <label className="mt-3 block max-w-xs text-xs font-medium text-gray-600">
+                        Days paid in this salary (out of {totalOffDays})
+                        <input
+                          type="number"
+                          min="0"
+                          max={totalOffDays}
+                          step="1"
+                          value={offDayPaidDays}
+                          disabled={!canEditAllocation || offDayAllocationSaving}
+                          onChange={(event) => setOffDayPaidDays(event.target.value)}
+                          className="mt-1 block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+                        />
+                      </label>}
+                      <label className="mt-3 flex items-center gap-2 text-sm font-medium text-gray-800">
+                        <input
+                          type="checkbox"
+                          checked={savedWorkDays > 0}
+                          disabled={!canEditAllocation || offDayAllocationSaving}
+                          onChange={(event) => setOffDayPaidDays(
+                            event.target.checked
+                              ? String(Math.max(0, totalOffDays - 1))
+                              : String(totalOffDays),
+                          )}
+                          className="rounded border-gray-300 text-emerald-600"
+                        />
+                        Save remaining eligible days as Comp-Off
+                      </label>
+                      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                        <p className="rounded-lg bg-white/80 px-3 py-2">Paid through salary: <strong>{paidDays}</strong> workday(s)</p>
+                        <p className="rounded-lg bg-white/80 px-3 py-2">Saved as Comp-Off: <strong>{savedWorkDays}</strong> workday(s)</p>
+                      </div>
+                      {savedWorkDays > 0 && <p className="mt-2 text-xs text-gray-600">Eligible Comp-Off balance units on these dates: <strong>{eligibleCompOffDays}</strong>. Comp-Off hours eligibility rules still apply.</p>}
+                      {!canEditAllocation && <p className="mt-2 text-xs text-gray-500">This allocation is locked after payroll review begins.</p>}
+                      {canEditAllocation && <div className="mt-3 flex justify-end">
+                        <button
+                          type="button"
+                          disabled={offDayAllocationSaving || !hasChanges}
+                          onClick={() => void saveOffDayAllocation()}
+                          className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+                        >{offDayAllocationSaving ? 'Recalculating…' : 'Save split and recalculate'}</button>
+                      </div>}
+                    </section>
+                  );
+                })()}
 
                 {tds && (
                   <div className="rounded-xl bg-purple-50 p-4 ring-1 ring-purple-100">

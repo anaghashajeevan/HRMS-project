@@ -212,10 +212,11 @@ class RunLifecycleService:
             if a.effective_to and a.effective_to < period_start:
                 continue
             # HRMS stores status codes in uppercase (ACTIVE / PROBATION).
-            # Treat both as eligible for a regular monthly payroll run.
+            # Employees serving notice remain eligible through their approved
+            # last working date, alongside active and probationary employees.
             emp = a.employee
             employee_status = (emp.status or '').strip().upper()
-            if employee_status not in ('ACTIVE', 'PROBATION'):
+            if employee_status not in ('ACTIVE', 'PROBATION', 'NOTICE_PERIOD'):
                 # Include if FNF run or if they were active during period
                 if run.run_type not in ('FNF', 'OFF_CYCLE'):
                     # For regular runs: skip terminated employees
@@ -1176,9 +1177,9 @@ class RunLifecycleService:
                 )
 
             employee = exit_request.employee
-            if employee.status != 'TERMINATED':
+            if employee.status != 'INACTIVE':
                 old_status = employee.status
-                employee.status = 'TERMINATED'
+                employee.status = 'INACTIVE'
                 employee.save(update_fields=['status'])
                 PayrollAuditLog.objects.create(
                     run=run, employee=employee, action='EMPLOYEE_EXIT_COMPLETED',
@@ -1186,7 +1187,7 @@ class RunLifecycleService:
                     performed_by=cls._actor_employee(user),
                     old_values={'status': old_status},
                     new_values={
-                        'status': 'TERMINATED',
+                        'status': 'INACTIVE',
                         'date_of_exit': exit_request.proposed_exit_date.isoformat(),
                         'exit_request_id': str(exit_request.id),
                     },

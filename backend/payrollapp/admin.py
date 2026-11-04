@@ -51,8 +51,8 @@ class PayCalendarAdmin(admin.ModelAdmin):
 @admin.register(EmployeeSalaryAssignment)
 class EmployeeSalaryAssignmentAdmin(admin.ModelAdmin):
     list_display = ('employee', 'structure', 'fixed_salary_monthly', 'ctc_monthly',
-                    'effective_from', 'effective_to')
-    list_filter = ('structure',)
+                    'effective_from', 'effective_to', 'increment_interval_months')
+    list_filter = ('structure', 'increment_interval_months')
     search_fields = ('employee__employee_id', 'employee__first_name', 'employee__last_name')
     autocomplete_fields = ('employee', 'structure', 'created_by')
 

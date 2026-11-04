@@ -586,6 +586,14 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'HRMSapp.tasks.scan_probation_reminders',
         'schedule': crontab(hour=8, minute=0),
     },
+    'daily-salary-increment-reminders': {
+        'task': 'HRMSapp.tasks.scan_salary_increment_reminders',
+        'schedule': crontab(hour=8, minute=5),
+    },
+    'daily-complete-employee-resignations': {
+        'task': 'HRMSapp.tasks.update_completed_resignation_statuses',
+        'schedule': crontab(hour=0, minute=10),
+    },
 }
 
 

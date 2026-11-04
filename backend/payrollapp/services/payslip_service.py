@@ -12,6 +12,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from ..models import PayrollRunComponentDetail, PayrollRunEmployee
+from .pdf_branding import draw_company_letterhead, get_payroll_branding
 
 
 def _money(value):
@@ -37,16 +38,22 @@ def generate_payslip_pdf(run_employee_id):
     ifsc = (profile.ifsc_code if profile else '') or getattr(employee, 'ifsc_code', '') or ''
     locked_day_data = (row.input_snapshot or {}).get('locked_inputs', {}).get('day_data', {})
     day_summary = locked_day_data.get('summary', {})
+    off_day_allocation = (row.input_snapshot or {}).get('off_day_allocation') or {}
+    off_day_paid_days = off_day_allocation.get(
+        'paid_days', (row.input_snapshot or {}).get('off_day_paid_days', day_summary.get('off_day_worked', 0)),
+    )
+    off_day_comp_off_work_days = off_day_allocation.get('comp_off_work_days', 0)
 
     buffer = BytesIO()
+    company, logo_source = get_payroll_branding()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4, rightMargin=18 * mm, leftMargin=18 * mm,
-        topMargin=16 * mm, bottomMargin=16 * mm,
+        topMargin=40 * mm, bottomMargin=16 * mm,
         title=f"Payslip {calendar.year}-{calendar.month:02d} {employee.employee_id}",
         author='Payroll',
     )
     styles = getSampleStyleSheet()
-    title = ParagraphStyle('PayslipTitle', parent=styles['Title'], alignment=TA_CENTER, textColor=colors.HexColor('#17365D'))
+    title = ParagraphStyle('PayslipTitle', parent=styles['Title'], alignment=TA_CENTER, textColor=colors.HexColor(company.get('primary') or '#17365D'))
     cell_label = ParagraphStyle(
         'PayslipCellLabel', parent=styles['BodyText'], fontName='Helvetica',
         fontSize=8, leading=10, spaceAfter=0,
@@ -63,7 +70,8 @@ def generate_payslip_pdf(run_employee_id):
         *([] if is_offcycle else [
             ['Calendar days', str(row.days_in_month), 'Payable days', str(row.payable_days)],
             ['LOP / absent', str(row.lop_days), 'Paid leave', str(day_summary.get('paid_leave', '0'))],
-            ['Off-day work', str(day_summary.get('off_day_worked', 0)), 'Salary divisor', f"{row.salary_divisor_days or row.days_in_month} calendar days"],
+            ['Extra-work days paid', str(off_day_paid_days), 'Salary divisor', f"{row.salary_divisor_days or row.days_in_month} calendar days"],
+            *([['Extra-work days saved as Comp-Off', str(off_day_comp_off_work_days), 'Comp-Off balance retained', str(off_day_allocation.get('eligible_comp_off_days', '0'))]] if off_day_comp_off_work_days else []),
         ]),
         ['Bank account', _masked_account(account), 'IFSC', (ifsc or 'Not provided')],
     ]
@@ -119,5 +127,6 @@ def generate_payslip_pdf(run_employee_id):
         'This is a computer-generated payslip. Bank account details are masked for security.',
         styles['Italic'],
     )])
-    doc.build(story)
+    draw_header = lambda canvas_obj, pdf_doc: draw_company_letterhead(canvas_obj, pdf_doc, company, logo_source)
+    doc.build(story, onFirstPage=draw_header, onLaterPages=draw_header)
     return buffer.getvalue(), f"payslip_{employee.employee_id}_{calendar.year}_{calendar.month:02d}_{row.run.run_type.lower()}_{str(row.run_id)[:8]}.pdf"

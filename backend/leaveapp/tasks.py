@@ -34,7 +34,7 @@ def notify_employees_calendar_published(self, calendar_id):
 
     employees = Employee.objects.filter(
         is_deleted=False,
-        status__in=['ACTIVE', 'PROBATION'],
+        status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'],
     )
 
     portal_url = getattr(settings, 'PORTAL_URL', 'http://localhost:5173')
@@ -113,7 +113,7 @@ def notify_employees_calendar_amendment(
 
     employees = Employee.objects.filter(
         is_deleted=False,
-        status__in=['ACTIVE', 'PROBATION'],
+        status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'],
     )
 
     portal_url = getattr(settings, 'PORTAL_URL', 'http://localhost:5173')

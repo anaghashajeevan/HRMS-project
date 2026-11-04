@@ -381,7 +381,7 @@ def collect_monthly_attendance(year, month, settings_obj=None, today=None, atten
     active_employees = list(
         Employee.objects.filter(
             is_deleted=False,
-            status__in=['ACTIVE', 'PROBATION'],
+            status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'],
         ).select_related('structure_location', 'department', 'location').order_by('employee_id')
     )
     # Build a set of normalized HRMS codes for quick lookup

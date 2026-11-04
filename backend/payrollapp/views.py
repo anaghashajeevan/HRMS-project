@@ -14,7 +14,7 @@ from io import BytesIO
 import logging
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from django.db.models import OuterRef, Subquery, Q, F
 from django.db import transaction
@@ -272,7 +272,10 @@ class EmployeeExitDocumentsView(APIView):
             return Response({'detail': 'HR Admin access is required to issue exit documents.'}, status=403)
         document_type = str(request.data.get('document_type') or '').strip().upper()
         try:
-            record = issue_exit_document(request_id, document_type, request.user)
+            record = issue_exit_document(
+                request_id, document_type, request.user,
+                refresh_branding=bool(request.data.get('refresh_branding')),
+            )
         except EmployeeExitRequest.DoesNotExist:
             return Response({'detail': 'Exit request not found.'}, status=404)
         except ValueError as exc:
@@ -826,6 +829,7 @@ class EmployeeSalaryAssignmentViewSet(ModelViewSet):
                 effective_from=effective_from,
                 effective_to=serializer.validated_data.get('effective_to'),
                 reason=serializer.validated_data.get('reason', ''),
+                increment_interval_months=serializer.validated_data.get('increment_interval_months', 12),
                 created_by=getattr(request.user, 'employee', None),
             )
         except AssignmentError as exc:
@@ -2016,6 +2020,11 @@ class StatutoryReturnExportView(APIView):
                     'uan': uan,
                     'gross_wages': gross_wages,
                     'pf_wages': pf_wage,
+                    # ECR uses separate pensionable and EDLI wage bases. The
+                    # notified ceiling rose to ₹25,000 from 17 Sep 2026; older
+                    # wage months retain the prior ₹15,000 ceiling.
+                    'eps_wages': min(pf_wage, Decimal('25000') if period_end >= date(2026, 9, 17) else Decimal('15000')) if eps_employer > 0 else Decimal('0'),
+                    'edli_wages': min(pf_wage, Decimal('25000') if period_end >= date(2026, 9, 17) else Decimal('15000')),
                     'employee_share': epf_employee,
                     'eps_share': eps_employer,
                     'epf_share': epf_employer,
@@ -2087,8 +2096,8 @@ class StatutoryReturnExportView(APIView):
                     re.sub(r'#~#', ' ', item['employee'].full_name).strip(),
                     str(_whole_rupees(item['gross_wages'])),
                     str(_whole_rupees(item['pf_wages'])),
-                    str(_whole_rupees(item['pf_wages'])),
-                    str(_whole_rupees(item['pf_wages'])),
+                    str(_whole_rupees(item['eps_wages'])),
+                    str(_whole_rupees(item['edli_wages'])),
                     str(_whole_rupees(item['employee_share'])),
                     str(_whole_rupees(item['eps_share'])),
                     str(_whole_rupees(item['epf_share'])),
@@ -2340,6 +2349,351 @@ class StatutoryReturnExportView(APIView):
         return response
 
 
+class StatutoryHistoryExportView(APIView):
+    """Serve employee PF/ESI history for the UI and employee Excel exports."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from HRMSapp.models import Employee
+        is_admin = is_hr_or_system_admin(request.user)
+        json_mode = request.query_params.get('format') == 'json'
+        scope = request.query_params.get('scope', 'mine' if json_mode else '')
+        export_all = not json_mode and scope == 'all'
+        employee_filter = None
+        if json_mode:
+            if scope == 'all':
+                if not is_admin:
+                    return Response({'detail': 'Only HR or system administrators can view all employee history.'}, status=403)
+                selected_employees = list(Employee.objects.filter(is_deleted=False).order_by('employee_id'))
+            elif scope == 'mine':
+                employee = getattr(request.user, 'employee', None)
+                if employee is None:
+                    return Response({'detail': 'No employee profile is linked to this account.'}, status=404)
+                selected_employees = [employee]
+            else:
+                return Response({'detail': 'scope must be mine or all.'}, status=400)
+        else:
+            if export_all:
+                if not is_admin:
+                    return Response({'detail': 'Only HR or system administrators can export all employee history.'}, status=403)
+                selected_employees = list(Employee.objects.filter(is_deleted=False).order_by('employee_id'))
+            else:
+                if not _can_manage_payment_batches(request.user):
+                    return Response({'detail': 'Finance or payroll admin access is required.'}, status=403)
+                employee_id = request.query_params.get('employee_id', '').strip()
+                if not employee_id:
+                    return Response({'detail': 'Select an employee to download their PF and ESI history.'}, status=400)
+                try:
+                    employee_uuid = UUID(employee_id)
+                except (ValueError, TypeError, AttributeError):
+                    return Response({'detail': 'A valid employee ID is required.'}, status=400)
+                employee_filter = Employee.objects.filter(id=employee_uuid, is_deleted=False).first()
+                if employee_filter is None:
+                    return Response({'detail': 'Employee not found.'}, status=404)
+                selected_employees = [employee_filter]
+        selected_employee_ids = [employee.id for employee in selected_employees]
+
+        today = timezone.localdate()
+        runs = PayrollRun.objects.filter(
+            run_type='REGULAR', status__in=['FINALIZED', 'PAID'],
+            pay_calendar__period_start__lte=today,
+        ).select_related('pay_calendar').order_by(
+            'pay_calendar__year', 'pay_calendar__month', '-status', '-updated_at',
+        )
+
+        monthly = {}
+        employees = {}
+        seen_periods = set()
+        pf_members = set()
+        esi_members = set()
+        pf_rule_cache = {}
+        pf_codes = {'PF_EMP', 'PF_ER', 'EPS_ER', 'EPF_ER'}
+        esi_codes = {'ESI_EMP', 'ESI_ER'}
+        for run in runs:
+            period_key = (run.pay_calendar.year, run.pay_calendar.month)
+            if period_key in seen_periods:
+                continue
+            run_rows = list(
+                PayrollRunEmployee.objects.filter(
+                    run=run, status='CALCULATED', employee_id__in=selected_employee_ids,
+                )
+                .select_related('employee')
+                .prefetch_related('component_details__component')
+                .order_by('employee__employee_id')
+            )
+            if not run_rows:
+                continue
+            seen_periods.add(period_key)
+            profiles = _statutory_profiles_for_run(run_rows, run.pay_calendar.period_end)
+            for row in run_rows:
+                employee = row.employee
+                employees[employee.id] = employee
+                details = list(row.component_details.all())
+                amounts = {
+                    detail.component.code: Decimal(str(detail.amount or 0))
+                    for detail in details if detail.component_id and detail.component
+                }
+                has_pf = any(detail.component and detail.component.code in pf_codes for detail in details)
+                has_esi = any(detail.component and detail.component.code in esi_codes for detail in details)
+                profile_data = profiles.get(employee.id, {})
+                profile = profile_data.get('effective')
+                snapshot = row.input_snapshot or {}
+
+                pf_data = None
+                if has_pf:
+                    basic = Decimal(str(snapshot.get('basic_full_month') or 0))
+                    pf_detail = next((detail for detail in details if detail.component and detail.component.code in pf_codes and detail.rule_reference), None)
+                    rule = None
+                    if pf_detail:
+                        rule_key = str(pf_detail.rule_reference)
+                        if rule_key not in pf_rule_cache:
+                            try:
+                                pf_rule_cache[rule_key] = StatutoryRule.objects.filter(
+                                    id=rule_key, statutory_type='PF',
+                                ).first()
+                            except (ValueError, TypeError):
+                                pf_rule_cache[rule_key] = None
+                        rule = pf_rule_cache[rule_key]
+                    pf_wages = min(basic, rule.wage_ceiling) if rule and rule.wage_ceiling > 0 else basic
+                    gross_wages = Decimal(str(
+                        snapshot.get('fixed_gross_pay_prorated')
+                        if 'fixed_gross_pay_prorated' in snapshot else row.gross_pay or 0
+                    )) + Decimal(str(snapshot.get('variable_earnings') or 0))
+                    employee_pf = amounts.get('PF_EMP', Decimal('0'))
+                    employer_eps = amounts.get('EPS_ER', Decimal('0'))
+                    employer_epf = amounts.get('EPF_ER', Decimal('0'))
+                    if not employer_epf and not any(detail.component and detail.component.code == 'EPF_ER' for detail in details):
+                        employer_epf = amounts.get('PF_ER', Decimal('0')) - employer_eps
+                    pf_data = {
+                        'uan': str((profile.uan if profile else '') or profile_data.get('latest_uan') or employee.uan_number_encrypted or '').strip(),
+                        'gross_wages': gross_wages,
+                        'pf_wages': pf_wages,
+                        'employee_share': employee_pf,
+                        'employer_eps': employer_eps,
+                        'employer_epf': employer_epf,
+                        'total_contribution': employee_pf + employer_eps + employer_epf,
+                        'ncp_days': Decimal(str(row.lop_days or 0)),
+                    }
+
+                esi_data = None
+                if has_esi:
+                    employee_esi = amounts.get('ESI_EMP', Decimal('0'))
+                    employer_esi = amounts.get('ESI_ER', Decimal('0'))
+                    esi_data = {
+                        'ip_number': str((profile.esi_number if profile else '') or profile_data.get('latest_esi_number') or '').strip(),
+                        'days_paid': Decimal(str(row.payable_days or 0)),
+                        'wages_paid': Decimal(str(snapshot.get('fixed_gross_pay_prorated') or 0)),
+                        'esi_wage_base': Decimal(str(snapshot.get('esi_wage_base') or 0)),
+                        'employee_share': employee_esi,
+                        'employer_share': employer_esi,
+                        'total_contribution': employee_esi + employer_esi,
+                    }
+
+                if has_pf:
+                    pf_members.add(employee.id)
+                if has_esi:
+                    esi_members.add(employee.id)
+                monthly[(employee.id, *period_key)] = {
+                    'run': run,
+                    'pf': pf_data,
+                    'esi': esi_data,
+                }
+
+        if not pf_members and not esi_members and not json_mode:
+            return Response({'detail': 'No finalized or paid payroll records with PF or ESI components were found.'}, status=400)
+
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill
+
+        workbook = Workbook()
+        workbook.remove(workbook.active)
+        navy = '17365D'
+        light_blue = 'DCE6F1'
+        light_gray = 'F3F6FA'
+        currency_format = '#,##0.00'
+
+        def add_sheet(title, headers, data_rows, money_columns=()):
+            sheet = workbook.create_sheet(title)
+            sheet.sheet_view.showGridLines = False
+            sheet.append(headers)
+            for cell in sheet[1]:
+                cell.font = Font(bold=True, color='FFFFFF')
+                cell.fill = PatternFill('solid', fgColor=navy)
+                cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            sheet.row_dimensions[1].height = 36
+            for values in data_rows:
+                sheet.append(values)
+                row_number = sheet.max_row
+                for cell in sheet[row_number]:
+                    cell.alignment = Alignment(vertical='center')
+                    if row_number % 2 == 0:
+                        cell.fill = PatternFill('solid', fgColor=light_gray)
+                for column in money_columns:
+                    sheet.cell(row_number, column).number_format = currency_format
+            if sheet.max_row > 1:
+                sheet.auto_filter.ref = sheet.dimensions
+            sheet.freeze_panes = 'A2'
+            for column, header in enumerate(headers, start=1):
+                width = min(max(len(str(header)) + 2, 14), 32)
+                sheet.column_dimensions[chr(64 + column)].width = width
+            return sheet
+
+        def month_rows(member_ids, kind):
+            result = []
+            summary = []
+            today_month = date(today.year, today.month, 1)
+            for employee_id in sorted(member_ids, key=lambda item: employees[item].employee_id):
+                employee = employees[employee_id]
+                start = date(employee.date_of_joining.year, employee.date_of_joining.month, 1)
+                last_day = min(today, employee.date_of_exit) if employee.date_of_exit else today
+                end = date(last_day.year, last_day.month, 1)
+                if start > today_month or start > end:
+                    continue
+                cumulative = {
+                    'employee_share': Decimal('0'),
+                    'employer_share': Decimal('0'),
+                    'employer_eps': Decimal('0'),
+                    'employer_epf': Decimal('0'),
+                    'total_contribution': Decimal('0'),
+                }
+                month = start
+                last_reported = ''
+                while month <= end:
+                    record = monthly.get((employee_id, month.year, month.month))
+                    values = record.get(kind) if record else None
+                    if values:
+                        cumulative['employee_share'] += values['employee_share']
+                        cumulative['total_contribution'] += values['total_contribution']
+                        if kind == 'pf':
+                            cumulative['employer_eps'] += values['employer_eps']
+                            cumulative['employer_epf'] += values['employer_epf']
+                            employer_share = values['employer_eps'] + values['employer_epf']
+                            uan_or_ip = values['uan']
+                            wage_value = values['pf_wages']
+                            employer_eps = values['employer_eps']
+                            employer_epf = values['employer_epf']
+                            employer_contribution = employer_share
+                            employee_contribution = values['employee_share']
+                        else:
+                            cumulative['employer_share'] += values['employer_share']
+                            uan_or_ip = values['ip_number']
+                            wage_value = values['wages_paid']
+                            employer_eps = None
+                            employer_epf = None
+                            employer_contribution = values['employer_share']
+                            employee_contribution = values['employee_share']
+                        status_text = f"Payroll {record['run'].status}"
+                        last_reported = f'{month.year}-{month.month:02d}'
+                        row_values = [
+                            employee.employee_id, employee.full_name, employee.date_of_joining.isoformat(),
+                            f'{month.year}-{month.month:02d}', uan_or_ip, float(wage_value),
+                            float(employee_contribution),
+                        ]
+                        if kind == 'pf':
+                            row_values.extend([float(employer_eps), float(employer_epf), float(employer_contribution)])
+                        else:
+                            row_values.append(float(employer_contribution))
+                        row_values.extend([float(values['total_contribution']), float(cumulative['employee_share'])])
+                        if kind == 'pf':
+                            cumulative_employer = cumulative['employer_eps'] + cumulative['employer_epf']
+                        else:
+                            cumulative_employer = cumulative['employer_share']
+                        row_values.extend([float(cumulative_employer), float(cumulative['total_contribution']), status_text, str(record['run'].id)])
+                    else:
+                        status_text = (
+                            f"No {kind.upper()} contribution line in finalized payroll"
+                            if record else 'No finalized payroll result for this month'
+                        )
+                        row_values = [
+                            employee.employee_id, employee.full_name, employee.date_of_joining.isoformat(),
+                            f'{month.year}-{month.month:02d}', '', None, None,
+                        ]
+                        if kind == 'pf':
+                            row_values.extend([None, None, None])
+                            cumulative_employer = cumulative['employer_eps'] + cumulative['employer_epf']
+                        else:
+                            row_values.append(None)
+                            cumulative_employer = cumulative['employer_share']
+                        row_values.extend([
+                            None, float(cumulative['employee_share']), float(cumulative_employer),
+                            float(cumulative['total_contribution']), status_text, '',
+                        ])
+                    result.append(row_values)
+                    month = date(month.year + (1 if month.month == 12 else 0), 1 if month.month == 12 else month.month + 1, 1)
+                summary.append([
+                    employee.employee_id, employee.full_name, employee.date_of_joining.isoformat(),
+                    employee.date_of_exit.isoformat() if employee.date_of_exit else '', last_reported,
+                    float(cumulative['employee_share']),
+                    float((cumulative['employer_eps'] + cumulative['employer_epf']) if kind == 'pf' else cumulative['employer_share']),
+                    float(cumulative['total_contribution']),
+                ])
+            return result, summary
+
+        pf_rows, pf_summary = month_rows(pf_members, 'pf')
+        esi_rows, esi_summary = month_rows(esi_members, 'esi')
+        pf_headers = [
+            'Employee ID', 'Employee Name', 'DOJ', 'Wage Month', 'UAN', 'PF Wages (₹)',
+            'Employee PF (₹)', 'Employer EPS (₹)', 'Employer EPF (₹)', 'Employer Total (₹)',
+            'Monthly Total (₹)', 'Cumulative Employee PF (₹)', 'Cumulative Employer PF (₹)',
+            'Cumulative PF Total (₹)', 'Payroll Status', 'Payroll Run ID',
+        ]
+        esi_headers = [
+            'Employee ID', 'Employee Name', 'DOJ', 'Wage Month', 'ESIC IP Number', 'ESI Wages (₹)',
+            'Employee ESI (₹)', 'Employer ESI (₹)', 'Monthly Total (₹)',
+            'Cumulative Employee ESI (₹)', 'Cumulative Employer ESI (₹)',
+            'Cumulative ESI Total (₹)', 'Payroll Status', 'Payroll Run ID',
+        ]
+        summary_headers = [
+            'Employee ID', 'Employee Name', 'DOJ', 'DOE', 'Last Reported Wage Month',
+            'Employee Contributions (₹)', 'Employer Contributions (₹)', 'Total Contributions (₹)',
+        ]
+        if json_mode:
+            response = Response({
+                'scope': scope,
+                'pf_headers': pf_headers,
+                'pf_monthly': pf_rows,
+                'pf_totals': pf_summary,
+                'esi_headers': esi_headers,
+                'esi_monthly': esi_rows,
+                'esi_totals': esi_summary,
+                'employees': [
+                    {'id': employee.id, 'employee_id': employee.employee_id, 'full_name': employee.full_name}
+                    for employee in selected_employees
+                ],
+            })
+            response['Cache-Control'] = 'no-store, private'
+            return response
+        pf_money = (6, 7, 8, 9, 10, 11, 12, 13, 14)
+        esi_money = (6, 7, 8, 9, 10, 11, 12)
+        summary_money = (6, 7, 8)
+        add_sheet('PF Monthly History', pf_headers, pf_rows, pf_money)
+        add_sheet('PF Employee Totals', summary_headers, pf_summary, summary_money)
+        add_sheet('ESI Monthly History', esi_headers, esi_rows, esi_money)
+        add_sheet('ESI Employee Totals', summary_headers, esi_summary, summary_money)
+        notes = add_sheet('Read Me', ['Report Notes'], [
+            ['Includes finalized and paid Regular payroll runs only; open, reversed, off-cycle, arrears, and F&F runs are excluded.'],
+            ['Monthly History starts at DOJ month and continues through the current month, or DOE month for exited employees.'],
+            ['Months without a finalized contribution are flagged and left blank; cumulative totals include only finalized/paid payroll contribution lines.'],
+            ['Totals are payroll contribution totals. They do not include EPFO/ESIC portal postings, interest, or account balances.'],
+            ['EPFO upload remains a separate monthly .txt file. EPFO ECR 2.0 requires 11 #~#-separated fields and the wage period is selected in the portal.'],
+        ])
+        notes.column_dimensions['A'].width = 120
+        output = BytesIO()
+        workbook.save(output)
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        filename = (
+            f'PF_ESI_History_All_Employees_{today:%Y%m%d}.xlsx' if export_all
+            else f'PF_ESI_History_{employee_filter.employee_id}_{today:%Y%m%d}.xlsx'
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Cache-Control'] = 'no-store, private'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+        return response
+
+
 class PaymentBatchRefreshBankDetailsView(APIView):
     """Refresh frozen bank snapshots before any payment file has been generated."""
     permission_classes = [IsAuthenticated]
@@ -2573,7 +2927,127 @@ class RunEmployeeDetailView(APIView):
                 run_id=run_id, assigned_to=employee,
             ).exists():
                 return Response({'detail': 'You are not assigned to review this pay run.'}, status=403)
-        return Response(PayrollRunEmployeeDetailSerializer(re).data)
+        payload = PayrollRunEmployeeDetailSerializer(re).data
+        locked_day_data = ((re.input_snapshot or {}).get('locked_inputs') or {}).get('day_data') or {}
+        off_day_dates = [
+            day for day, day_status in (locked_day_data.get('day_map') or {}).items()
+            if day_status == 'off_day_worked'
+        ]
+        if off_day_dates:
+            from leaveapp.models import CompOffCreditLog
+            payload['off_day_credit_days_by_date'] = {
+                item['credit_date'].isoformat(): str(item['comp_off_days'])
+                for item in CompOffCreditLog.objects.filter(
+                    employee=re.employee, credit_date__in=off_day_dates,
+                ).values('credit_date', 'comp_off_days')
+            }
+        else:
+            payload['off_day_credit_days_by_date'] = {}
+        return Response(payload)
+
+
+class RunEmployeeOffDayAllocationView(APIView):
+    """Update how a calculated regular-run employee's off-day work is settled."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    @transaction.atomic
+    def post(self, request, run_id, pk):
+        run = PayrollRun.objects.select_for_update().filter(id=run_id).first()
+        if not run:
+            return Response({'detail': 'Payroll run not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if run.run_type != 'REGULAR':
+            return Response({'detail': 'Extra worked-day allocation is available only for regular payroll runs.'}, status=400)
+        if run.status != 'CALCULATED':
+            return Response({'detail': 'Update the allocation while the run is calculated and before it is submitted for approval.'}, status=400)
+
+        row = PayrollRunEmployee.objects.select_for_update().filter(
+            id=pk, run=run, status='CALCULATED',
+        ).select_related('employee').first()
+        if not row:
+            return Response({'detail': 'Calculated employee record not found.'}, status=404)
+
+        try:
+            requested_paid_days = Decimal(str(request.data.get('paid_days', '')))
+        except Exception:
+            return Response({'detail': 'paid_days must be a whole number.'}, status=400)
+        if not requested_paid_days.is_finite() or requested_paid_days != requested_paid_days.to_integral_value():
+            return Response({'detail': 'Paid extra-work days must be a whole number.'}, status=400)
+
+        snapshot = row.input_snapshot or {}
+        locked_day_data = (snapshot.get('locked_inputs') or {}).get('day_data') or {}
+        worked_dates = sorted(
+            str(day) for day, day_status in (locked_day_data.get('day_map') or {}).items()
+            if day_status == 'off_day_worked'
+        )
+        total_worked_days = len(worked_dates)
+        paid_count = int(requested_paid_days)
+        if paid_count < 0 or paid_count > total_worked_days:
+            return Response({'detail': f'Enter a number from 0 to {total_worked_days}.'}, status=400)
+
+        paid_dates = worked_dates[:paid_count]
+        comp_off_dates = worked_dates[paid_count:]
+        try:
+            from leaveapp.models import CompOffCreditLog
+            credit_rows = list(CompOffCreditLog.objects.filter(
+                employee=row.employee, credit_date__in=comp_off_dates,
+                paid_in_payroll_run_id='',
+            ).values_list('comp_off_days', flat=True))
+            eligible_comp_off_days = sum((Decimal(str(value)) for value in credit_rows), Decimal('0'))
+        except ImportError:
+            eligible_comp_off_days = Decimal('0')
+
+        previous_allocation = snapshot.get('off_day_allocation') or {}
+        allocation = {
+            **previous_allocation,
+            'total_worked_days': str(total_worked_days),
+            'paid_days': str(paid_count),
+            'comp_off_work_days': str(len(comp_off_dates)),
+            'eligible_comp_off_days': str(eligible_comp_off_days),
+            'paid_dates': paid_dates,
+            'comp_off_dates': comp_off_dates,
+            'selected_at': timezone.now().isoformat(),
+            'selected_by': getattr(getattr(request.user, 'employee', None), 'employee_id', ''),
+        }
+        row.input_snapshot = {**snapshot, 'off_day_allocation': allocation}
+        row.save(update_fields=['input_snapshot', 'updated_at'])
+
+        old_paid_days = previous_allocation.get(
+            'paid_days', snapshot.get('off_day_paid_days', total_worked_days),
+        )
+        PayrollCalculationService.calculate_for_run(run, row.employee)
+        row.refresh_from_db()
+        RunLifecycleService._recalc_totals(run)
+        PayrollAuditLog.objects.create(
+            run=run, employee=row.employee,
+            action='OFF_DAY_ALLOCATION_UPDATED',
+            reason='Extra worked days split between salary and Comp-Off before payroll approval.',
+            performed_by=getattr(request.user, 'employee', None),
+            old_values={'paid_days': str(old_paid_days)},
+            new_values={
+                'paid_days': str(paid_count),
+                'comp_off_work_days': str(len(comp_off_dates)),
+                'eligible_comp_off_days': str(eligible_comp_off_days),
+                'paid_dates': paid_dates,
+                'comp_off_dates': comp_off_dates,
+            },
+        )
+        payload = PayrollRunEmployeeDetailSerializer(row).data
+        locked_day_data = ((row.input_snapshot or {}).get('locked_inputs') or {}).get('day_data') or {}
+        off_day_dates = [
+            day for day, day_status in (locked_day_data.get('day_map') or {}).items()
+            if day_status == 'off_day_worked'
+        ]
+        if off_day_dates:
+            from leaveapp.models import CompOffCreditLog
+            payload['off_day_credit_days_by_date'] = {
+                item['credit_date'].isoformat(): str(item['comp_off_days'])
+                for item in CompOffCreditLog.objects.filter(
+                    employee=row.employee, credit_date__in=off_day_dates,
+                ).values('credit_date', 'comp_off_days')
+            }
+        else:
+            payload['off_day_credit_days_by_date'] = {}
+        return Response(payload)
 
 
 class RunEmployeeExcludeView(APIView):

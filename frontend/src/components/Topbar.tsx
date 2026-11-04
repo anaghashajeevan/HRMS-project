@@ -303,7 +303,7 @@ export default function Topbar() {
                         <p className={`text-xs ${n.is_read ? 'text-gray-700' : 'font-semibold text-gray-950'}`}>
                           {n.title}
                         </p>
-                        <p className="mt-0.5 text-[11px] text-gray-500 line-clamp-2">
+                        <p title={n.message} className="mt-0.5 text-[11px] text-gray-500 line-clamp-2">
                           {n.message}
                         </p>
                         <span className="mt-1 block text-[9px] text-gray-400">

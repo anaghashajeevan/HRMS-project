@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
 from itertools import combinations
 import re
 from datetime import datetime
@@ -18,6 +17,10 @@ SUPPORTED_PDF_EXTENSIONS = {".pdf"}
 UNSUPPORTED_OCR_MESSAGE = "OCR is currently supported for image and PDF files only."
 TESSERACT_UNAVAILABLE_MESSAGE = "Tesseract OCR is not available."
 AMOUNT_KEYWORDS = [
+    "selected price",
+    "selected fare",
+    "ride fare",
+    "fare amount",
     "grand total inr",
     "grand total",
     "amount payable",
@@ -57,9 +60,25 @@ NOISE_CONTEXT_KEYWORDS = {
     "invoice number",
     "receipt no",
     "receipt number",
+    "address",
+    "pin code",
+    "pincode",
+    "postal code",
+    "zip code",
+    "zipcode",
+    "sector",
+    "gurugram",
+    "haryana",
+    "india",
+    "near",
+    "phase",
+    "block",
+    "road",
 }
 AMOUNT_PATTERN = re.compile(
-    r"(?<![\dA-Z])(?P<prefix>\u20b9|rs\.?|inr)?\s*(?P<value>[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)(?![\d/:-])",
+    # Accept both western grouping (122,101.00) and Indian grouping
+    # (1,22,101.00) so the latter is captured as one amount, not fragments.
+    r"(?<![\dA-Z])(?P<prefix>\u20b9|rs\.?|inr)?\s*(?P<value>(?:[0-9]{1,2}(?:,[0-9]{2})*,[0-9]{3}|[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?)(?![\d/:-])",
     re.IGNORECASE,
 )
 
@@ -135,6 +154,50 @@ def is_likely_noise_amount(value: Decimal, context: str, *, raw: str = "", has_c
 
     if len(integer_part) >= 7 and not has_currency:
         return True
+
+    # Indian PIN codes are six digits and can be mistaken for high-value
+    # expenses. Accept a bare six-digit amount only when its own OCR line has
+    # a recognizable amount label; reject lines identified as address/postal
+    # data even if a nearby table label says "Total". Currency-marked values
+    # are valid regardless of digit count.
+    if len(integer_part) == 6 and not has_currency:
+        has_amount_label = any(
+            keyword in normalized_context
+            for keyword in (
+                "selected price",
+                "selected fare",
+                "ride fare",
+                "fare amount",
+                "grand total",
+                "amount payable",
+                "total amount",
+                "invoice total",
+                "net amount",
+                "paid amount",
+                "bill amount",
+                "total",
+            )
+        )
+        has_postal_context = any(
+            keyword in normalized_context
+            for keyword in (
+                "address",
+                "pin",
+                "postal",
+                "postcode",
+                "zip",
+                "district",
+                "state",
+                "sector",
+                "near",
+                "phase",
+                "block",
+                "road",
+                "india",
+            )
+        )
+        if has_postal_context or not has_amount_label:
+            return True
 
     if not has_currency and value == value.to_integral_value() and Decimal("1900") <= value <= Decimal("2100"):
         return True
@@ -331,20 +394,27 @@ def extract_amount_from_text(raw_text: str) -> Decimal | None:
     if keyword_amount is not None:
         return keyword_amount
 
-    candidates = extract_amount_candidates_from_text(raw_text)
-    if not candidates:
-        return None
+    # If there was no recognizable amount label, accept only currency-marked
+    # values. Choosing the largest bare number is unsafe: OCR commonly reads
+    # PIN codes, ride IDs, and vehicle/phone numbers as monetary amounts.
+    currency_candidates: list[dict] = []
+    for raw_line in raw_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        for candidate in parse_amount_candidates(line):
+            if not candidate["has_currency"]:
+                continue
+            if is_likely_noise_amount(
+                candidate["value"],
+                candidate["context"],
+                raw=candidate["raw"],
+                has_currency=True,
+            ):
+                continue
+            currency_candidates.append(candidate)
 
-    candidate_frequency = Counter(candidates)
-    best_value = max(
-        candidate_frequency,
-        key=lambda value: (
-            candidate_frequency[value],
-            value >= Decimal("100.00"),
-            value,
-        ),
-    )
-    return best_value.quantize(Decimal("0.01"))
+    return _choose_preferred_candidate(currency_candidates)
 
 
 def extract_date_from_text(raw_text: str):
@@ -615,4 +685,3 @@ def run_ocr_for_attachment(attachment: ExpenseAttachment) -> BillExtraction:
             ]
         )
         return extraction
- 

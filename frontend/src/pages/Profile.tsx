@@ -21,6 +21,9 @@ type TabKey = 'personal' | 'employment' | 'bank' | 'documents' | 'exitDocuments'
 const statusStyles: Record<string, string> = {
   ACTIVE: 'bg-green-100 text-green-700',
   PROBATION: 'bg-amber-100 text-amber-700',
+  NOTICE_PERIOD: 'bg-sky-100 text-sky-700',
+  RELIEVED: 'bg-violet-100 text-violet-700',
+  INACTIVE: 'bg-slate-100 text-slate-700',
   SUSPENDED: 'bg-orange-100 text-orange-700',
   TERMINATED: 'bg-red-100 text-red-700',
 };
@@ -158,7 +161,7 @@ export default function ProfilePage() {
                     <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
                       statusStyles[employee.status] || 'bg-gray-100 text-gray-700'
                     }`}>
-                      {employee.status}
+                      {employee.status_label || employee.status}
                     </span>
                     {user?.role_codes.map((role) => (
                       <span

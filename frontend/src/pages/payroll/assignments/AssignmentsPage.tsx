@@ -73,6 +73,7 @@ export default function AssignmentsPage() {
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Monthly CTC</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Fixed Gross / Month</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Effective</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Increment Review</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Reason</th>
                   <th className="px-4 py-3" />
                 </tr>
@@ -94,6 +95,9 @@ export default function AssignmentsPage() {
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-500">
                       {a.effective_from}{a.effective_to ? ` → ${a.effective_to}` : ' → present'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-500">
+                      {a.increment_interval_months ? `Every ${a.increment_interval_months} months` : 'Not set'}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-500 max-w-[150px] truncate">{a.reason || '—'}</td>
                     <td className="px-4 py-3 text-right">

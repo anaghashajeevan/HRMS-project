@@ -14,7 +14,8 @@ export const getEmployeeExitClearance = (id: string) => api.get(`/payroll/exits/
 export const addEmployeeExitClearanceItem = (id: string, payload: Record<string, unknown>) => api.post(`/payroll/exits/${id}/clearance/`, payload);
 export const updateEmployeeExitClearanceItem = (id: string, itemId: string, payload: Record<string, unknown>) => api.patch(`/payroll/exits/${id}/clearance/${itemId}/`, payload);
 export const getEmployeeExitDocumentStatus = (id: string) => api.get(`/payroll/exits/${id}/documents/`);
-export const issueEmployeeExitDocument = (id: string, documentType: string) => api.post(`/payroll/exits/${id}/documents/`, { document_type: documentType });
+export const issueEmployeeExitDocument = (id: string, documentType: string, refreshBranding = false) =>
+  api.post(`/payroll/exits/${id}/documents/`, { document_type: documentType, refresh_branding: refreshBranding });
 export const getMyExitDocuments = () => api.get('/payroll/exits/my-documents/');
 export const downloadMyExitDocument = (id: string) => api.get(`/payroll/exits/my-documents/${id}/download/`, { responseType: 'blob' });
 
@@ -24,6 +25,26 @@ export const downloadMyExitDocument = (id: string) => api.get(`/payroll/exits/my
 export const getPayrollEmployees = async () => {
   const employees = new Map<string, any>();
   for (const status of ['ACTIVE', 'PROBATION']) {
+    let page = 1;
+    let hasNext = true;
+    while (hasNext) {
+      const response = await api.get('/employees/', { params: { status, page } });
+      const payload = response.data;
+      const rows = Array.isArray(payload) ? payload : (payload.results || []);
+      rows.forEach((employee: any) => employees.set(employee.id, employee));
+      hasNext = Boolean(payload?.next);
+      page += 1;
+    }
+  }
+  return Array.from(employees.values()).sort((a, b) =>
+    String(a.employee_id || '').localeCompare(String(b.employee_id || '')),
+  );
+};
+
+// Statutory history can include employees who have since left the company.
+export const getStatutoryHistoryEmployees = async () => {
+  const employees = new Map<string, any>();
+  for (const status of ['ACTIVE', 'PROBATION', 'SUSPENDED', 'TERMINATED']) {
     let page = 1;
     let hasNext = true;
     while (hasNext) {
@@ -186,6 +207,26 @@ export const downloadStatutoryReturn = async (runId: string, type: 'pf' | 'esi')
   window.URL.revokeObjectURL(url);
 };
 
+export const downloadStatutoryHistory = async (employeeId?: string, scope?: 'all') => {
+  const response = await api.get('/payroll/statutory-exports/cumulative-history/', {
+    params: scope === 'all' ? { scope } : { employee_id: employeeId },
+    responseType: 'blob',
+  });
+  const url = window.URL.createObjectURL(response.data);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  const disposition = response.headers['content-disposition'] || '';
+  const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+  anchor.download = filename || 'PF_ESI_Employee_History.xlsx';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+export const getStatutoryHistory = (scope: 'mine' | 'all' = 'mine') =>
+  api.get('/payroll/statutory-exports/cumulative-history/', { params: { format: 'json', scope } });
+
 export const getPayRun = (id: string) =>
   api.get(`/payroll/runs/${id}/`);
 
@@ -218,6 +259,9 @@ export const createRunAdjustment = (runId: string, data: {
 
 export const getRunEmployee = (runId: string, empId: string) =>
   api.get(`/payroll/runs/${runId}/employees/${empId}/`);
+
+export const updateRunEmployeeOffDayAllocation = (runId: string, empId: string, paidDays: number) =>
+  api.post(`/payroll/runs/${runId}/employees/${empId}/off-day-allocation/`, { paid_days: paidDays });
 
 export const excludeRunEmployee = (runId: string, empId: string, data: any) =>
   api.post(`/payroll/runs/${runId}/employees/${empId}/exclude/`, data);

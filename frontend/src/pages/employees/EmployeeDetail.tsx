@@ -283,6 +283,9 @@ type TabKey = 'personal' | 'employment' | 'bank' | 'documents' | 'career' | 'aud
 const statusStyles: Record<string, string> = {
   ACTIVE: 'bg-green-100 text-green-700',
   PROBATION: 'bg-amber-100 text-amber-700',
+  NOTICE_PERIOD: 'bg-sky-100 text-sky-700',
+  RELIEVED: 'bg-violet-100 text-violet-700',
+  INACTIVE: 'bg-slate-100 text-slate-700',
   SUSPENDED: 'bg-orange-100 text-orange-700',
   TERMINATED: 'bg-red-100 text-red-700',
 };
@@ -392,7 +395,7 @@ const costCenterInfo = empData.cost_center_detail || null;
                         statusStyles[employee.status] || 'bg-gray-100 text-gray-700'
                       }`}
                     >
-                      {employee.status}
+                      {employee.status_label || employee.status}
                     </span>
                     <span className="flex items-center gap-1 text-sm text-gray-600">
                       <Mail className="h-3.5 w-3.5" />

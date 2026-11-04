@@ -23,6 +23,7 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
     ctc_annual: '',
     fixed_salary_monthly: '',
     effective_from: '',
+    increment_interval_months: '12',
     reason: '',
   });
   const [preview, setPreview] = useState<any>(null);
@@ -98,6 +99,7 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
         structure: form.structure,
         ctc_annual: parseFloat(form.ctc_annual),
         effective_from: form.effective_from,
+        increment_interval_months: form.increment_interval_months ? Number(form.increment_interval_months) : null,
         reason: form.reason || null,
       });
       onSaved();
@@ -220,6 +222,22 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
               setError('');
             }} />
             <p className="mt-1 text-xs text-gray-500">Defaults to the selected employee’s joining date. You can change it before saving.</p>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">Salary Increment Review Interval</label>
+            <select
+              className={inputCls}
+              value={form.increment_interval_months}
+              onChange={(e) => set('increment_interval_months', e.target.value)}
+            >
+              <option value="">No reminder</option>
+              <option value="6">Every 6 months</option>
+              <option value="12">Every 1 year</option>
+              <option value="24">Every 2 years</option>
+              <option value="36">Every 3 years</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500">HR receives an in-app reminder during the week before each review date, after probation ends.</p>
           </div>
 
           <div>

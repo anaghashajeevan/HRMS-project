@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDownTrayIcon, DocumentTextIcon } from '@heroicons/react/24/outline';
-import { downloadStatutoryReturn, getPayRuns } from '../../../api/payrollApi';
+import { downloadStatutoryHistory, downloadStatutoryReturn, getPayRuns, getStatutoryHistoryEmployees } from '../../../api/payrollApi';
 
 type PayrollRunOption = {
   id: string;
@@ -25,8 +25,11 @@ async function errorMessage(error: any) {
 export default function StatutoryExportsPage() {
   const [runs, setRuns] = useState<PayrollRunOption[]>([]);
   const [selectedRun, setSelectedRun] = useState('');
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [selectedEmployee, setSelectedEmployee] = useState('');
   const [loading, setLoading] = useState(true);
-  const [working, setWorking] = useState<'pf' | 'esi' | null>(null);
+  const [employeesLoading, setEmployeesLoading] = useState(true);
+  const [working, setWorking] = useState<'pf' | 'esi' | 'history' | null>(null);
   const [message, setMessage] = useState('');
   const [problem, setProblem] = useState(false);
 
@@ -41,6 +44,10 @@ export default function StatutoryExportsPage() {
       })
       .catch(() => { setProblem(true); setMessage('Could not load payroll runs.'); })
       .finally(() => setLoading(false));
+    getStatutoryHistoryEmployees()
+      .then(setEmployees)
+      .catch(() => { setProblem(true); setMessage('Could not load employees for statutory history.'); })
+      .finally(() => setEmployeesLoading(false));
   }, []);
 
   const activeRun = useMemo(() => runs.find((run) => run.id === selectedRun), [runs, selectedRun]);
@@ -61,11 +68,25 @@ export default function StatutoryExportsPage() {
     } finally { setWorking(null); }
   };
 
+  const downloadHistory = async () => {
+    if (!selectedEmployee) return;
+    setWorking('history');
+    setProblem(false);
+    setMessage('');
+    try {
+      await downloadStatutoryHistory(selectedEmployee);
+      setMessage('Selected employee’s PF and ESI workbook downloaded with monthly contributions and running totals from DOJ through the latest available period.');
+    } catch (error: any) {
+      setProblem(true);
+      setMessage(await errorMessage(error));
+    } finally { setWorking(null); }
+  };
+
   return (
     <div className="space-y-6">
       <header>
         <h2 className="text-lg font-semibold text-gray-900">PF &amp; ESI Return Exports</h2>
-        <p className="mt-1 text-sm text-gray-600">Prepare monthly statutory files from approved payroll calculations.</p>
+        <p className="mt-1 text-sm text-gray-600">Prepare monthly statutory files and employee contribution history from finalized payroll calculations.</p>
       </header>
 
       <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
@@ -92,7 +113,7 @@ export default function StatutoryExportsPage() {
             <DocumentTextIcon className="mt-0.5 h-6 w-6 text-blue-600" />
             <div>
               <h3 className="font-semibold text-gray-900">EPFO ECR 2.0</h3>
-              <p className="mt-1 text-sm text-gray-600">Downloads the official 11-field, UAN-based text layout. The ECR data rows do not contain a month field; the selected period is in the filename and must also be selected in the EPFO portal. Employees missing a UAN, PF rule, or valid whole-day NCP value block file generation.</p>
+              <p className="mt-1 text-sm text-gray-600">EPFO requires a plain text file with 11 UAN-based fields separated by #~#. The selected wage month is chosen in the EPFO portal. Employees missing a valid UAN, PF rule, or whole-day NCP value block file generation.</p>
             </div>
           </div>
           <button disabled={!selectedRun || Boolean(working)} onClick={() => void download('pf')} className="mt-5 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
@@ -113,6 +134,29 @@ export default function StatutoryExportsPage() {
           </button>
         </section>
       </div>
+
+      <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+        <div>
+          <h3 className="font-semibold text-gray-900">Cumulative PF &amp; ESI History</h3>
+          <p className="mt-1 max-w-3xl text-sm text-gray-600">Select an employee to download their Excel workbook with monthly employee and employer PF/ESI contributions and running totals from DOJ through the current month. Only finalized or paid regular payroll is counted; months without finalized data are clearly marked.</p>
+          <label htmlFor="statutory-employee" className="mt-4 block text-sm font-medium text-gray-800">Employee</label>
+          <select
+            id="statutory-employee"
+            value={selectedEmployee}
+            onChange={(event) => { setSelectedEmployee(event.target.value); setMessage(''); }}
+            disabled={employeesLoading || !employees.length || Boolean(working)}
+            className="mt-2 block w-full max-w-xl rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          >
+            <option value="">{employeesLoading ? 'Loading employees…' : employees.length ? 'Select an employee' : 'No employees available'}</option>
+            {employees.map((employee) => (
+              <option key={employee.id} value={employee.id}>{employee.employee_id} · {employee.full_name || `${employee.first_name || ''} ${employee.last_name || ''}`.trim()}</option>
+            ))}
+          </select>
+          <button disabled={!selectedEmployee || Boolean(working)} onClick={() => void downloadHistory()} className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
+            <ArrowDownTrayIcon className="h-4 w-4" />{working === 'history' ? 'Preparing…' : 'Download Employee History'}
+          </button>
+        </div>
+      </section>
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
         Exports use finalized payroll snapshots only. Check the employee IDs and contribution totals against the official portal before submission. A successful download does not file or pay the statutory return.

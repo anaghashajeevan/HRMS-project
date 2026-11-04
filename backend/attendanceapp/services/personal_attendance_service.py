@@ -1669,7 +1669,7 @@ def get_team_monthly_summary(manager_employee, year: int, month: int):
     team_members = Employee.objects.filter(
         reporting_manager=manager_employee,
         is_deleted=False,
-        status__in=['ACTIVE', 'PROBATION'],
+        status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'],
     ).select_related('position', 'structure_location').order_by('employee_id')
 
     team_data = []
@@ -1721,7 +1721,7 @@ def get_all_employees_monthly_summary(year: int, month: int, filters: dict = Non
     filters = filters or {}
     qs = Employee.objects.filter(
         is_deleted=False,
-        status__in=['ACTIVE', 'PROBATION'],
+        status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'],
     ).select_related('position', 'structure_location', 'reporting_manager')
 
     dept_id = filters.get('department_id')

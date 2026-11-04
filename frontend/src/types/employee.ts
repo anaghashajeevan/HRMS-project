@@ -15,7 +15,8 @@ export interface EmployeeListItem {
   last_name: string;
   official_email: string;
   phone_number: string;
-  status: 'ACTIVE' | 'PROBATION' | 'SUSPENDED' | 'TERMINATED';
+  status: 'ACTIVE' | 'PROBATION' | 'NOTICE_PERIOD' | 'RELIEVED' | 'INACTIVE' | 'SUSPENDED' | 'TERMINATED';
+  status_label?: string;
   position_title: string | null;
   department_name: string | null;
   manager_name: string | null;
@@ -31,6 +32,7 @@ export interface EmployeeDetail {
   id: string;
   employee_id: string;
   status: string;
+  status_label?: string;
   first_name: string;
   last_name: string;
   full_name: string;

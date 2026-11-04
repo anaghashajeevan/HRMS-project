@@ -239,8 +239,11 @@ class Employee(models.Model):
     STATUS_CHOICES = [
         ('ACTIVE', 'Active'),
         ('PROBATION', 'Probation'),
+        ('NOTICE_PERIOD', 'Notice Period'),
+        ('RELIEVED', 'Relieved'),
+        ('INACTIVE', 'Inactive'),
         ('SUSPENDED', 'Suspended'),
-        ('TERMINATED', 'Terminated'),
+        ('TERMINATED', 'Terminated (Dismissed)'),
     ]
     GENDER_CHOICES = [
         ('MALE', 'Male'),

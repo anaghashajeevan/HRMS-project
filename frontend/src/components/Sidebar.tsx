@@ -2101,6 +2101,12 @@ const mainNav: NavEntry[] = [
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE', 'REPORTING_MANAGER', 'HOD'],
   },
   {
+    label: 'My PF / ESI',
+    icon: FileText,
+    to: '/my-statutory-contributions',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE', 'REPORTING_MANAGER', 'HOD'],
+  },
+  {
     label: 'Reports',
     icon: BarChart3,
     to: '/reports',

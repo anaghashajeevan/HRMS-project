@@ -1561,8 +1561,11 @@ export default function EmployeeForm() {
                       className={inputCls()}>
                       <option value="PROBATION">Probation</option>
                       <option value="ACTIVE">Active</option>
+                      <option value="NOTICE_PERIOD">Notice Period</option>
+                      <option value="RELIEVED">Relieved</option>
+                      <option value="INACTIVE">Inactive</option>
                       <option value="SUSPENDED">Suspended</option>
-                      <option value="TERMINATED">Terminated</option>
+                      <option value="TERMINATED">Terminated (Dismissed)</option>
                     </select>
                   )}
                 </Field>
