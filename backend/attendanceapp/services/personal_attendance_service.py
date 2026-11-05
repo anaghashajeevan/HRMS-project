@@ -1149,8 +1149,8 @@ def _get_leaves_for_period(start_date, end_date, employee):
 
 def _seconds_to_hhmm(seconds: int) -> str:
     seconds = max(int(seconds or 0), 0)
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
+    total_minutes = (seconds + 30) // 60
+    hours, minutes = divmod(total_minutes, 60)
     return f"{hours:02d}:{minutes:02d}"
 
 

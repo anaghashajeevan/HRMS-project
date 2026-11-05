@@ -211,6 +211,7 @@ def _build_attendance_row(employee_code, attendance_date, punch_entries, setting
         return None
 
     intervals = []
+    calculation_end = None
     if has_dedicated_roles:
         active_in = None
         punch_in = None
@@ -228,6 +229,10 @@ def _build_attendance_row(employee_code, attendance_date, punch_entries, setting
                     intervals.append((active_in, punch_time))
                     punch_out = punch_time
                     active_in = None
+        if active_in is not None and attendance_date == timezone.localdate():
+            calculation_end = timezone.now()
+            if calculation_end > active_in:
+                intervals.append((active_in, calculation_end))
     else:
         all_times = [record['punch_time'] for record in records]
         punch_in = all_times[0]
@@ -237,13 +242,19 @@ def _build_attendance_row(employee_code, attendance_date, punch_entries, setting
             if end_index >= len(all_times) or all_times[end_index] > punch_out:
                 break
             intervals.append((all_times[index], all_times[end_index]))
+        if len(all_times) % 2 and attendance_date == timezone.localdate():
+            calculation_end = timezone.now()
+            active_in = all_times[-1]
+            if calculation_end > active_in:
+                intervals.append((active_in, calculation_end))
 
     total_punches = len(records)
     missing_punch = punch_out is None or punch_in is None
 
     working_time = timedelta()
-    if punch_in and punch_out and punch_out > punch_in:
-        working_time = punch_out - punch_in
+    effective_end = calculation_end or punch_out
+    if punch_in and effective_end and effective_end > punch_in:
+        working_time = effective_end - punch_in
 
     paired_work_seconds = sum(
         max(int((end - start).total_seconds()), 0) for start, end in intervals
@@ -251,7 +262,7 @@ def _build_attendance_row(employee_code, attendance_date, punch_entries, setting
     inferred_break_seconds = max(
         int(working_time.total_seconds()) - paired_work_seconds, 0,
     )
-    lunch_overlap_seconds = _calculate_lunch_overlap(punch_in, punch_out, settings_obj) if punch_in and punch_out else 0
+    lunch_overlap_seconds = _calculate_lunch_overlap(punch_in, effective_end, settings_obj) if punch_in and effective_end else 0
     total_break_seconds = max(inferred_break_seconds, lunch_overlap_seconds)
     
     net_working_time = max(working_time - timedelta(seconds=total_break_seconds), timedelta())
@@ -432,6 +443,6 @@ def build_summary(attendance_rows, report_log=None):
 
 def format_duration(total_seconds):
     total_seconds = max(int(total_seconds or 0), 0)
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
+    total_minutes = (total_seconds + 30) // 60
+    hours, minutes = divmod(total_minutes, 60)
     return f"{hours:02d}:{minutes:02d}"
