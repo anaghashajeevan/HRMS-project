@@ -1770,7 +1770,14 @@ export default function AttendanceSettingsPage() {
                 <SectionLabel icon={ShieldCheck} text="Punch processing" />
                 <FormField label="Shift In Time" type="time" value={settings.shift_in_time} onChange={(e) => updateField('shift_in_time', e.target.value)} />
                 <FormField label="Shift Out Time" type="time" value={settings.shift_out_time} onChange={(e) => updateField('shift_out_time', e.target.value)} />
-                <FormField label="Duplicate Punch Ignore Seconds" type="number" value={settings.duplicate_punch_ignore_seconds} onChange={(e) => updateField('duplicate_punch_ignore_seconds', Number(e.target.value))} />
+                <FormField
+                  label="Duplicate Punch Ignore Seconds"
+                  type="number"
+                  min="0"
+                  value={settings.duplicate_punch_ignore_seconds}
+                  helper="Ignores rapid repeat scans by the same employee. Start with 60 seconds; lower it if valid punches close together are being dropped."
+                  onChange={(e) => updateField('duplicate_punch_ignore_seconds', Number(e.target.value))}
+                />
               </SettingsSection>
 
               <SettingsSection title="Attendance Data Period">
@@ -1886,8 +1893,19 @@ export default function AttendanceSettingsPage() {
                 <FormField label="Half Day Minimum Hours" type="number" min="0" step="0.25" value={settings.half_day_min_hours} onChange={(e) => updateField('half_day_min_hours', Number(e.target.value))} />
                 <FormField label="Full Day Out Time" type="time" value={settings.full_day_out_time} onChange={(e) => updateField('full_day_out_time', e.target.value)} />
                 <FormField label="Half Day Out Time" type="time" value={settings.half_day_out_time} onChange={(e) => updateField('half_day_out_time', e.target.value)} />
-                <FormField label="Lunch Start Time" type="time" value={settings.lunch_start_time} onChange={(e) => updateField('lunch_start_time', e.target.value)} />
-                <FormField label="Lunch End Time" type="time" value={settings.lunch_end_time} onChange={(e) => updateField('lunch_end_time', e.target.value)} />
+              </div>
+
+              <div className="mt-4 space-y-3 rounded-xl border border-white/10 bg-slate-950/35 p-4">
+                <ToggleField
+                  label="Count Configured Lunch Break"
+                  helper="When on, the configured lunch window is included as a break (using the larger of punch-inferred breaks or lunch overlap). When off, only punch data determines breaks."
+                  checked={settings.enable_lunch_break}
+                  onChange={(v) => updateField('enable_lunch_break', v)}
+                />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <FormField label="Lunch Start Time" type="time" disabled={!settings.enable_lunch_break} value={settings.lunch_start_time} onChange={(e) => updateField('lunch_start_time', e.target.value)} />
+                  <FormField label="Lunch End Time" type="time" disabled={!settings.enable_lunch_break} value={settings.lunch_end_time} onChange={(e) => updateField('lunch_end_time', e.target.value)} />
+                </div>
               </div>
 
               <FormField label="Excluded Dates from Absent Calculation" textarea value={settings.excluded_dates} onChange={(e) => updateField('excluded_dates', e.target.value)} />

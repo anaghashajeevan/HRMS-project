@@ -62,6 +62,7 @@ class AutomationSettingsSerializer(serializers.ModelSerializer):
             'half_day_min_hours',
             'full_day_out_time',
             'half_day_out_time',
+            'enable_lunch_break',
             'lunch_start_time',
             'lunch_end_time',
             'excluded_dates',

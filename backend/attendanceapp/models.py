@@ -151,6 +151,7 @@ class AutomationSettings(models.Model):
     half_day_min_hours = models.DecimalField(max_digits=4, decimal_places=2, default=4)
     full_day_out_time = models.TimeField(default="18:30")
     half_day_out_time = models.TimeField(default="14:00")
+    enable_lunch_break = models.BooleanField(default=True)
     lunch_start_time = models.TimeField(default="13:00")
     lunch_end_time = models.TimeField(default="14:00")
     excluded_dates = models.TextField(blank=True)

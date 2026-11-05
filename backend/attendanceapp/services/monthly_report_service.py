@@ -168,7 +168,11 @@ def _setting_time(value):
 
 
 def _lunch_overlap_seconds(row, settings_obj):
-    if not row.punch_in or not row.punch_out:
+    if (
+        not row.punch_in
+        or not row.punch_out
+        or not getattr(settings_obj, "enable_lunch_break", True)
+    ):
         return 0
     local_in = timezone.localtime(row.punch_in)
     local_out = timezone.localtime(row.punch_out)

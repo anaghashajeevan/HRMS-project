@@ -68,7 +68,11 @@ def _setting_time(value):
 
 def _calculate_lunch_overlap(punch_in, punch_out, settings_obj):
     """Calculate overlap between employee working hours and configured lunch window."""
-    if not punch_in or not punch_out:
+    if (
+        not punch_in
+        or not punch_out
+        or not getattr(settings_obj, 'enable_lunch_break', True)
+    ):
         return 0
     local_in = timezone.localtime(punch_in)
     local_out = timezone.localtime(punch_out)

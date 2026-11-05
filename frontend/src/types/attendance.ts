@@ -139,6 +139,7 @@ export interface AttendanceSettings {
   half_day_min_hours: number;
   full_day_out_time: string;
   half_day_out_time: string;
+  enable_lunch_break: boolean;
   lunch_start_time: string;
   lunch_end_time: string;
   excluded_dates: string;
