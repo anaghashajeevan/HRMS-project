@@ -9,7 +9,7 @@ import logging
 
 from django.utils import timezone
 
-from attendanceapp.models import DailyAttendance, RawPunchLog, normalize_employee_code
+from attendanceapp.models import DailyAttendance, EsslDevice, RawPunchLog, normalize_employee_code
 from .employee_matcher import find_hrms_employee_by_code, get_employee_display_name
 
 logger = logging.getLogger(__name__)
@@ -340,6 +340,10 @@ def process_attendance_period(logs, settings_obj, start_date, end_date, persist=
     if persist:
         persist_raw_logs(logs)
 
+    device_roles_by_serial = dict(
+        EsslDevice.objects.values_list("serial_number", "role")
+    )
+
     # Group ALL punches by (employee, date), retaining device roles for pairing.
     grouped_logs = defaultdict(list)
     for log in logs:
@@ -349,10 +353,17 @@ def process_attendance_period(logs, settings_obj, start_date, end_date, persist=
         punch_time = _make_aware(log["punch_time"])
         attendance_date = timezone.localtime(punch_time).date()
         if start_date <= attendance_date <= end_date:
+            raw_line = log.get("raw_line", "") or ""
+            device_serial = log.get("device_serial", "")
+            if not device_serial and " | " in raw_line:
+                device_serial = raw_line.rsplit(" | ", 1)[-1].strip()
+            device_role = log.get("device_role") or device_roles_by_serial.get(
+                device_serial, "BOTH"
+            )
             grouped_logs[(employee_code, attendance_date)].append({
                 'punch_time': punch_time,
-                'device_serial': log.get('device_serial', ''),
-                'device_role': log.get('device_role', 'BOTH'),
+                'device_serial': device_serial,
+                'device_role': device_role,
             })
 
     attendance_rows = []
@@ -374,6 +385,25 @@ def process_attendance_period(logs, settings_obj, start_date, end_date, persist=
             current_date += timedelta(days=1)
 
     return sorted(attendance_rows, key=lambda row: (row.attendance_date, row.employee_code))
+
+
+def process_saved_raw_punches(settings_obj, start_date, end_date, employee_code=None):
+    """Rebuild attendance from stored punches, recovering device roles from serials."""
+    raw_logs = RawPunchLog.objects.filter(
+        punch_date__gte=start_date,
+        punch_date__lte=end_date,
+    )
+    if employee_code:
+        raw_logs = raw_logs.filter(employee_code__iexact=employee_code)
+
+    return process_attendance_period(
+        list(raw_logs.values("employee_code", "punch_time", "raw_line")),
+        settings_obj,
+        start_date,
+        end_date,
+        persist=False,
+        delete_missing=False,
+    )
 
 def process_attendance(logs, settings_obj, report_date):
     return process_attendance_period(logs, settings_obj, report_date, report_date)

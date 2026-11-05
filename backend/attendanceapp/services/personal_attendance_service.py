@@ -1399,6 +1399,17 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
     # Process live attendance on-demand if enabled
     if ensure_sync:
         _ensure_attendance_processed_for_period(start_date, end_date, employee=employee)
+    else:
+        # Refresh saved device-based totals so older rows created with punch
+        # roles discarded can be corrected without another device API call.
+        from .attendance_processor import process_saved_raw_punches
+
+        process_saved_raw_punches(
+            settings_obj,
+            start_date,
+            min(end_date, today),
+            employee_code=employee.employee_id,
+        )
 
     # Get attendance records
     attendance_rows = DailyAttendance.objects.filter(

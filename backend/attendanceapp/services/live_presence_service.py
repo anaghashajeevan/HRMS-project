@@ -143,7 +143,7 @@ from datetime import datetime, time as dtime
 from django.utils import timezone
 
 from attendanceapp.models import RawPunchLog, EsslDevice, AutomationSettings
-from .attendance_processor import persist_raw_logs, process_attendance_period
+from .attendance_processor import persist_raw_logs, process_saved_raw_punches
 from .essl_service import fetch_logs_for_range
 
 LIVE_STATUS_NOT_ARRIVED = "NOT_ARRIVED"
@@ -405,6 +405,7 @@ def build_live_presence_map(employee_codes, report_date, settings_obj=None, toda
 
 def sync_live_raw_punches(settings_obj, report_date):
     """Sync raw punches from all active devices into DB."""
+    saved = 0
     try:
         mode, logs = fetch_logs_for_range(
             datetime.combine(report_date, dtime.min),
@@ -412,11 +413,13 @@ def sync_live_raw_punches(settings_obj, report_date):
         )
         if logs:
             saved = persist_raw_logs(logs)
-            process_attendance_period(
-                logs, settings_obj, report_date, report_date,
-                persist=False, delete_missing=False,
-            )
-            return saved
     except Exception as exc:
         logger.warning("Live sync error: %s", exc)
-    return 0
+
+    # Recalculate from the complete stored timeline, even when the device API
+    # returns no new punches. This also repairs stale totals saved by older logic.
+    try:
+        process_saved_raw_punches(settings_obj, report_date, report_date)
+    except Exception as exc:
+        logger.warning("Live attendance recalculation error: %s", exc)
+    return saved
