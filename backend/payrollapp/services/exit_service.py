@@ -145,7 +145,11 @@ def _settlement_baseline(request, include_reserved_in_run=None):
     ).filter(Q(effective_to__gte=request.proposed_exit_date) | Q(effective_to__isnull=True)).select_related('structure').order_by('-effective_from').first()
     salary_snapshot = None
     if assignment:
-        breakdown = AssignmentService.preview_breakdown(assignment.structure, assignment.ctc_monthly, as_of_date=request.proposed_exit_date)
+        breakdown = AssignmentService.preview_breakdown(
+            assignment.structure, assignment.ctc_monthly,
+            as_of_date=request.proposed_exit_date,
+            component_rows=AssignmentService.get_components_for_assignment(assignment),
+        )
         from .gratuity_service import gratuity_salary_basis
         gratuity_basis = gratuity_salary_basis(assignment, request.proposed_exit_date)
         salary_snapshot = {

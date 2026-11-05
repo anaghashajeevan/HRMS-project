@@ -143,7 +143,7 @@ from datetime import datetime, time as dtime
 from django.utils import timezone
 
 from attendanceapp.models import RawPunchLog, EsslDevice, AutomationSettings
-from .attendance_processor import persist_raw_logs
+from .attendance_processor import persist_raw_logs, process_attendance_period
 from .essl_service import fetch_logs_for_range
 
 LIVE_STATUS_NOT_ARRIVED = "NOT_ARRIVED"
@@ -411,7 +411,12 @@ def sync_live_raw_punches(settings_obj, report_date):
             datetime.combine(report_date, dtime(23, 59, 59)),
         )
         if logs:
-            return persist_raw_logs(logs)
+            saved = persist_raw_logs(logs)
+            process_attendance_period(
+                logs, settings_obj, report_date, report_date,
+                persist=False, delete_missing=False,
+            )
+            return saved
     except Exception as exc:
         logger.warning("Live sync error: %s", exc)
     return 0

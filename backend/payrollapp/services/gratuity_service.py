@@ -33,6 +33,7 @@ def _salary_basis_from_assignment(assignment, as_of_date):
 
     breakdown = AssignmentService.preview_breakdown(
         assignment.structure, assignment.ctc_monthly, as_of_date=as_of_date,
+        component_rows=AssignmentService.get_components_for_assignment(assignment),
     )
     basic = Decimal('0')
     dearness_allowance = Decimal('0')

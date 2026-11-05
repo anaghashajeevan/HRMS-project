@@ -70,7 +70,7 @@ class AssignmentService:
     def assign_salary(
         employee, structure, ctc_annual, ctc_monthly,
         effective_from, reason='', created_by=None, effective_to=None,
-        fixed_salary_monthly=None, increment_interval_months=None,
+        fixed_salary_monthly=None, increment_interval_months=None, components=None,
     ):
         """
         Create a new salary assignment with overlap handling.
@@ -83,7 +83,7 @@ class AssignmentService:
            one → reject (ambiguous)
         4. Create the new assignment
         """
-        from ..models import EmployeeSalaryAssignment
+        from ..models import EmployeeSalaryAssignment, EmployeeSalaryAssignmentComponent
 
         # Step 1: Check overlaps with closed assignments
         overlaps = AssignmentService.check_overlap(
@@ -130,6 +130,22 @@ class AssignmentService:
             created_by=created_by,
         )
 
+        if components is None:
+            component_rows = list(structure.components.select_related('component').all())
+            component_values = [{
+                'component': row.component,
+                'amount': row.amount,
+                'percentage_of_basic': row.percentage_of_basic,
+                'is_enabled': row.is_enabled,
+                'display_order': row.display_order,
+            } for row in component_rows]
+        else:
+            component_values = components
+        EmployeeSalaryAssignmentComponent.objects.bulk_create([
+            EmployeeSalaryAssignmentComponent(assignment=assignment, **row)
+            for row in component_values
+        ])
+
         # Step 3: Audit log
         from ..models import PayrollAuditLog
         PayrollAuditLog.objects.create(
@@ -141,6 +157,12 @@ class AssignmentService:
                 'ctc_annual': str(ctc_annual),
                 'ctc_monthly': str(ctc_monthly),
                 'fixed_salary_monthly': str(fixed_salary_monthly) if fixed_salary_monthly is not None else None,
+                'components': [{
+                    'component': str(row['component'].id),
+                    'amount': str(row.get('amount', 0)),
+                    'percentage_of_basic': str(row.get('percentage_of_basic', 0)),
+                    'is_enabled': row.get('is_enabled', True),
+                } for row in component_values],
                 'effective_from': str(effective_from),
                 'increment_interval_months': increment_interval_months,
             },
@@ -191,12 +213,24 @@ class AssignmentService:
             models_Q_effective_to_gte_or_null(period_start)
         ).order_by('effective_from')
 
+    @staticmethod
+    def get_components_for_assignment(assignment, enabled_only=False):
+        """Return the assignment snapshot, falling back for legacy records."""
+        components = assignment.components.select_related('component').all()
+        if not components.exists():
+            components = assignment.structure.components.select_related('component').all()
+        if enabled_only:
+            components = components.filter(is_enabled=True)
+        return components.order_by(
+            'component__component_type', 'display_order', 'component__code',
+        )
+
     # ==========================================================================
     # PREVIEW BREAKDOWN
     # ==========================================================================
 
     @staticmethod
-    def preview_breakdown(structure, ctc_monthly, as_of_date=None):
+    def preview_breakdown(structure, ctc_monthly, as_of_date=None, component_rows=None):
         """
         Preview monthly salary breakdown for a structure + CTC.
         This is a simplified preview — the full calculation engine
@@ -219,11 +253,21 @@ class AssignmentService:
 
         as_of_date = as_of_date or timezone.localdate()
 
-        components = SalaryStructureComponent.objects.filter(
-            structure=structure, is_enabled=True,
-        ).select_related('component').order_by(
-            'component__component_type', 'component__display_order',
-        )
+        if component_rows is None:
+            components = SalaryStructureComponent.objects.filter(
+                structure=structure, is_enabled=True,
+            ).select_related('component').order_by(
+                'component__component_type', 'component__display_order',
+            )
+        elif hasattr(component_rows, 'filter'):
+            components = component_rows.filter(is_enabled=True).select_related('component').order_by(
+                'component__component_type', 'display_order', 'component__code',
+            )
+        else:
+            components = sorted(
+                (row for row in component_rows if row.is_enabled),
+                key=lambda row: (row.component.component_type, row.display_order, row.component.code),
+            )
 
         parser = FormulaParser()
         # First pass: find Basic amount (needed for percentage calculations)

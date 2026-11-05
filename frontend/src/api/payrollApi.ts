@@ -176,7 +176,18 @@ export const updateProfile = (id: string, data: any) =>
   api.patch(`/payroll/profiles/${id}/`, data);
 
 // ─── Preview ───
-export const previewStructure = (data: { structure_id: string; ctc_annual: number; effective_from?: string }) =>
+export const previewStructure = (data: {
+  structure_id: string;
+  ctc_annual: number;
+  effective_from?: string;
+  components?: Array<{
+    component: string;
+    amount: string | number;
+    percentage_of_basic: string | number;
+    is_enabled: boolean;
+    display_order: number;
+  }>;
+}) =>
   api.post('/payroll/preview/', data);
 
 export const calculatePreview = (data: {

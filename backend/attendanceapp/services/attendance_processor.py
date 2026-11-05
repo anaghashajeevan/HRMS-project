@@ -38,6 +38,21 @@ def calculate_break_time(clean_punches):
     return break_time
 
 
+def _dedupe_punch_records(records, duplicate_seconds, role_aware=False):
+    """Drop rapid repeat scans without losing the direction of device punches."""
+    clean_records = []
+    threshold = max(int(duplicate_seconds or 0), 0)
+    for record in sorted(records, key=lambda item: item['punch_time']):
+        role = record.get('device_role') or 'BOTH'
+        previous = clean_records[-1] if clean_records else None
+        if previous is not None:
+            same_event_type = not role_aware or previous.get('device_role') == role
+            if same_event_type and (record['punch_time'] - previous['punch_time']).total_seconds() <= threshold:
+                continue
+        clean_records.append(record)
+    return clean_records
+
+
 def _make_aware(punch_time):
     if timezone.is_aware(punch_time):
         return punch_time
@@ -166,49 +181,72 @@ def _build_attendance_row(employee_code, attendance_date, punch_entries, setting
     if not punch_entries:
         return None
 
-    # Detect if punch_entries contains device_role (dicts) or just datetimes
     is_dict = isinstance(punch_entries[0], dict)
-
     if is_dict:
-        # Separate punches by device role
-        in_punches = sorted([e["punch_time"] for e in punch_entries if e.get("device_role") in ("PUNCH_IN", "BOTH")])
-        out_punches = sorted([e["punch_time"] for e in punch_entries if e.get("device_role") in ("PUNCH_OUT", "BOTH")])
-        all_times = sorted([e["punch_time"] for e in punch_entries])
+        records = [{
+            'punch_time': _make_aware(entry['punch_time']),
+            'device_role': entry.get('device_role') or 'BOTH',
+            'device_serial': entry.get('device_serial', ''),
+        } for entry in punch_entries]
+        has_dedicated_roles = any(
+            row['device_role'] in ('PUNCH_IN', 'PUNCH_OUT') for row in records
+        )
+        records = _dedupe_punch_records(
+            records,
+            settings_obj.duplicate_punch_ignore_seconds,
+            role_aware=has_dedicated_roles,
+        )
     else:
-        all_times = remove_duplicate_punches(punch_entries, settings_obj.duplicate_punch_ignore_seconds)
-        in_punches = all_times
-        out_punches = all_times
+        clean_times = remove_duplicate_punches(
+            punch_entries, settings_obj.duplicate_punch_ignore_seconds,
+        )
+        records = [{'punch_time': punch_time, 'device_role': 'BOTH'} for punch_time in clean_times]
+        has_dedicated_roles = False
 
-    if not all_times:
+    if not records:
         return None
 
-    # 1. PUNCH IN: Always the earliest punch of the day
-    punch_in = in_punches[0] if in_punches else all_times[0]
-
-    # 2. PUNCH OUT: Must be an EXIT punch (PUNCH_OUT device or EVEN-numbered punch)
-    punch_out = None
-    if is_dict and any(e.get("device_role") == "PUNCH_OUT" for e in punch_entries):
-        # Dedicated device setup: Take latest punch from PUNCH_OUT device
-        out_device_punches = sorted([e["punch_time"] for e in punch_entries if e.get("device_role") == "PUNCH_OUT"])
-        if out_device_punches:
-            punch_out = out_device_punches[-1]
+    intervals = []
+    if has_dedicated_roles:
+        active_in = None
+        punch_in = None
+        punch_out = None
+        for record in records:
+            punch_time = record['punch_time']
+            role = record['device_role']
+            if role == 'PUNCH_IN' or (role == 'BOTH' and active_in is None):
+                if active_in is None:
+                    active_in = punch_time
+                    if punch_in is None:
+                        punch_in = punch_time
+            elif role == 'PUNCH_OUT' or (role == 'BOTH' and active_in is not None):
+                if active_in is not None and punch_time > active_in:
+                    intervals.append((active_in, punch_time))
+                    punch_out = punch_time
+                    active_in = None
     else:
-        # BOTH devices / Single device setup: Take latest EVEN-numbered punch
-        total_count = len(all_times)
-        if total_count >= 2:
-            if total_count % 2 == 0:
-                punch_out = all_times[-1]  # Even count (2, 4) -> Last punch is an OUT punch
-            else:
-                punch_out = all_times[-2]  # Odd count (3, 5) -> Second-to-last punch is the OUT punch
+        all_times = [record['punch_time'] for record in records]
+        punch_in = all_times[0]
+        punch_out = all_times[-1] if len(all_times) % 2 == 0 else (all_times[-2] if len(all_times) >= 2 else None)
+        for index in range(0, len(all_times) - 1, 2):
+            end_index = index + 1
+            if end_index >= len(all_times) or all_times[end_index] > punch_out:
+                break
+            intervals.append((all_times[index], all_times[end_index]))
 
-    total_punches = len(all_times)
+    total_punches = len(records)
     missing_punch = punch_out is None or punch_in is None
 
     working_time = timedelta()
-    if punch_in and punch_out:
+    if punch_in and punch_out and punch_out > punch_in:
         working_time = punch_out - punch_in
 
-    inferred_break_seconds = int(calculate_break_time(all_times).total_seconds()) if len(all_times) >= 4 else 0
+    paired_work_seconds = sum(
+        max(int((end - start).total_seconds()), 0) for start, end in intervals
+    )
+    inferred_break_seconds = max(
+        int(working_time.total_seconds()) - paired_work_seconds, 0,
+    )
     lunch_overlap_seconds = _calculate_lunch_overlap(punch_in, punch_out, settings_obj) if punch_in and punch_out else 0
     total_break_seconds = max(inferred_break_seconds, lunch_overlap_seconds)
     
@@ -298,10 +336,11 @@ def persist_raw_logs(logs):
             saved += 1
     return saved
 
-def process_attendance_period(logs, settings_obj, start_date, end_date):
-    persist_raw_logs(logs)
+def process_attendance_period(logs, settings_obj, start_date, end_date, persist=True, delete_missing=True):
+    if persist:
+        persist_raw_logs(logs)
 
-    # Group ALL punches by (employee, date) — merge across all devices
+    # Group ALL punches by (employee, date), retaining device roles for pairing.
     grouped_logs = defaultdict(list)
     for log in logs:
         employee_code = normalize_employee_code(log["employee_code"])
@@ -310,7 +349,11 @@ def process_attendance_period(logs, settings_obj, start_date, end_date):
         punch_time = _make_aware(log["punch_time"])
         attendance_date = timezone.localtime(punch_time).date()
         if start_date <= attendance_date <= end_date:
-            grouped_logs[(employee_code, attendance_date)].append(punch_time)
+            grouped_logs[(employee_code, attendance_date)].append({
+                'punch_time': punch_time,
+                'device_serial': log.get('device_serial', ''),
+                'device_role': log.get('device_role', 'BOTH'),
+            })
 
     attendance_rows = []
     codes_by_date = defaultdict(list)
@@ -322,12 +365,13 @@ def process_attendance_period(logs, settings_obj, start_date, end_date):
             attendance_rows.append(attendance)
             codes_by_date[attendance_date].append(employee_code)
 
-    current_date = start_date
-    while current_date <= end_date:
-        DailyAttendance.objects.filter(attendance_date=current_date).exclude(
-            employee_code__in=codes_by_date.get(current_date, [])
-        ).exclude(is_manual_override=True).delete()
-        current_date += timedelta(days=1)
+    if delete_missing:
+        current_date = start_date
+        while current_date <= end_date:
+            DailyAttendance.objects.filter(attendance_date=current_date).exclude(
+                employee_code__in=codes_by_date.get(current_date, [])
+            ).exclude(is_manual_override=True).delete()
+            current_date += timedelta(days=1)
 
     return sorted(attendance_rows, key=lambda row: (row.attendance_date, row.employee_code))
 

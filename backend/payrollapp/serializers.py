@@ -14,6 +14,7 @@ from rest_framework import serializers
 from .models import (
     SalaryComponent, SalaryStructure, SalaryStructureComponent,
     StatutoryRule, PayCalendar, EmployeeSalaryAssignment,
+    EmployeeSalaryAssignmentComponent,
     EmployeePayrollProfile, PayrollRun, PayrollRunEmployee,
     PayrollRunComponentDetail, PaymentBatch, PaymentBatchLine,
     PayslipRequest, PayslipRequestApprovalAction, PayrollAuditLog, ArrearsLog, PayrollRunAdjustment,
@@ -191,6 +192,30 @@ class SalaryStructureCreateSerializer(serializers.ModelSerializer):
         return instance
 
 
+class EmployeeSalaryAssignmentComponentSerializer(serializers.ModelSerializer):
+    component_name = serializers.CharField(source='component.name', read_only=True)
+    component_code = serializers.CharField(source='component.code', read_only=True)
+    component_type = serializers.CharField(source='component.component_type', read_only=True)
+
+    class Meta:
+        model = EmployeeSalaryAssignmentComponent
+        fields = [
+            'id', 'component', 'component_name', 'component_code', 'component_type',
+            'amount', 'percentage_of_basic', 'is_enabled', 'display_order',
+        ]
+        read_only_fields = ['id']
+
+
+class EmployeeSalaryAssignmentComponentCreateSerializer(serializers.Serializer):
+    component = serializers.PrimaryKeyRelatedField(
+        queryset=SalaryComponent.objects.all(),
+    )
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=Decimal('0'))
+    percentage_of_basic = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, default=Decimal('0'))
+    is_enabled = serializers.BooleanField(required=False, default=True)
+    display_order = serializers.IntegerField(required=False, default=0)
+
+
 # ==============================================================================
 # 3. STATUTORY RULE
 # ==============================================================================
@@ -321,12 +346,14 @@ class EmployeeSalaryAssignmentSerializer(serializers.ModelSerializer):
         source='created_by.full_name', read_only=True, default=None,
     )
     is_current = serializers.SerializerMethodField()
+    components = EmployeeSalaryAssignmentComponentSerializer(many=True, read_only=True)
 
     class Meta:
         model = EmployeeSalaryAssignment
         fields = [
             'id', 'employee', 'employee_name', 'employee_code',
             'structure', 'structure_name',
+            'components',
             'ctc_annual', 'ctc_monthly', 'fixed_salary_monthly',
             'effective_from', 'effective_to',
             'is_current', 'reason', 'increment_interval_months',
@@ -345,10 +372,12 @@ class EmployeeSalaryAssignmentCreateSerializer(serializers.ModelSerializer):
     Overlap validation is handled in the view via AssignmentService.
     """
 
+    components = EmployeeSalaryAssignmentComponentCreateSerializer(many=True, required=False)
+
     class Meta:
         model = EmployeeSalaryAssignment
         fields = [
-            'employee', 'structure',
+            'employee', 'structure', 'components',
             'ctc_annual', 'ctc_monthly', 'fixed_salary_monthly',
             'effective_from', 'effective_to',
             'reason', 'increment_interval_months',
@@ -367,6 +396,13 @@ class EmployeeSalaryAssignmentCreateSerializer(serializers.ModelSerializer):
         return employee
 
     def validate(self, attrs):
+        components = attrs.get('components')
+        if components is not None:
+            component_ids = [row['component'].id for row in components]
+            if len(component_ids) != len(set(component_ids)):
+                raise serializers.ValidationError({
+                    'components': 'A component can only be included once in an assignment.',
+                })
         employee = attrs['employee']
         # If a client omits the date, default the assignment start to the
         # employee's joining date. Clients may still send an edited date.
@@ -668,8 +704,16 @@ class PreviewBreakdownSerializer(serializers.Serializer):
     ctc_monthly = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     ctc_annual = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
     effective_from = serializers.DateField(required=False)
+    components = EmployeeSalaryAssignmentComponentCreateSerializer(many=True, required=False)
 
     def validate(self, attrs):
+        components = attrs.get('components')
+        if components is not None:
+            component_ids = [row['component'].id for row in components]
+            if len(component_ids) != len(set(component_ids)):
+                raise serializers.ValidationError({
+                    'components': 'A component can only be included once in a preview.',
+                })
         structure_id = attrs.get('structure') or attrs.get('structure_id')
         if not structure_id:
             raise serializers.ValidationError({'structure_id': 'This field is required.'})

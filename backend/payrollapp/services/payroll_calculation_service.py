@@ -339,7 +339,9 @@ class PayrollCalculationService:
         tax_assignment = AssignmentService.get_assignment_for_period(
             employee, payment_period_start, payment_date,
         ).order_by('-effective_from').first() or assignment
-        structure_components = tax_assignment.structure.components.select_related('component').all()
+        structure_components = AssignmentService.get_components_for_assignment(
+            tax_assignment, enabled_only=True,
+        )
         tds_component = next((
             item for item in structure_components if item.component.code == 'TDS'
         ), None)
@@ -348,6 +350,7 @@ class PayrollCalculationService:
             taxable_monthly_projection = Decimal('0')
             breakdown = AssignmentService.preview_breakdown(
                 tax_assignment.structure, tax_assignment.ctc_monthly, as_of_date=payment_date,
+                component_rows=AssignmentService.get_components_for_assignment(tax_assignment),
             )
             taxable_monthly_projection = sum((
                 Decimal(str(item.get('amount', 0))) for item in breakdown.get('earnings', [])
@@ -424,7 +427,8 @@ class PayrollCalculationService:
         Internal: pure computation. No DB writes.
         Returns a dict with everything needed to persist or preview.
         """
-        from ..models import SalaryStructureComponent, EmployeePayrollProfile
+        from ..models import EmployeePayrollProfile
+        from .assignment_service import AssignmentService
 
         parser = FormulaParser()
 
@@ -468,10 +472,8 @@ class PayrollCalculationService:
             raise PayrollCalculationError('Pay period must contain at least one calendar day.')
 
         # Get structure components (ordered)
-        structure_comps = SalaryStructureComponent.objects.filter(
-            structure=structure, is_enabled=True,
-        ).select_related('component').order_by(
-            'component__component_type', 'component__display_order',
+        structure_comps = AssignmentService.get_components_for_assignment(
+            assignment, enabled_only=True,
         )
 
         # Get employee's payroll profile for tax regime + jurisdiction

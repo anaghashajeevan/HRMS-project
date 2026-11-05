@@ -328,6 +328,34 @@ class EmployeeSalaryAssignment(models.Model):
         return f"{self.employee} — ₹{self.ctc_monthly} ({self.effective_from} → {end})"
 
 
+class EmployeeSalaryAssignmentComponent(models.Model):
+    """Per-assignment copy of a structure component, including employee overrides."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    assignment = models.ForeignKey(
+        EmployeeSalaryAssignment, on_delete=models.CASCADE, related_name='components',
+    )
+    component = models.ForeignKey(SalaryComponent, on_delete=models.PROTECT)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    percentage_of_basic = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    is_enabled = models.BooleanField(default=True)
+    display_order = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'payroll_salary_assignment_components'
+        ordering = ['component__component_type', 'display_order', 'component__code']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['assignment', 'component'],
+                name='uniq_assignment_salary_component',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.assignment_id} → {self.component.code}"
+
+
 # ==============================================================================
 # 7. EMPLOYEE PAYROLL PROFILE (Encrypted bank + statutory IDs, versioned)
 # ==============================================================================

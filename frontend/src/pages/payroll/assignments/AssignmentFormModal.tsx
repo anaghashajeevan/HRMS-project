@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import SearchableSelect from '../../../components/SearchableSelect';
-import { getPayrollEmployees, getStructures, createAssignment, previewStructure } from '../../../api/payrollApi';
+import { getPayrollEmployees, getStructures, getStructure, getComponentsMini, createAssignment, previewStructure } from '../../../api/payrollApi';
 
 const inputCls =
   'block w-full rounded-xl border-0 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-blue-500 transition';
@@ -17,6 +17,10 @@ interface Props {
 export default function AssignmentFormModal({ onClose, onSaved }: Props) {
   const [employees, setEmployees] = useState<any[]>([]);
   const [structures, setStructures] = useState<any[]>([]);
+  const [componentOptions, setComponentOptions] = useState<any[]>([]);
+  const [assignmentComponents, setAssignmentComponents] = useState<any[]>([]);
+  const [componentToAdd, setComponentToAdd] = useState('');
+  const [componentsLoading, setComponentsLoading] = useState(false);
   const [form, setForm] = useState({
     employee: '',
     structure: '',
@@ -33,6 +37,7 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [employeesLoading, setEmployeesLoading] = useState(true);
   const previewRequestId = useRef(0);
+  const structureRequestId = useRef(0);
 
   useEffect(() => {
     getPayrollEmployees()
@@ -42,14 +47,37 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
     getStructures({ is_active: 'true' } as any)
       .then((r) => setStructures(r.data.results || r.data))
       .catch(() => {});
+    getComponentsMini().then((r) => setComponentOptions(r.data || [])).catch(() => {});
   }, []);
+
+  const updateComponent = (index: number, field: string, value: any) => {
+    setAssignmentComponents((rows) => rows.map((row, i) => i === index ? { ...row, [field]: value } : row));
+    setPreview(null);
+  };
+
+  const addComponent = () => {
+    if (!componentToAdd || assignmentComponents.some((row) => row.component === componentToAdd)) return;
+    const option = componentOptions.find((item) => item.id === componentToAdd);
+    setAssignmentComponents((rows) => [...rows, {
+      component: componentToAdd,
+      component_code: option?.code,
+      component_name: option?.name,
+      component_type: option?.component_type,
+      amount: '0',
+      percentage_of_basic: '0',
+      is_enabled: true,
+      display_order: rows.length,
+    }]);
+    setComponentToAdd('');
+    setPreview(null);
+  };
 
   const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
 
   useEffect(() => {
     const requestId = ++previewRequestId.current;
     const annualCtc = Number(form.ctc_annual);
-    if (!form.structure || !Number.isFinite(annualCtc) || annualCtc <= 0 || !form.effective_from) {
+    if (!form.structure || componentsLoading || !Number.isFinite(annualCtc) || annualCtc <= 0 || !form.effective_from) {
       setPreview(null);
       setPreviewError('');
       setPreviewLoading(false);
@@ -66,6 +94,9 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
           structure_id: form.structure,
           ctc_annual: annualCtc,
           effective_from: form.effective_from,
+          components: assignmentComponents.map(({ component, amount, percentage_of_basic, is_enabled, display_order }) => ({
+            component, amount: amount || '0', percentage_of_basic: percentage_of_basic || '0', is_enabled, display_order,
+          })),
         });
         if (requestId !== previewRequestId.current) return;
         setPreview(response.data);
@@ -83,7 +114,7 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
     }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [form.structure, form.ctc_annual, form.effective_from]);
+  }, [form.structure, form.ctc_annual, form.effective_from, assignmentComponents, componentsLoading]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,6 +130,9 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
         structure: form.structure,
         ctc_annual: parseFloat(form.ctc_annual),
         effective_from: form.effective_from,
+        components: assignmentComponents.map(({ component, amount, percentage_of_basic, is_enabled, display_order }) => ({
+          component, amount: amount || '0', percentage_of_basic: percentage_of_basic || '0', is_enabled, display_order,
+        })),
         increment_interval_months: form.increment_interval_months ? Number(form.increment_interval_months) : null,
         reason: form.reason || null,
       });
@@ -112,7 +146,7 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-gray-100">
+      <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl ring-1 ring-gray-100">
         <div className="mb-5 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-900">Assign Salary</h3>
           <button onClick={onClose} className="rounded-lg p-1 hover:bg-gray-100 transition">
@@ -155,14 +189,39 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
               className={inputCls}
               value={form.structure}
               onChange={(e) => {
+                const requestId = ++structureRequestId.current;
+                const structureId = e.target.value;
                 setForm((current) => ({
                   ...current,
-                  structure: e.target.value,
+                  structure: structureId,
                   fixed_salary_monthly: '',
                 }));
+                setAssignmentComponents([]);
                 setPreview(null);
                 setPreviewError('');
                 setError('');
+                setComponentsLoading(Boolean(structureId));
+                if (structureId) {
+                  getStructure(structureId).then((response) => {
+                    if (requestId !== structureRequestId.current) return;
+                    setAssignmentComponents((response.data.components || []).map((row: any, index: number) => ({
+                      component: row.component?.id || row.component,
+                      component_code: row.component_code,
+                      component_name: row.component_name,
+                      component_type: row.component_type,
+                      amount: row.amount ?? '0',
+                      percentage_of_basic: row.percentage_of_basic ?? '0',
+                      is_enabled: row.is_enabled ?? true,
+                      display_order: row.display_order ?? index,
+                    })));
+                    setComponentsLoading(false);
+                  }).catch((err: any) => {
+                    if (requestId === structureRequestId.current) {
+                      setComponentsLoading(false);
+                      setError(err?.response?.data?.detail || 'Could not load the selected structure components.');
+                    }
+                  });
+                }
               }}
             >
               <option value="">Select structure…</option>
@@ -171,6 +230,44 @@ export default function AssignmentFormModal({ onClose, onSaved }: Props) {
               ))}
             </select>
           </div>
+
+          {form.structure && (
+            <div className="rounded-xl border border-gray-200 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-800">Employee Components</h4>
+                  <p className="text-xs text-gray-500">Changes here apply to this assignment only. The saved structure template stays unchanged.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select className="max-w-56 rounded-lg border-0 bg-gray-50 px-3 py-2 text-xs ring-1 ring-inset ring-gray-200" value={componentToAdd} onChange={(e) => setComponentToAdd(e.target.value)}>
+                    <option value="">Add component…</option>
+                    {componentOptions.filter((option) => !assignmentComponents.some((row) => row.component === option.id)).map((option) => (
+                      <option key={option.id} value={option.id}>{option.code} — {option.name}</option>
+                    ))}
+                  </select>
+                  <button type="button" onClick={addComponent} disabled={!componentToAdd} className="rounded-lg bg-gray-100 px-3 py-2 text-xs font-medium text-gray-700 disabled:opacity-50">Add</button>
+                </div>
+              </div>
+              {componentsLoading && <p className="py-3 text-center text-sm text-blue-600">Loading structure components…</p>}
+              {!componentsLoading && assignmentComponents.length === 0 && <p className="py-3 text-center text-sm text-gray-400">No components loaded. Add at least the required salary components.</p>}
+              <div className="space-y-2">
+                {assignmentComponents.map((row, index) => (
+                  <div key={row.component} className="grid grid-cols-[minmax(0,1fr)_110px_110px_auto_auto] items-center gap-2 rounded-lg bg-gray-50 p-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-gray-800">{row.component_code} — {row.component_name}</div>
+                      <div className="text-xs text-gray-500">{row.component_type}</div>
+                    </div>
+                    <input aria-label={`${row.component_name} amount`} type="number" step="0.01" className="w-full rounded-lg border-0 bg-white px-2 py-2 text-sm ring-1 ring-inset ring-gray-200" value={row.amount} onChange={(e) => updateComponent(index, 'amount', e.target.value)} placeholder="Amount" />
+                    <input aria-label={`${row.component_name} percentage`} type="number" step="0.01" className="w-full rounded-lg border-0 bg-white px-2 py-2 text-sm ring-1 ring-inset ring-gray-200" value={row.percentage_of_basic} onChange={(e) => updateComponent(index, 'percentage_of_basic', e.target.value)} placeholder="% of Basic" />
+                    <label className="flex items-center gap-1 whitespace-nowrap text-xs text-gray-600">
+                      <input type="checkbox" checked={row.is_enabled} onChange={(e) => updateComponent(index, 'is_enabled', e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" /> Enabled
+                    </label>
+                    <button type="button" onClick={() => { setAssignmentComponents((rows) => rows.filter((_, i) => i !== index)); setPreview(null); }} className="rounded-lg px-2 py-1 text-xs text-red-600 hover:bg-red-50">Remove</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600">Annual CTC (₹) *</label>

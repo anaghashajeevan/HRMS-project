@@ -368,6 +368,7 @@ class StatutoryService:
                         assignment.structure,
                         assignment.ctc_monthly,
                         as_of_date=month_end,
+                        component_rows=AssignmentService.get_components_for_assignment(assignment),
                     )
                     full_month_taxable = sum(
                         (Decimal(str(row.get('amount', 0))) for row in breakdown.get('earnings', [])

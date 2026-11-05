@@ -32,7 +32,7 @@ from HRMSapp.permissions import IsHRAdmin
 
 from .models import (
     PayrollRun, SalaryComponent, SalaryStructure, SalaryStructureComponent,
-    StatutoryRule, PayCalendar, EmployeeSalaryAssignment,
+    StatutoryRule, PayCalendar, EmployeeSalaryAssignment, EmployeeSalaryAssignmentComponent,
     EmployeePayrollProfile, PayrollRunAdjustment, PayrollRunEmployee,
     PayrollRunComponentDetail, PayrollAuditLog, PayslipRequest, PayslipRequestApprovalAction,
     PaymentBatch, PaymentBatchLine, PayrollRunApprovalAction,
@@ -753,7 +753,7 @@ class EmployeeSalaryAssignmentViewSet(ModelViewSet):
     """
     queryset = EmployeeSalaryAssignment.objects.all().select_related(
         'employee', 'structure', 'created_by',
-    )
+    ).prefetch_related('components__component')
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['employee', 'structure']
     search_fields = ['employee__employee_id', 'employee__first_name']
@@ -797,9 +797,14 @@ class EmployeeSalaryAssignmentViewSet(ModelViewSet):
         structure = serializer.validated_data['structure']
         ctc_monthly = serializer.validated_data['ctc_monthly']
         effective_from = serializer.validated_data['effective_from']
+        component_values = serializer.validated_data.get('components')
+        component_rows = None if component_values is None else [
+            EmployeeSalaryAssignmentComponent(**row) for row in component_values
+        ]
         try:
             salary_preview = AssignmentService.preview_breakdown(
                 structure, ctc_monthly, as_of_date=effective_from,
+                component_rows=component_rows,
             )
         except Exception as exc:
             logger.exception('Could not preview salary assignment')
@@ -831,6 +836,7 @@ class EmployeeSalaryAssignmentViewSet(ModelViewSet):
                 reason=serializer.validated_data.get('reason', ''),
                 increment_interval_months=serializer.validated_data.get('increment_interval_months', 12),
                 created_by=getattr(request.user, 'employee', None),
+                components=component_values,
             )
         except AssignmentError as exc:
             return Response({'detail': str(exc)}, status=400)
@@ -1235,6 +1241,10 @@ class PreviewCalculationView(APIView):
             structure,
             ctc_monthly,
             as_of_date=serializer.validated_data.get('effective_from'),
+            component_rows=(
+                [EmployeeSalaryAssignmentComponent(**row) for row in serializer.validated_data['components']]
+                if 'components' in serializer.validated_data else None
+            ),
         )
 
         return Response({
