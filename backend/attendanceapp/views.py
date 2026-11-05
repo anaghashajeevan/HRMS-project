@@ -776,7 +776,7 @@ class DownloadMonthlyReportView(APIView):
 # EMPLOYEE MY-ATTENDANCE VIEWS (FIXED & IMPROVED)
 # ==============================================================================
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from .services.personal_attendance_service import (
     get_monthly_attendance_for_employee,
     get_day_detail_for_employee,
@@ -814,7 +814,18 @@ class MyAttendanceMonthView(APIView):
         month = int(request.query_params.get('month', timezone.now().month))
 
         try:
-            data = get_monthly_attendance_for_employee(employee, year, month)
+            from .services.personal_attendance_service import _ensure_attendance_processed_for_period
+            month_start = datetime(year, month, 1).date()
+            if month == 12:
+                month_end = datetime(year, 12, 31).date()
+            else:
+                month_end = (date(year, month + 1, 1) - timedelta(days=1))
+            server_available = _ensure_attendance_processed_for_period(
+                month_start, month_end, employee=employee,
+            )
+            data = get_monthly_attendance_for_employee(
+                employee, year, month, server_off=not server_available,
+            )
             return Response(data)
         except Exception as exc:
             logger.exception("Failed to load monthly attendance")
@@ -930,7 +941,18 @@ class EmployeeAttendanceMonthView(APIView):
         month = int(request.query_params.get('month', timezone.now().month))
 
         try:
-            data = get_monthly_attendance_for_employee(target_employee, year, month)
+            from .services.personal_attendance_service import _ensure_attendance_processed_for_period
+            month_start = datetime(year, month, 1).date()
+            if month == 12:
+                month_end = datetime(year, 12, 31).date()
+            else:
+                month_end = (date(year, month + 1, 1) - timedelta(days=1))
+            server_available = _ensure_attendance_processed_for_period(
+                month_start, month_end, employee=target_employee,
+            )
+            data = get_monthly_attendance_for_employee(
+                target_employee, year, month, server_off=not server_available,
+            )
             return Response(data)
         except Exception as exc:
             logger.exception("Failed to load employee attendance")

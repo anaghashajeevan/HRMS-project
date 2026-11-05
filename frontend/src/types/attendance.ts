@@ -251,6 +251,7 @@ export type DayStatus =
   | 'wfh' 
   | 'site_visit' 
   | 'manual_present'
+  | 'server_off'
   | 'before_joining' | 'before_system_start';  
 
 export interface DayEntry {
@@ -262,6 +263,7 @@ export interface DayEntry {
   is_holiday: boolean;
   is_future: boolean;
   is_today: boolean;
+  essl_server_off?: boolean;
   punch_in: string | null;
   punch_out: string | null;
   total_punches: number;
@@ -319,10 +321,12 @@ export interface MonthlyAttendanceData {
   employee: EmployeeInfo;
   stats: MonthlyStats;
   days: DayEntry[];
+  essl_server_off?: boolean;
 }
 
 export interface DayDetailData {
   date: string;
+  essl_server_off?: boolean;
   day_name: string;
   employee: {
     id: string;
@@ -359,6 +363,7 @@ export interface TeamAttendanceData {
   year: number;
   month: number;
   month_label: string;
+  essl_server_off?: boolean;
   manager: {
     id: string;
     employee_id: string;
@@ -385,6 +390,7 @@ export interface AllEmployeesAttendanceData {
   year: number;
   month: number;
   month_label: string;
+  essl_server_off?: boolean;
   total_employees: number;
   total_shortage: number;
   total_on_leave: number; 

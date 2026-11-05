@@ -1280,66 +1280,56 @@ def _ensure_attendance_processed_for_period(start_date: date, end_date: date, em
     """
     today = timezone.localdate()
     effective_end = min(end_date, today)
-    if start_date > effective_end:
-        return
-
     settings_obj = AutomationSettings.get_solo()
+    server_available = False
 
     # 1) Sync from eSSL (best effort — if device is down, uses cached DB punches)
     try:
         from datetime import datetime, time as dtime
         from .essl_service import fetch_logs_for_range
         from .attendance_processor import persist_raw_logs
-        from ..models import normalize_employee_code
-
-        mode, logs = fetch_logs_for_range(
-            datetime.combine(start_date, dtime.min),
-            datetime.combine(effective_end, dtime(23, 59, 59)),
+        mode, today_logs = fetch_logs_for_range(
+            datetime.combine(today, dtime.min),
+            datetime.combine(today, dtime(23, 59, 59)),
+            timeout_seconds=5,
+            fail_fast=True,
         )
-        if logs and employee is not None:
-            target = normalize_employee_code(employee.employee_id)
-            logs = [
-                log
-                for log in logs
-                if normalize_employee_code(log.get("employee_code")) == target
-            ]
-        if logs:
-            persist_raw_logs(logs)
-            # also process below from raw or from logs
+        server_available = mode != "EMPTY"
+        if today_logs:
+            persist_raw_logs(today_logs)
     except Exception as exc:
         logger.warning(
-            "eSSL sync skipped for personal attendance (%s to %s): %s",
+            "eSSL unavailable while loading attendance (%s to %s): %s",
             start_date,
             effective_end,
             exc,
         )
 
-    # 2) Build DailyAttendance rows from RawPunchLog
-    from .attendance_processor import process_attendance_period
+    # Only fetch the selected history after the short current-server probe works.
+    if server_available and start_date <= effective_end and (start_date, effective_end) != (today, today):
+        try:
+            mode, period_logs = fetch_logs_for_range(
+                datetime.combine(start_date, dtime.min),
+                datetime.combine(effective_end, dtime(23, 59, 59)),
+                timeout_seconds=8,
+            )
+            if period_logs:
+                persist_raw_logs(period_logs)
+        except Exception as exc:
+            logger.warning("Historical eSSL sync skipped (%s to %s): %s", start_date, effective_end, exc)
 
-    raw_qs = RawPunchLog.objects.filter(
-        punch_date__gte=start_date,
-        punch_date__lte=effective_end,
-    )
-    if employee is not None:
-        raw_qs = raw_qs.filter(
-            employee_code__iexact=employee.employee_id
-        ) | raw_qs.filter(employee=employee)
+    # Rebuild from cached punches without deleting rows when eSSL is unavailable.
+    if start_date <= effective_end:
+        from .attendance_processor import process_saved_raw_punches
 
-    raw_rows = list(raw_qs.values("employee_code", "punch_time", "raw_line"))
-    if not raw_rows:
-        return
+        process_saved_raw_punches(
+            settings_obj,
+            start_date,
+            effective_end,
+            employee_code=employee.employee_id if employee is not None else None,
+        )
 
-    logs = [
-        {
-            "employee_code": row["employee_code"],
-            "punch_time": row["punch_time"],
-            "raw_line": row.get("raw_line") or "",
-        }
-        for row in raw_rows
-    ]
-
-    process_attendance_period(logs, settings_obj, start_date, effective_end)
+    return server_available
 
 
 def _ensure_month_attendance_for_all(year: int, month: int):
@@ -1351,14 +1341,16 @@ def _ensure_month_attendance_for_all(year: int, month: int):
     _, last_day = calendar.monthrange(year, month)
     end_date = date(year, month, last_day)
 
-    _ensure_attendance_processed_for_period(start_date, end_date, employee=None)
+    return _ensure_attendance_processed_for_period(start_date, end_date, employee=None)
 
 
 # ==============================================================================
 # PERSONAL ATTENDANCE PUBLIC SERVICES
 # ==============================================================================
 
-def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_sync: bool = False):
+def get_monthly_attendance_for_employee(
+    employee, year: int, month: int, ensure_sync: bool = False, server_off: bool = False,
+):
     settings_obj = AutomationSettings.get_solo()
     today = timezone.localdate()
 
@@ -1377,6 +1369,7 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
             'month': month,
             'month_label': date(year, month, 1).strftime('%B %Y'),
             'no_attendance_data': True,
+            'essl_server_off': server_off,
             'message': f"Attendance tracking started from {sys_start_date.strftime('%B %Y')}",
             'employee': {
                 'id': str(employee.id),
@@ -1457,6 +1450,9 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
             row, current, holiday_dates, leaves_by_date, is_future, today, 
             joining_date=joining_date, sys_start_date=sys_start_date
         )
+        server_off_today = server_off and current == today
+        if server_off_today and (not row or row.missing_punch) and status in ('absent', 'missing_punch'):
+            status = 'server_off'
 
         # Count working days ONLY IF it's on/after DOJ and System Start Date
         is_working_day = (
@@ -1468,7 +1464,7 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
         
         if is_working_day:
             working_days_in_month += 1
-            if not is_future:
+            if not is_future and not server_off_today:
                 working_days_elapsed += 1
 
         worked_seconds = row.net_working_hours_seconds if row else 0
@@ -1559,6 +1555,7 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
         'month_label': date(year, month, 1).strftime('%B %Y'),
         'start_date': start_date.isoformat(),
         'end_date': end_date.isoformat(),
+        'essl_server_off': server_off,
         'employee': {
             'id': str(employee.id),
             'employee_id': employee.employee_id,
@@ -1602,7 +1599,7 @@ def get_monthly_attendance_for_employee(employee, year: int, month: int, ensure_
 
 def get_day_detail_for_employee(employee, day: date):
     """Get full punch details + leave info for one day."""
-    _ensure_attendance_processed_for_period(day, day, employee=employee)
+    server_available = _ensure_attendance_processed_for_period(day, day, employee=employee)
 
     attendance = DailyAttendance.objects.filter(
         employee=employee,
@@ -1635,6 +1632,7 @@ def get_day_detail_for_employee(employee, day: date):
 
     return {
         'date': day.isoformat(),
+        'essl_server_off': day == timezone.localdate() and not server_available,
         'day_name': day.strftime('%A'),
         'employee': {
             'id': str(employee.id),
@@ -1675,7 +1673,7 @@ def get_team_monthly_summary(manager_employee, year: int, month: int):
     from HRMSapp.models import Employee
 
     # Bulk sync for the entire month once
-    _ensure_month_attendance_for_all(year, month)
+    server_available = _ensure_month_attendance_for_all(year, month)
 
     team_members = Employee.objects.filter(
         reporting_manager=manager_employee,
@@ -1687,7 +1685,7 @@ def get_team_monthly_summary(manager_employee, year: int, month: int):
     for member in team_members:
         try:
             month_data = get_monthly_attendance_for_employee(
-                member, year, month, ensure_sync=False
+                member, year, month, ensure_sync=False, server_off=not server_available
             )
             team_data.append({
                 'employee': month_data['employee'],
@@ -1709,6 +1707,7 @@ def get_team_monthly_summary(manager_employee, year: int, month: int):
         'year': year,
         'month': month,
         'month_label': date(year, month, 1).strftime('%B %Y'),
+        'essl_server_off': not server_available,
         'manager': {
             'id': str(manager_employee.id),
             'employee_id': manager_employee.employee_id,
@@ -1727,7 +1726,7 @@ def get_all_employees_monthly_summary(year: int, month: int, filters: dict = Non
     from HRMSapp.models import Employee
 
     # Bulk sync for the entire month once
-    _ensure_month_attendance_for_all(year, month)
+    server_available = _ensure_month_attendance_for_all(year, month)
 
     filters = filters or {}
     qs = Employee.objects.filter(
@@ -1754,7 +1753,7 @@ def get_all_employees_monthly_summary(year: int, month: int, filters: dict = Non
     for emp in qs:
         try:
             month_data = get_monthly_attendance_for_employee(
-                emp, year, month, ensure_sync=False
+                emp, year, month, ensure_sync=False, server_off=not server_available
             )
             employees_data.append({
                 'employee': month_data['employee'],
@@ -1802,6 +1801,7 @@ def get_all_employees_monthly_summary(year: int, month: int, filters: dict = Non
         'year': year,
         'month': month,
         'month_label': date(year, month, 1).strftime('%B %Y'),
+        'essl_server_off': not server_available,
         'total_employees': len(employees_data),
         'total_shortage': round(total_shortage, 2),
         'total_on_leave': total_on_leave,

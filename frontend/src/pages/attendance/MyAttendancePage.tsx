@@ -1010,6 +1010,7 @@ const STATUS_STYLES: Record<DayStatus, { bg: string; text: string; label: string
   wfh: { bg: 'bg-indigo-50 border-indigo-200', text: 'text-indigo-700', label: 'WFH', dot: 'bg-indigo-500' },
   site_visit: { bg: 'bg-fuchsia-50 border-fuchsia-200', text: 'text-fuchsia-700', label: 'Site Visit', dot: 'bg-fuchsia-500' },
   manual_present: { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Manual Present', dot: 'bg-emerald-500' },
+  server_off: { bg: 'bg-orange-50 border-orange-300', text: 'text-orange-800', label: 'Server off', dot: 'bg-orange-500' },
   before_joining: { bg: 'bg-slate-50 border-slate-200', text: 'text-slate-400', label: 'Not joined', dot: 'bg-slate-300' },
   before_system_start: { bg: 'bg-slate-50 border-slate-100', text: 'text-slate-300', label: 'No data', dot: 'bg-slate-200' },
 };
@@ -1147,6 +1148,12 @@ export default function MyAttendancePage() {
               </div>
             </div>
           </div>
+
+          {data?.essl_server_off && (
+            <div className="mb-4 rounded-xl border border-orange-300 bg-orange-50 px-4 py-3 text-sm font-medium text-orange-800">
+              eSSL server off. Saved attendance through the previous day is shown; today is marked Server off and is not counted as absent.
+            </div>
+          )}
 
           {/* Month Navigation */}
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-gray-100">
@@ -1441,7 +1448,7 @@ function DayCard({ day, onClick, canAddSelf = false }: {
 }) {
   const style = STATUS_STYLES[day.status] || STATUS_STYLES.future;
   const isBlocked = day.status === 'before_joining' || day.status === 'before_system_start'
-    || day.is_future || day.status === 'holiday';
+    || day.is_future || day.status === 'holiday' || day.status === 'server_off';
     
   const canSelfAdd = canAddSelf && !isBlocked && !day.is_manual && (day.status === 'absent' || day.status === 'missing_punch' || day.status === 'weekend');
   const canSelfEdit = canAddSelf && !isBlocked && day.is_manual;
@@ -1485,6 +1492,10 @@ function DayCard({ day, onClick, canAddSelf = false }: {
         <div className="mt-1 text-[8px] font-semibold text-slate-400">
           {day.status === 'before_joining' ? 'Not joined' : 'No data'}
         </div>
+      )}
+
+      {day.status === 'server_off' && (
+        <div className="mt-1 text-[8px] font-bold text-orange-800">Server off</div>
       )}
 
       {canSelfAdd && <span className="mt-1 block text-[9px] font-bold text-indigo-600">+ Add</span>}

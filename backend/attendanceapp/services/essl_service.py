@@ -170,7 +170,10 @@ def test_connection(settings_obj):
 
 
 
-def call_essl_api_with_serial(api_url, username, password, serial_number, from_datetime, to_datetime):
+def call_essl_api_with_serial(
+    api_url, username, password, serial_number, from_datetime, to_datetime,
+    timeout_seconds=30,
+):
     """
     Same SOAP call as today, but serial/url/user/pass passed explicitly.
     """
@@ -210,7 +213,7 @@ def call_essl_api_with_serial(api_url, username, password, serial_number, from_d
             api_url,
             data=soap_body.encode("utf-8"),
             headers=headers,
-            timeout=30,
+            timeout=timeout_seconds,
             proxies={"http": None, "https": None},
         )
         response.raise_for_status()
@@ -223,7 +226,7 @@ def call_essl_api_with_serial(api_url, username, password, serial_number, from_d
 
     return response.text
 
-def fetch_logs_for_range(from_datetime, to_datetime):
+def fetch_logs_for_range(from_datetime, to_datetime, timeout_seconds=30, fail_fast=False):
     """
     Fetches punches from ALL active devices simultaneously.
     Each punch is tagged with device_serial for audit.
@@ -251,6 +254,7 @@ def fetch_logs_for_range(from_datetime, to_datetime):
                 item["serial"],
                 from_datetime,
                 to_datetime,
+                timeout_seconds=timeout_seconds,
             )
             _, str_data = extract_str_data_list(xml_text)
             logs = parse_punch_logs(str_data or "")
@@ -263,6 +267,8 @@ def fetch_logs_for_range(from_datetime, to_datetime):
                 "eSSL fetch failed serial=%s role=%s err=%s",
                 item.get("serial"), item.get("role"), exc,
             )
+            if fail_fast:
+                raise EsslServiceError(str(exc)) from exc
             errors.append(str(exc))
 
     if not all_logs and errors:

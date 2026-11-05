@@ -528,6 +528,12 @@ export default function AllEmployeesAttendancePage() {
             </button>
           </div>
 
+          {data?.essl_server_off && (
+            <div className="mb-4 rounded-xl border border-orange-300 bg-orange-50 px-4 py-3 text-sm font-medium text-orange-800">
+              eSSL server off. Showing saved attendance through the previous day. Today's attendance is marked Server off and is not counted as absent.
+            </div>
+          )}
+
           {/* Filters */}
           <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-gray-100">
             <div className="relative flex-1 min-w-[240px]">
