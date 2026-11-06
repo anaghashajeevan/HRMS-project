@@ -10,6 +10,8 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .project_management import ProjectManagementAPIError, fetch_projects
+
 from HRMSapp.models import Employee
 
 from .models import (
@@ -939,7 +941,7 @@ class QuickClaimUploadAPIView(APIView):
         if not uploaded_files:
             return Response({"detail": "At least one bill file is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        input_serializer = SmartUploadCreateSerializer(data=request.data)
+        input_serializer = SmartUploadCreateSerializer(data=request.data, context={"request": request})
         input_serializer.is_valid(raise_exception=True)
         prepared_bills = prepare_uploaded_bills(uploaded_files)
         upload = create_smart_upload(
@@ -1118,3 +1120,16 @@ class QuickClaimCancelAPIView(APIView):
         return Response(SmartReimbursementUploadSerializer(upload, context={"request": request}).data)
 
 
+class ClaimProjectListAPIView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        try:
+            projects = fetch_projects()
+        except ProjectManagementAPIError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response({"results": projects}, status=status.HTTP_200_OK)

@@ -154,6 +154,7 @@ def generate_combined_excel_report(batch_id: int) -> GeneratedReport:
         [
             "Employee Code",
             "Employee Name",
+            "Project",
             "Department",
             "Claim Status",
             "Expense Count",
@@ -180,6 +181,7 @@ def generate_combined_excel_report(batch_id: int) -> GeneratedReport:
             [
                 claim.employee.employee_id,
                 claim.employee.full_name,
+                " — ".join(value for value in (claim.project_code, claim.project_name) if value) or "-",
                 (claim.employee.structure_location.name if claim.employee.structure_location else "-"),
                 claim.status,
                 len(expense_items),
@@ -190,7 +192,7 @@ def generate_combined_excel_report(batch_id: int) -> GeneratedReport:
             ]
         )
 
-    for column in ("A", "B", "C", "D", "E", "F", "G", "H", "I"):
+    for column in ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J"):
         sheet.column_dimensions[column].width = 22
 
     filename = f"combined_reimbursement_report_batch_{batch.id}.xlsx"
@@ -221,6 +223,7 @@ def generate_employee_excel_report(claim_id: int) -> GeneratedReport:
         ["Employee Reimbursement Claim Report"],
         [f"Employee: {claim.employee.full_name} ({claim.employee.employee_id})"],
         [f"Department: {claim.employee.structure_location.name if claim.employee.structure_location else '-'}",],
+        [f"Project: {' — '.join(value for value in (claim.project_code, claim.project_name) if value) or '-'}"],
         [f"Batch: {claim.batch.title or f'Batch {claim.batch.month}/{claim.batch.year}'}"],
         [f"Claim Status: {claim.status}"],
         [f"Generated At: {_generated_timestamp()}"],

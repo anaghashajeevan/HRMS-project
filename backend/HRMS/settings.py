@@ -600,3 +600,7 @@ CELERY_BEAT_SCHEDULE = {
 # Allow PDF files to display inline in browser (not force download)
 import mimetypes
 mimetypes.add_type('application/pdf', '.pdf', True)
+
+
+PROJECT_MANAGEMENT_API_URL = os.environ.get("PROJECT_MANAGEMENT_API_URL", "").rstrip("/")
+PROJECT_MANAGEMENT_API_TOKEN = os.environ.get("PROJECT_MANAGEMENT_API_TOKEN", "")

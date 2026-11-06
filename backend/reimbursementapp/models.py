@@ -121,6 +121,13 @@ class ReimbursementClaim(models.Model):
         decimal_places=2,
         default=Decimal("0.00"),
     )
+    project_management_project_id = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    project_code = models.CharField(max_length=32, blank=True, default="")
+    project_name = models.CharField(max_length=255, blank=True, default="")
     remarks = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -449,7 +456,13 @@ class SmartReimbursementUpload(models.Model):
     sent_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    project_management_project_id = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    project_code = models.CharField(max_length=32, blank=True, default="")
+    project_name = models.CharField(max_length=255, blank=True, default="")
     class Meta:
         ordering = ["-created_at"]
 

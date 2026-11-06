@@ -343,3 +343,17 @@ export const reimbursementFormsApi = {
     return data;
   },
 };
+
+export interface ClaimProject {
+  id: number;
+  code: string | null;
+  title: string;
+  status: string;
+}
+
+export const claimProjectsApi = {
+  list: async (): Promise<ClaimProject[]> => {
+    const { data } = await api.get(`${BASE}/claim-projects/`);
+    return Array.isArray(data) ? data : data.results || [];
+  },
+};

@@ -218,6 +218,7 @@ def prepare_uploaded_bills(uploaded_files) -> list[dict]:
 @transaction.atomic
 def create_smart_upload(*, user, validated_data: dict, prepared_bills: list[dict]) -> SmartReimbursementUpload:
     profile = get_complete_reimbursement_profile(user)
+    project = validated_data.pop("_project_management_project")
     upload = SmartReimbursementUpload.objects.create(
         created_by=user,
         reimbursement_profile=profile,
@@ -230,6 +231,9 @@ def create_smart_upload(*, user, validated_data: dict, prepared_bills: list[dict
         auto_send=False,
         total_files=len(prepared_bills),
         status=SmartReimbursementUpload.Status.QUEUED,
+        project_management_project_id=project["id"],
+        project_code=project.get("code") or "",
+        project_name=project["title"],
     )
     for prepared in prepared_bills:
         bill = SmartUploadedBillFile(
@@ -358,6 +362,34 @@ def materialize_draft_expenses(upload: SmartReimbursementUpload) -> Reimbursemen
             source=ReimbursementClaim.Source.QUICK_BULK_UPLOAD,
             status=ReimbursementClaim.Status.SUBMITTED,
             remarks=f"Created from Smart Reimbursement Upload #{upload.id}.",
+            project_management_project_id=upload.project_management_project_id,
+            project_code=upload.project_code,
+            project_name=upload.project_name,
+        )
+        if existing_claim and not existing_claim.project_management_project_id:
+            existing_claim.project_management_project_id = upload.project_management_project_id
+            existing_claim.project_code = upload.project_code
+            existing_claim.project_name = upload.project_name
+            existing_claim.save(
+                update_fields=[
+                    "project_management_project_id",
+                    "project_code",
+                    "project_name",
+                    "updated_at",
+                ]
+            )
+
+    if not claim.project_management_project_id and upload.project_management_project_id:
+        claim.project_management_project_id = upload.project_management_project_id
+        claim.project_code = upload.project_code
+        claim.project_name = upload.project_name
+        claim.save(
+            update_fields=[
+                "project_management_project_id",
+                "project_code",
+                "project_name",
+                "updated_at",
+            ]
         )
 
     for draft in drafts:
