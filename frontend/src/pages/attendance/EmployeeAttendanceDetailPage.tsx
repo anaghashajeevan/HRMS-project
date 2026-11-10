@@ -1067,7 +1067,7 @@
 
 
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
 import {
   ChevronLeft, ChevronRight, Loader2, ArrowLeft, Clock,
@@ -1081,6 +1081,41 @@ import { personalAttendanceApi } from '../../api/attendance';
 import type { MonthlyAttendanceData, DayEntry, DayStatus } from '../../types/attendance';
 import { authApi } from '../../api/auth';
 import { isHrAdmin } from '../../utils/roles';
+import { leaveApplicationsApi, leaveBalancesApi, leaveTypesApi } from '../../api/leave';
+import type { LeaveBalance, LeaveTypeMini } from '../../types/leave';
+
+type EmployeeNavigationItem = { id: string; employee_id: string; full_name: string };
+
+const employeeMonthCache = new Map<string, MonthlyAttendanceData>();
+const employeeMonthRequests = new Map<string, Promise<MonthlyAttendanceData>>();
+
+function getEmployeeMonth(employeeId: string, year: number, month: number, skipDeviceSync = true, force = false) {
+  const key = `${employeeId}:${year}:${month}`;
+  const cached = force ? undefined : employeeMonthCache.get(key);
+  if (cached) return Promise.resolve(cached);
+  const pending = employeeMonthRequests.get(key);
+  if (pending) return pending;
+  const request = personalAttendanceApi.getEmployeeMonth(employeeId, year, month, skipDeviceSync)
+    .then((result) => {
+      employeeMonthCache.set(key, result);
+      return result;
+    })
+    .finally(() => employeeMonthRequests.delete(key));
+  employeeMonthRequests.set(key, request);
+  return request;
+}
+
+function getEmployeeNavigation(state: unknown): EmployeeNavigationItem[] {
+  const incoming = (state as { employeeNavigation?: EmployeeNavigationItem[] } | null)?.employeeNavigation;
+  if (incoming?.length) return incoming;
+  try {
+    const stored = sessionStorage.getItem('all-attendance-employee-navigation');
+    const parsed = stored ? JSON.parse(stored) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 const STATUS_STYLES: Record<DayStatus, { bg: string; text: string; label: string; dot: string }> = {
   present: { bg: 'bg-green-50 border-green-200', text: 'text-green-700', label: 'Present', dot: 'bg-green-500' },
@@ -1115,11 +1150,24 @@ export default function EmployeeAttendanceDetailPage() {
   const isFromAllView = location.pathname.startsWith('/all-attendance');
   const backUrl = isFromAllView ? '/all-attendance' : '/team-attendance';
   const backLabel = isFromAllView ? 'Back to All Employees' : 'Back to Team Attendance';
+  const [employeeNavigation, setEmployeeNavigation] = useState<EmployeeNavigationItem[]>(() =>
+    getEmployeeNavigation(location.state),
+  );
+  const employeeIndex = employeeNavigation.findIndex((employee) => employee.id === employeeId);
+
+  useEffect(() => {
+    const incomingNavigation = (location.state as { employeeNavigation?: EmployeeNavigationItem[] } | null)?.employeeNavigation;
+    if (incomingNavigation?.length) {
+      setEmployeeNavigation(incomingNavigation);
+      sessionStorage.setItem('all-attendance-employee-navigation', JSON.stringify(incomingNavigation));
+    }
+  }, [location.state]);
 
   const [year, setYear] = useState(parseInt(searchParams.get('year') || String(today.getFullYear())));
   const [month, setMonth] = useState(parseInt(searchParams.get('month') || String(today.getMonth() + 1)));
   const [data, setData] = useState<MonthlyAttendanceData | null>(null);
   const [loading, setLoading] = useState(true);
+  const loadRequestId = useRef(0);
   
   const [modalOpen, setModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -1128,6 +1176,12 @@ export default function EmployeeAttendanceDetailPage() {
   const [savingManual, setSavingManual] = useState(false);
   const [deletingManual, setDeletingManual] = useState(false);
   const [canAddManual, setCanAddManual] = useState(false);
+  const [entryChoiceOpen, setEntryChoiceOpen] = useState(false);
+  const [leaveModalOpen, setLeaveModalOpen] = useState(false);
+  const [leaveTypes, setLeaveTypes] = useState<LeaveTypeMini[]>([]);
+  const [leaveBalances, setLeaveBalances] = useState<LeaveBalance[]>([]);
+  const [leaveForm, setLeaveForm] = useState({ leave_type: '', start_date: '', end_date: '', reason: '' });
+  const [savingLeave, setSavingLeave] = useState(false);
   
   useEffect(() => {
     let cancelled = false;
@@ -1144,22 +1198,45 @@ export default function EmployeeAttendanceDetailPage() {
   }, []);
 
   useEffect(() => {
+    if (!canAddManual) return;
+    leaveTypesApi.mini()
+      .then(setLeaveTypes)
+      .catch(() => toast.error('Failed to load leave types'));
+  }, [canAddManual]);
+
+  useEffect(() => {
     if (employeeId) loadData();
   }, [employeeId, year, month]);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (forceRefresh = false) => {
+    const requestId = ++loadRequestId.current;
+    const cacheKey = `${employeeId}:${year}:${month}`;
+    const cached = forceRefresh ? undefined : employeeMonthCache.get(cacheKey);
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
-      const res = await personalAttendanceApi.getEmployeeMonth(employeeId!, year, month);
+      const res = await getEmployeeMonth(employeeId!, year, month, isFromAllView, forceRefresh);
+      if (requestId !== loadRequestId.current) return;
       setData(res);
+      setLoading(false);
+
+      // Warm the adjacent employees so the next/previous action is immediate.
+      if (isFromAllView && employeeIndex >= 0) {
+        [employeeNavigation[employeeIndex - 1], employeeNavigation[employeeIndex + 1]]
+          .filter((employee): employee is EmployeeNavigationItem => Boolean(employee))
+          .forEach((employee) => { void getEmployeeMonth(employee.id, year, month).catch(() => undefined); });
+      }
     } catch (error: any) {
+      if (requestId !== loadRequestId.current) return;
       const msg = error?.response?.status === 403
         ? "You don't have permission to view this employee's attendance"
         : error?.response?.data?.detail || 'Failed to load attendance';
       toast.error(msg);
       if (error?.response?.status === 403) navigate(backUrl);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -1171,6 +1248,15 @@ export default function EmployeeAttendanceDetailPage() {
     setMonth(newMonth);
     setYear(newYear);
     setSearchParams({ year: String(newYear), month: String(newMonth) });
+  };
+
+  const navigateEmployee = (direction: number) => {
+    const nextEmployee = employeeNavigation[employeeIndex + direction];
+    if (!nextEmployee) return;
+    navigate(
+      `/all-attendance/${nextEmployee.id}?year=${year}&month=${month}`,
+      { state: { employeeNavigation } },
+    );
   };
 
   const firstDay = data ? new Date(year, month - 1, 1).getDay() : 0;
@@ -1186,7 +1272,7 @@ export default function EmployeeAttendanceDetailPage() {
       });
       toast.success(isEditing ? 'Manual override updated' : 'Manual attendance saved');
       setModalOpen(false);
-      loadData();
+      loadData(true);
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Failed to save');
     } finally {
@@ -1201,11 +1287,101 @@ export default function EmployeeAttendanceDetailPage() {
       await personalAttendanceApi.deleteManualEntry(employeeId!, selectedDate);
       toast.success('Manual override reverted successfully');
       setModalOpen(false);
-      loadData();
+      loadData(true);
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'Failed to remove override');
     } finally {
       setDeletingManual(false);
+    }
+  };
+
+  const openAttendanceEntry = () => {
+    const day = data?.days.find((item) => item.date === selectedDate);
+    setEntryChoiceOpen(false);
+    if (!day) return;
+    if (day.is_manual) {
+      setIsEditing(true);
+      setManualForm({
+        status: day.manual_status || 'WFH',
+        punch_in: day.punch_in || '09:30',
+        punch_out: day.punch_out || '18:30',
+        reason: (day.manual_reason || '').replace('[Self-Reported] ', ''),
+      });
+      setModalOpen(true);
+      return;
+    }
+    if (day.status !== 'absent' && day.status !== 'missing_punch' && day.status !== 'weekend') {
+      toast.error('Manual attendance can only be added to absent, missing-punch, or weekend days.');
+      return;
+    }
+    setIsEditing(false);
+    setManualForm({ status: 'Manual Present', punch_in: '09:30', punch_out: '18:30', reason: '' });
+    setModalOpen(true);
+  };
+
+  const openLeaveEntry = () => {
+    setEntryChoiceOpen(false);
+    setLeaveForm({ leave_type: '', start_date: selectedDate, end_date: selectedDate, reason: '' });
+    setLeaveModalOpen(true);
+  };
+
+  useEffect(() => {
+    if (!leaveModalOpen || !employeeId || !leaveForm.start_date) return;
+    const leaveYear = Number(leaveForm.start_date.slice(0, 4));
+    leaveBalancesApi.list({ employee: employeeId, year: leaveYear })
+      .then(setLeaveBalances)
+      .catch(() => setLeaveBalances([]));
+  }, [leaveModalOpen, employeeId, leaveForm.start_date]);
+
+  const handleLeaveSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!employeeId) return;
+    setSavingLeave(true);
+    try {
+      const result = await leaveApplicationsApi.recordForEmployee({
+        employee_id: employeeId,
+        ...leaveForm,
+      });
+      const selectedType = leaveTypes.find((type) => type.id === leaveForm.leave_type);
+      setData((current) => current ? {
+        ...current,
+        days: current.days.map((day) => {
+          if (day.date < leaveForm.start_date || day.date > leaveForm.end_date) return day;
+          const hasPunch = Boolean(day.punch_in || day.punch_out);
+          const hasFullAttendance = Boolean(day.punch_in && day.punch_out);
+          const status: DayStatus = day.is_future
+            ? 'will_be_on_leave'
+            : day.is_holiday || day.is_weekend
+              ? day.status
+              : hasFullAttendance
+                ? 'leave_but_present'
+                : hasPunch
+                  ? 'leave_but_partial'
+                  : 'on_leave';
+          return {
+            ...day,
+            status,
+            leave_info: {
+              leave_type_code: selectedType?.code || '',
+              leave_type_name: selectedType?.name || 'Leave',
+              leave_type_color: selectedType?.color_code || '#0891B2',
+              is_half_day: false,
+              half_day_period: '',
+              application_number: result.application_id,
+              is_paid: selectedType?.is_paid ?? true,
+              is_lop: Number(result.lop_days) > 0,
+            },
+          };
+        }),
+      } : current);
+      toast.success(`${result.message}${Number(result.lop_days) > 0 ? ` ${result.lop_days} day(s) recorded as LOP.` : ''}`);
+      setLeaveModalOpen(false);
+      setEntryChoiceOpen(false);
+      await loadData(true);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Failed to record leave');
+    } finally {
+      setSavingLeave(false);
     }
   };
 
@@ -1219,6 +1395,25 @@ export default function EmployeeAttendanceDetailPage() {
             <ArrowLeft className="h-4 w-4" />
             {backLabel}
           </button>
+
+          {isFromAllView && employeeNavigation.length > 1 && employeeIndex >= 0 && (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-gray-100">
+              <button type="button" onClick={() => navigateEmployee(-1)} disabled={employeeIndex <= 0} className="flex items-center gap-1 rounded-lg px-2 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40">
+                <ChevronLeft className="h-4 w-4" />
+                <span className="hidden sm:inline">{employeeNavigation[employeeIndex - 1]?.full_name || 'Previous'}</span>
+                <span className="sm:hidden">Previous</span>
+              </button>
+              <div className="min-w-0 text-center">
+                <p className="truncate text-sm font-semibold text-gray-900">{employeeNavigation[employeeIndex]?.full_name}</p>
+                <p className="text-xs text-gray-500">Employee {employeeIndex + 1} of {employeeNavigation.length}</p>
+              </div>
+              <button type="button" onClick={() => navigateEmployee(1)} disabled={employeeIndex >= employeeNavigation.length - 1} className="flex items-center gap-1 rounded-lg px-2 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40">
+                <span className="hidden sm:inline">{employeeNavigation[employeeIndex + 1]?.full_name || 'Next'}</span>
+                <span className="sm:hidden">Next</span>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          )}
 
           {data?.employee && (
             <div className="mb-6 rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
@@ -1325,31 +1520,12 @@ export default function EmployeeAttendanceDetailPage() {
                       key={day.date}
                       day={day}
                       canAddManual={canAddManual}
+                      canRecordLeave={canAddManual}
                       onClick={() => {
                         if (!canAddManual) return;
-                        if (day.status === 'before_joining' || day.status === 'before_system_start' || day.is_future || day.status === 'holiday') return;
-                        
-                        // Edit manual entry
-                        if (day.is_manual) {
-                          setSelectedDate(day.date);
-                          setIsEditing(true);
-                          setManualForm({
-                            status: day.manual_status || 'Manual Present',
-                            punch_in: day.punch_in || '09:30',
-                            punch_out: day.punch_out || '18:30',
-                            reason: (day.manual_reason || '').replace('[Self-Reported] ', ''),
-                          });
-                          setModalOpen(true);
-                          return;
-                        }
-                        
-                        // Add manual entry
-                        if (day.status === 'absent' || day.status === 'missing_punch' || day.status === 'weekend') {
-                          setSelectedDate(day.date);
-                          setIsEditing(false);
-                          setManualForm({ status: 'Manual Present', punch_in: '09:30', punch_out: '18:30', reason: '' });
-                          setModalOpen(true);
-                        }
+                        if (day.status === 'before_joining' || day.status === 'before_system_start') return;
+                        setSelectedDate(day.date);
+                        setEntryChoiceOpen(true);
                       }}
                     />
                   ))}
@@ -1383,6 +1559,69 @@ export default function EmployeeAttendanceDetailPage() {
               </div>
             </>
           ) : null}
+
+          {canAddManual && entryChoiceOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+              <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+                <h3 className="text-lg font-bold text-gray-900">Add to attendance</h3>
+                <p className="mt-1 text-sm text-gray-500">Choose what to record for {selectedDate}.</p>
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  <button type="button" onClick={openAttendanceEntry} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm font-semibold text-blue-800 hover:bg-blue-100">
+                    Record attendance
+                  </button>
+                  <button type="button" onClick={openLeaveEntry} className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-4 text-sm font-semibold text-cyan-800 hover:bg-cyan-100">
+                    Record leave
+                  </button>
+                </div>
+                <button type="button" onClick={() => setEntryChoiceOpen(false)} className="mt-4 w-full rounded-lg px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100">Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {canAddManual && leaveModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+              <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+                <h3 className="text-lg font-bold text-gray-900">Record employee leave</h3>
+                <p className="mb-5 text-sm text-gray-500">{data?.employee?.full_name} · Starts from {selectedDate}</p>
+                <form onSubmit={handleLeaveSubmit} className="space-y-4">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Leave type</label>
+                    <select required value={leaveForm.leave_type} onChange={(event) => setLeaveForm({ ...leaveForm, leave_type: event.target.value })} className="w-full rounded-lg border border-gray-300 bg-white p-2.5 text-sm outline-none focus:border-cyan-500">
+                      <option value="">Select leave type</option>
+                      {leaveTypes.map((type) => <option key={type.id} value={type.id}>{type.code} — {type.name}</option>)}
+                    </select>
+                    {leaveForm.leave_type && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Available in {leaveForm.start_date.slice(0, 4)}: {leaveBalances.find((balance) => balance.leave_type.id === leaveForm.leave_type)?.available ?? '0'} day(s)
+                      </p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">From date</label>
+                      <input type="date" required value={leaveForm.start_date} onChange={(event) => setLeaveForm({ ...leaveForm, start_date: event.target.value, end_date: leaveForm.end_date < event.target.value ? event.target.value : leaveForm.end_date })} className="w-full rounded-lg border border-gray-300 p-2.5 text-sm outline-none focus:border-cyan-500" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-700">To date</label>
+                      <input type="date" required min={leaveForm.start_date} value={leaveForm.end_date} onChange={(event) => setLeaveForm({ ...leaveForm, end_date: event.target.value })} className="w-full rounded-lg border border-gray-300 p-2.5 text-sm outline-none focus:border-cyan-500" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500">Weekends and configured holidays are excluded from leave balance usage. The full date range is marked on the calendar.</p>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Reason</label>
+                    <textarea required minLength={2} rows={3} value={leaveForm.reason} onChange={(event) => setLeaveForm({ ...leaveForm, reason: event.target.value })} placeholder="Enter the reason for leave" className="w-full rounded-lg border border-gray-300 p-2.5 text-sm outline-none focus:border-cyan-500" />
+                  </div>
+                  <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+                    <button type="button" onClick={() => setLeaveModalOpen(false)} className="rounded-lg px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100">Cancel</button>
+                    <button type="submit" disabled={savingLeave || leaveTypes.length === 0} className="flex items-center gap-2 rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800 disabled:opacity-50">
+                      {savingLeave && <Loader2 className="h-4 w-4 animate-spin" />}
+                      Save leave
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
 
           {canAddManual && modalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
@@ -1459,7 +1698,7 @@ function MiniStat({ label, value, color }: { label: string; value: number; color
   );
 }
 
-function DayCard({ day, onClick, canAddManual = false }: { day: DayEntry; onClick?: () => void; canAddManual?: boolean }) {
+function DayCard({ day, onClick, canAddManual = false, canRecordLeave = false }: { day: DayEntry; onClick?: () => void; canAddManual?: boolean; canRecordLeave?: boolean }) {
   const style = STATUS_STYLES[day.status] || STATUS_STYLES.future;
   const isBlocked = day.status === 'before_joining' || day.status === 'before_system_start' || day.status === 'future' || day.status === 'holiday' || day.status === 'server_off';
   
@@ -1467,17 +1706,18 @@ function DayCard({ day, onClick, canAddManual = false }: { day: DayEntry; onClic
   const canSelfEdit = canAddManual && !isBlocked && day.is_manual;
 
   // FIXED: It is clickable if you have permission to ADD or EDIT
-  const clickable = Boolean(onClick) && (canSelfAdd || canSelfEdit);
+  const canRecordOnDay = canRecordLeave && day.status !== 'before_joining' && day.status !== 'before_system_start';
+  const clickable = Boolean(onClick) && (canSelfAdd || canSelfEdit || canRecordOnDay);
 
   return (
-    <div onClick={clickable ? onClick : undefined} className={`group relative aspect-square rounded-lg border p-2 ${style.bg} ${clickable ? 'cursor-pointer hover:shadow-md transition' : ''} ${day.is_today ? 'ring-2 ring-blue-500' : ''}`}>
+    <div onClick={clickable ? onClick : undefined} style={day.leave_info ? { backgroundColor: `${day.leave_info.leave_type_color}18`, borderColor: `${day.leave_info.leave_type_color}66` } : undefined} className={`group relative aspect-square rounded-lg border p-2 ${style.bg} ${clickable ? 'cursor-pointer hover:shadow-md transition' : ''} ${day.is_today ? 'ring-2 ring-blue-500' : ''}`}>
       <div className="flex items-start justify-between">
         {/* FIXED: Respects original status colors */}
         <span className={`text-sm font-bold ${style.text}`}>{day.day_number}</span>
         {!isBlocked && <span className={`h-2 w-2 rounded-full ${style.dot}`} />}
       </div>
 
-      {day.leave_info && !isBlocked && (
+      {day.leave_info && (
         <div className="mt-1"><span className="inline-block rounded px-1 py-0.5 text-[9px] font-bold text-white" style={{ backgroundColor: day.leave_info.leave_type_color }}>{day.leave_info.leave_type_code} {day.leave_info.is_half_day && `(${day.leave_info.half_day_period})`}</span></div>
       )}
 
@@ -1495,6 +1735,7 @@ function DayCard({ day, onClick, canAddManual = false }: { day: DayEntry; onClic
       {day.status === 'server_off' && <div className="mt-1 text-[8px] font-bold text-orange-800">Server off</div>}
 
       {canSelfAdd && <span className="mt-1 block text-[9px] font-bold text-blue-600">+ Manual</span>}
+      {canRecordOnDay && <span className="mt-1 block text-[9px] font-bold text-cyan-700">+ Add record</span>}
       {canSelfEdit && <span className="mt-1 block text-[9px] font-bold text-blue-600">✎ Edit</span>}
       {day.is_late && !isBlocked && <span className="absolute bottom-1 right-1 text-[8px] font-bold text-red-600">L</span>}
 

@@ -699,11 +699,18 @@ export default function AllEmployeesAttendancePage() {
                         {data.employees.map((member) => (
                           <tr
                             key={member.employee.id}
-                            onClick={() =>
+                            onClick={() => {
+                              const employeeNavigation = data.employees.map(({ employee }) => ({
+                                id: employee.id,
+                                employee_id: employee.employee_id,
+                                full_name: employee.full_name,
+                              }));
+                              sessionStorage.setItem('all-attendance-employee-navigation', JSON.stringify(employeeNavigation));
                               navigate(
-                                `/all-attendance/${member.employee.id}?year=${year}&month=${month}`
-                              )
-                            }
+                                `/all-attendance/${member.employee.id}?year=${year}&month=${month}`,
+                                { state: { employeeNavigation } },
+                              );
+                            }}
                             className="cursor-pointer hover:bg-gray-50"
                           >
                             <td className="px-4 py-3">

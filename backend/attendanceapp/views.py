@@ -947,7 +947,10 @@ class EmployeeAttendanceMonthView(APIView):
                 month_end = datetime(year, 12, 31).date()
             else:
                 month_end = (date(year, month + 1, 1) - timedelta(days=1))
-            server_available = _ensure_attendance_processed_for_period(
+            # The All Employees page already performs one bulk sync before
+            # navigation. Avoid repeating the slow eSSL probe for each employee.
+            skip_device_sync = request.query_params.get('sync') == '0'
+            server_available = False if skip_device_sync else _ensure_attendance_processed_for_period(
                 month_start, month_end, employee=target_employee,
             )
             data = get_monthly_attendance_for_employee(
