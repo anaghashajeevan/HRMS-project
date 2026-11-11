@@ -526,24 +526,65 @@ class EmployeeViewSet(ModelViewSet):
     def perform_create(self, serializer):
         """Auto-generate employee_id + increment position headcount."""
         from .models import JobPosition
+        from django.utils import timezone as django_timezone
+        from recruitmentapp.models import CandidateOffer, HiringRequisition
+        from recruitmentapp.offer_services import link_accepted_offer_to_employee
+        from recruitmentapp.services import _reserved_openings
 
+        accepted_offer = serializer.validated_data.pop('_accepted_recruitment_offer', None)
         with transaction.atomic():
             position = serializer.validated_data.get('position')
             locked_position = None
             if position:
                 locked_position = JobPosition.objects.select_for_update().get(pk=position.pk)
                 filled = Employee.objects.filter(position=locked_position, is_deleted=False).count()
-                if filled >= locked_position.budgeted_count:
+                reserved = _reserved_openings(locked_position)
+                if accepted_offer:
+                    accepted_offer = CandidateOffer.objects.select_for_update().select_related(
+                        'application__candidate', 'application__requisition', 'employee',
+                    ).get(pk=accepted_offer.pk)
+                    requisition = HiringRequisition.objects.select_for_update().get(
+                        pk=accepted_offer.application.requisition_id,
+                    )
+                    if accepted_offer.status != 'ACCEPTED' or requisition.status != 'APPROVED':
+                        raise ValidationError({'accepted_recruitment_offer': 'The selected offer or its requisition is no longer eligible for employee creation.'})
+                    if requisition.position_id != locked_position.pk:
+                        raise ValidationError({'accepted_recruitment_offer': 'The selected offer reserves a different position.'})
+                    already_fulfilled = bool(
+                        accepted_offer.employee_id
+                        and accepted_offer.responded_at
+                        and accepted_offer.employee.created_at >= accepted_offer.responded_at
+                    )
+                    if not already_fulfilled:
+                        reserved = max(0, reserved - 1)
+                if filled + reserved >= locked_position.budgeted_count:
                     raise ValidationError({
                         'position': (
-                            f'This position has reached its approved headcount limit '
-                            f'({filled}/{locked_position.budgeted_count}). Increase the position budget '
-                            'or select another position.'
+                            f'This position has {filled} filled and {reserved} reserved opening(s) '
+                            f'out of {locked_position.budgeted_count} budgeted. Cancel a requisition, '
+                            'increase the position budget, or select another position.'
                         )
                     })
 
             employee_id = generate_employee_id()
             instance = serializer.save(employee_id=employee_id)
+
+            if accepted_offer:
+                accepted_offer.employee = instance
+                accepted_offer.save(update_fields=['employee', 'updated_at'])
+                link_accepted_offer_to_employee(
+                    accepted_offer, instance,
+                    uploaded_by=getattr(self.request.user, 'employee', None),
+                )
+                fulfilled_openings = CandidateOffer.objects.filter(
+                    application__requisition=requisition,
+                    status='ACCEPTED', employee__isnull=False,
+                    employee__created_at__gte=models.F('responded_at'),
+                ).count()
+                if fulfilled_openings >= requisition.openings:
+                    requisition.status = 'FILLED'
+                    requisition.completed_at = django_timezone.now()
+                    requisition.save(update_fields=['status', 'completed_at', 'updated_at'])
 
             if instance.department and not instance.structure_location:
                 instance.structure_location = instance.department
@@ -1384,6 +1425,8 @@ class ApprovalWorkflowViewSet(ModelViewSet):
             {'id': 'SYSTEM_ADMIN', 'label': '🎭 Any System Admin', 'category': 'By Role'},
         ]
         
+        options.append({'id': 'FINANCE_ADMIN', 'label': 'Finance Approver', 'category': 'By Role'})
+
         # Specific employees (with their roles for identification)
         employees = Employee.objects.filter(
             is_deleted=False,

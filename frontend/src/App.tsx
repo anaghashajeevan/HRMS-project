@@ -278,6 +278,12 @@ import LifecycleRequestNewPage from './pages/lifecycle/LifecycleRequestNewPage';
 import LifecycleRequestsPage from './pages/lifecycle/LifecycleRequestsPage';
 import MyApprovalsPage from './pages/approvals/MyApprovalsPage';
 import LifecycleRequestDetailPage from './pages/lifecycle/LifecycleRequestDetailPage';
+import HiringRequisitionsPage from './pages/recruitment/HiringRequisitionsPage';
+import CandidateApplicationsPage from './pages/recruitment/CandidateApplicationsPage';
+import CandidateInterviewsPage from './pages/recruitment/CandidateInterviewsPage';
+import ReferenceChecksPage from './pages/recruitment/ReferenceChecksPage';
+import CandidateOffersPage from './pages/recruitment/CandidateOffersPage';
+import RecruitmentSettingsPage from './pages/recruitment/RecruitmentSettingsPage';
 import RatingScalePage from './pages/settings/RatingScalePage';
 import OrgPrioritiesPage from './pages/settings/OrgPrioritiesPage';
 import DepartmentalKRAsPage from './pages/settings/DepartmentalKRAsPage';
@@ -582,6 +588,54 @@ export default function App() {
                 requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','REPORTING_MANAGER','HOD']}
               >
                 <MyApprovalsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recruitment/requisitions"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER', 'HOD', 'FINANCE', 'FINANCE_ADMIN', 'FINANCE_HEAD', 'CFO']}>
+                <HiringRequisitionsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recruitment/candidates"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+                <CandidateApplicationsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recruitment/interviews"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER', 'HOD', 'DEPARTMENT_HEAD', 'EMPLOYEE', 'FINANCE', 'FINANCE_ADMIN', 'FINANCE_HEAD', 'CFO']}>
+                <CandidateInterviewsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recruitment/reference-checks"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+                <ReferenceChecksPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recruitment/offers"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'FINANCE_ADMIN']}>
+                <CandidateOffersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/recruitment"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+                <RecruitmentSettingsPage />
               </ProtectedRoute>
             }
           />

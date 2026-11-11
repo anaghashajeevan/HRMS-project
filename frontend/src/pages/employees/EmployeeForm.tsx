@@ -1212,6 +1212,7 @@ import type { CompanyStructure, JobPosition, Role, ProbationPolicy } from '../..
 import type { ManagerOption } from '../../api/employees';
 import toast from 'react-hot-toast';
 import { AxiosError } from 'axios';
+import { recruitmentApi, type AcceptedOfferEmployeeOption } from '../../api/recruitment';
 
 const initialForm: EmployeeCreatePayload = {
   employee_id: '',
@@ -1224,6 +1225,7 @@ const initialForm: EmployeeCreatePayload = {
   gender: 'MALE',
   status: 'PROBATION',
   position: null,
+  accepted_recruitment_offer: null,
   reporting_manager: null,
   structure_location: null,
   date_of_joining: '',
@@ -1261,6 +1263,7 @@ export default function EmployeeForm() {
   const [managers, setManagers] = useState<ManagerOption[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [probationPolicies, setProbationPolicies] = useState<ProbationPolicy[]>([]);
+  const [acceptedOffers, setAcceptedOffers] = useState<AcceptedOfferEmployeeOption[]>([]);
 
   const departments = allStructures.filter((s) =>
     ['DEPARTMENT', 'TEAM'].includes(s.type) && s.is_active
@@ -1290,6 +1293,15 @@ export default function EmployeeForm() {
         setManagers(mgrData);
         setRoles(roleData.results || []);
         setProbationPolicies(probationData.results || []);
+
+        if (!isEditMode) {
+          try {
+            const recruitmentOptions = await recruitmentApi.candidateOfferOptions();
+            setAcceptedOffers(recruitmentOptions.accepted_offers || []);
+          } catch {
+            // Employee creation remains available when recruitment has no offers configured.
+          }
+        }
 
         if (isEditMode && id) {
           const emp = await employeesApi.getById(id);
@@ -1569,6 +1581,30 @@ export default function EmployeeForm() {
                     </select>
                   )}
                 </Field>
+                {!isEditMode && <Field label="Accepted recruitment offer (optional)">
+                  <select value={form.accepted_recruitment_offer || ''}
+                    onChange={(event) => {
+                      const offer = acceptedOffers.find((item) => item.id === event.target.value);
+                      if (offer?.employee_name && !window.confirm(`This accepted offer is currently linked to ${offer.employee_name}. Continue and link it to the new employee profile instead?`)) return;
+                      setForm((current) => ({
+                        ...current,
+                        accepted_recruitment_offer: offer?.id || null,
+                        position: offer?.position_id || current.position,
+                        personal_email: offer?.candidate_email || current.personal_email,
+                      }));
+                      if (offer) {
+                        setSelectedDepartment(offer.department_id);
+                        setSelectedLocation(offer.location_id);
+                      }
+                    }}
+                    className={inputCls()}>
+                    <option value="">No recruitment offer link</option>
+                    {acceptedOffers.map((offer) => <option key={offer.id} value={offer.id}>
+                      {offer.candidate_name} — {offer.position_title}{offer.employee_name ? ` (currently linked to ${offer.employee_name})` : ''}
+                    </option>)}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">Select the accepted offer to use its reserved opening and link the offer letter to this employee profile.</p>
+                </Field>}
                 <Field label="Position" error={errors.position}>
                   <select value={form.position || ''}
                     onChange={(e) => update('position', e.target.value || null)}

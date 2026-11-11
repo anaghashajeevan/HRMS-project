@@ -462,6 +462,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
     status_label = serializers.SerializerMethodField()
     position_title = serializers.CharField(source='position.title', read_only=True, default=None)
+    position_id = serializers.UUIDField(source='position.id', read_only=True, allow_null=True)
     department_name = serializers.SerializerMethodField()
     manager_name = serializers.SerializerMethodField()
     location_name = serializers.SerializerMethodField()
@@ -481,6 +482,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             'status',
             'status_label',
             'position_title',
+            'position_id',
             'department_name','location_name', 
             'manager_name',
             'date_of_joining','role_names','role_codes','work_mode', 'work_mode_display', 'can_self_attend',
@@ -954,6 +956,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         write_only=True, required=False, allow_empty=True
     )
     employee_id = serializers.CharField(required=False, max_length=20, trim_whitespace=True)
+    accepted_recruitment_offer = serializers.UUIDField(write_only=True, required=False, allow_null=True)
 
     class Meta:
         model = Employee
@@ -965,7 +968,7 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
             'date_of_joining', 'date_of_exit','work_mode', 'can_self_attend',
             'bank_name', 'bank_account_holder_name', 'bank_account_encrypted', 'bank_ifsc_code',
             'pan_number_encrypted', 'aadhaar_number_encrypted', 'uan_number_encrypted',
-            'create_user_account', 'password', 'role_ids',
+            'create_user_account', 'password', 'role_ids', 'accepted_recruitment_offer',
         ]
         read_only_fields = ['date_of_exit']
 
@@ -989,6 +992,26 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        offer_id = attrs.pop('accepted_recruitment_offer', None)
+        if offer_id:
+            if self.instance:
+                raise serializers.ValidationError({'accepted_recruitment_offer': 'An offer can only be connected when creating the employee profile.'})
+            from recruitmentapp.models import CandidateOffer
+            offer = CandidateOffer.objects.select_related(
+                'application__candidate', 'application__requisition', 'application__requisition__position',
+            ).filter(pk=offer_id, status='ACCEPTED').first()
+            if offer is None:
+                raise serializers.ValidationError({'accepted_recruitment_offer': 'Select a valid accepted recruitment offer.'})
+            if offer.application.requisition.position_id != getattr(attrs.get('position'), 'pk', None):
+                raise serializers.ValidationError({'accepted_recruitment_offer': 'The selected employee position must match the accepted offer.'})
+            candidate_email = offer.application.candidate.email.casefold()
+            if candidate_email not in {
+                (attrs.get('official_email') or '').strip().casefold(),
+                (attrs.get('personal_email') or '').strip().casefold(),
+            }:
+                raise serializers.ValidationError({'accepted_recruitment_offer': 'Enter the candidate email as the employee personal or official email so the accepted offer can be verified.'})
+            attrs['_accepted_recruitment_offer'] = offer
+
         create_account = attrs.get('create_user_account', False)
         password = attrs.get('password', '').strip() if attrs.get('password') else ''
 

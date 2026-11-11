@@ -8,11 +8,12 @@ export type ApproverType =
   | 'DEPARTMENT_HEAD'
   | 'HR_ADMIN'
   | 'SYSTEM_ADMIN'
+  | 'FINANCE_ADMIN'
   | 'SPECIFIC_EMPLOYEE'
   | 'LEAVE_APPLICATION'   
   | 'LEAVE_APPROVAL'; 
 
-export type ModuleType = 'LIFECYCLE' | 'LEAVE'|'POLICY'| 'CALENDAR' | 'PAYROLL' | 'PAYSLIP' | 'EXIT';
+export type ModuleType = 'LIFECYCLE' | 'LEAVE'|'POLICY'| 'CALENDAR' | 'PAYROLL' | 'PAYSLIP' | 'EXIT' | 'RECRUITMENT';
 
 export interface WorkflowStep {
   id?: string;
@@ -60,6 +61,8 @@ export interface ApproverOption {
 // ==============================================================================
 
 export type LetterTemplateType =
+  | 'OFFER_EMAIL'
+  | 'OFFER_LETTER'
   | 'PROMOTION'
   | 'TRANSFER'
   | 'REDESIGNATION'

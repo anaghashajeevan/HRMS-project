@@ -25,6 +25,20 @@ import toast from 'react-hot-toast';
 // ==============================================================================
 
 const AVAILABLE_VARIABLES = [
+  { key: 'candidate_name', desc: 'Candidate full name', group: 'Recruitment Offer' },
+  { key: 'candidate_email', desc: 'Candidate email', group: 'Recruitment Offer' },
+  { key: 'position_title', desc: 'Offered position', group: 'Recruitment Offer' },
+  { key: 'department_name', desc: 'Department', group: 'Recruitment Offer' },
+  { key: 'location_name', desc: 'Work location', group: 'Recruitment Offer' },
+  { key: 'grade_band', desc: 'Position grade', group: 'Recruitment Offer' },
+  { key: 'annual_salary', desc: 'Annual salary amount', group: 'Recruitment Offer' },
+  { key: 'signing_bonus', desc: 'Signing bonus amount', group: 'Recruitment Offer' },
+  { key: 'currency', desc: 'Offer currency', group: 'Recruitment Offer' },
+  { key: 'joining_date', desc: 'Expected joining date', group: 'Recruitment Offer' },
+  { key: 'offer_expiry_date', desc: 'Offer expiry date', group: 'Recruitment Offer' },
+  { key: 'offer_date', desc: 'Offer date', group: 'Recruitment Offer' },
+  { key: 'offer_reference', desc: 'Offer reference ID', group: 'Recruitment Offer' },
+  { key: 'requisition_number', desc: 'Hiring requisition number', group: 'Recruitment Offer' },
   // ===== COMMON (all letters) =====
   { key: 'employee_name', desc: 'Full name of the employee', group: 'Common' },
   { key: 'employee_id', desc: 'Employee ID', group: 'Common' },
@@ -107,6 +121,20 @@ const PREVIEW_DATA: Record<string, string> = {
   // Common
   employee_name: 'Jithin Raj C',
   employee_id: 'EMP-2026-001',
+  candidate_name: 'Aarav Sharma',
+  candidate_email: 'aarav.sharma@example.com',
+  position_title: 'Software Engineer',
+  department_name: 'Engineering',
+  location_name: 'Bengaluru',
+  grade_band: 'G5',
+  annual_salary: '1,200,000.00',
+  signing_bonus: '50,000.00',
+  currency: 'INR',
+  joining_date: '1 February 2027',
+  offer_expiry_date: '15 January 2027',
+  offer_date: '11 November 2026',
+  offer_reference: 'OFR-EXAMPLE-001',
+  requisition_number: 'REQ-2026-001',
   employee_position: 'Software Engineer',
   employee_department: 'Engineering',
   company_name: 'Your Company Ltd',
@@ -419,8 +447,16 @@ export default function LetterTemplateEditorPage() {
     const next = e.target.value as LetterTemplateType;
     setTemplateType(next);
     
-    // Auto-fill AI prompt for Assets
-    if (next === 'ASSET_ALLOCATION' && !aiPrompt.trim()) {
+    // Auto-fill AI prompt for recruitment offer letters and assets.
+    if (next === 'OFFER_EMAIL' && !aiPrompt.trim()) {
+      setAiPrompt(
+        'Write a warm, professional email to {{candidate_name}} confirming selection for the {{position_title}} position at {{company_name}}. Mention the proposed annual salary {{currency}} {{annual_salary}}, joining date {{joining_date}}, and response deadline {{offer_expiry_date}}. Ask the candidate to reply accepting or declining. This is the initial offer email, not the formal offer letter.'
+      );
+    } else if (next === 'OFFER_LETTER' && !aiPrompt.trim()) {
+      setAiPrompt(
+        'Write a formal employment offer letter addressed to {{candidate_name}} for the {{position_title}} position in {{department_name}} at {{location_name}}. State annual compensation of {{currency}} {{annual_salary}}, signing bonus {{currency}} {{signing_bonus}}, grade {{grade_band}}, joining date {{joining_date}}, and response deadline {{offer_expiry_date}}. Include offer reference {{offer_reference}}, requisition {{requisition_number}}, the company name {{company_name}}, and signature space for Human Resources. Keep the language clear and professional.'
+      );
+    } else if (next === 'ASSET_ALLOCATION' && !aiPrompt.trim()) {
       setAiPrompt(
         'Write a professional asset allocation letter informing the employee that {{asset_name}} (Tag: {{asset_tag}}, Serial: {{serial_number}}) has been allocated to them on {{allocated_date}}. Mention they are responsible for safe custody and must return it on exit. Include handover notes {{handover_notes}}.'
       );
@@ -464,6 +500,10 @@ export default function LetterTemplateEditorPage() {
   }}
   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
 >
+  <optgroup label="Recruitment">
+    <option value="OFFER_EMAIL">Recruitment Offer Email</option>
+    <option value="OFFER_LETTER">Recruitment Offer Letter</option>
+  </optgroup>
   <optgroup label="🔄 Lifecycle Letters">
     <option value="PROMOTION">Promotion Letter</option>
     <option value="TRANSFER">Transfer Letter</option>
@@ -678,7 +718,7 @@ export default function LetterTemplateEditorPage() {
   </div>
 
   {/* Group by category */}
- {['Common', 'Lifecycle', 'Performance', 'Leave', 'Asset', 'Probation', 'Employment Status', 'Employee ID'].map((group) => {
+ {['Common', 'Recruitment Offer', 'Lifecycle', 'Performance', 'Leave', 'Asset', 'Probation', 'Employment Status', 'Employee ID'].map((group) => {
   const groupVars = AVAILABLE_VARIABLES.filter((v) => {
     if (v.group !== group) return false;
     
@@ -691,6 +731,7 @@ export default function LetterTemplateEditorPage() {
     const isProbationTemplate = ['PROBATION_REMINDER', 'PROBATION_PERIOD_CHANGED'].includes(templateType);
     const isEmploymentStatusTemplate = templateType === 'EMPLOYMENT_STATUS_CHANGED';
     const isEmployeeIdTemplate = templateType === 'EMPLOYEE_ID_CHANGED';
+    const isRecruitmentOfferTemplate = ['OFFER_EMAIL', 'OFFER_LETTER'].includes(templateType);
     
     if (group === 'Lifecycle' && !isLifecycleTemplate) return false;
     if (group === 'Performance' && !isPerformanceTemplate) return false;
@@ -699,6 +740,7 @@ export default function LetterTemplateEditorPage() {
     if (group === 'Probation' && !isProbationTemplate) return false;
     if (group === 'Employment Status' && !isEmploymentStatusTemplate) return false;
     if (group === 'Employee ID' && !isEmployeeIdTemplate) return false;
+    if (group === 'Recruitment Offer' && !isRecruitmentOfferTemplate) return false;
     
     return true;
   });

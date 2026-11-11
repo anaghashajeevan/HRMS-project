@@ -1785,6 +1785,36 @@ const mainNav: NavEntry[] = [
     to: '/lifecycle-requests',
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','HOD'],
   },
+  {
+    label: 'Hiring Requisitions',
+    icon: Briefcase,
+    to: '/recruitment/requisitions',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER', 'HOD', 'FINANCE', 'FINANCE_ADMIN', 'FINANCE_HEAD', 'CFO'],
+  },
+  {
+    label: 'Candidate Applications',
+    icon: UserCheck,
+    to: '/recruitment/candidates',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  },
+  {
+    label: 'Interviews',
+    icon: Calendar,
+    to: '/recruitment/interviews',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER', 'HOD', 'EMPLOYEE'],
+  },
+  {
+    label: 'Reference Checks',
+    icon: ClipboardCheck,
+    to: '/recruitment/reference-checks',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  },
+  {
+    label: 'Candidate Offers',
+    icon: FileText,
+    to: '/recruitment/offers',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'FINANCE_ADMIN'],
+  },
 
   // ==================== KRA & KPIs (Dropdown) ====================
   // {
@@ -2155,6 +2185,12 @@ const settingsNav: NavItem[] = [
     label: 'Approval Workflows',
     icon: Workflow,
     to: '/settings/approval-workflows',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  },
+  {
+    label: 'Recruitment Setup',
+    icon: Briefcase,
+    to: '/settings/recruitment',
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
   },
   {

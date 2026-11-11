@@ -654,6 +654,12 @@ const MODULE_CONFIG: Record<ModuleType, {
     defaultName: 'Standard Employee Exit Approval',
     helpText: 'HR submits an exit request for an employee. The configured approvers review the exit date and settlement inputs. The employee exit date is recorded only after the final approval.',
   },
+  RECRUITMENT: {
+    label: 'Hiring Requisitions',
+    description: 'For new hire and replacement requests',
+    defaultName: 'Standard Hiring Requisition Approval',
+    helpText: 'Approved requisitions reserve their position openings. Configure sequential reporting manager, department head, HR, Finance, or named employee approvals.',
+  },
 };
 
 export default function ApprovalWorkflowSettingsPage() {

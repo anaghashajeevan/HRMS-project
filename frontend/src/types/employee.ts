@@ -18,6 +18,7 @@ export interface EmployeeListItem {
   status: 'ACTIVE' | 'PROBATION' | 'NOTICE_PERIOD' | 'RELIEVED' | 'INACTIVE' | 'SUSPENDED' | 'TERMINATED';
   status_label?: string;
   position_title: string | null;
+  position_id?: string | null;
   department_name: string | null;
   manager_name: string | null;
   date_of_joining: string;

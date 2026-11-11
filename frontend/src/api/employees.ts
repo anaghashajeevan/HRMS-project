@@ -22,6 +22,7 @@ export interface EmployeeCreatePayload {
   gender?: string;
   status?: string;
   position?: string | null;
+  accepted_recruitment_offer?: string | null;
   reporting_manager?: string | null;
   structure_location?: string | null;
   date_of_joining: string;

@@ -191,6 +191,7 @@ INSTALLED_APPS = [
     'django_celery_results',
     # Your apps (add your apps here)
     'HRMSapp',  # Your app
+    'recruitmentapp',
     'reimbursementapp',   
     'attendanceapp',
     'leaveapp',
