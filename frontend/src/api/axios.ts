@@ -8,13 +8,21 @@ const API_BASE_URL = '/api/v1';
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
+  // The Nexus SSO handshake uses a short-lived, HttpOnly state cookie.  It
+  // must accompany both the request that starts SSO and the code exchange.
+  // This is a no-op for the normal same-origin /api proxy, and also supports
+  // a deliberately configured credentialed API origin.
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 });
 
 // ---------- Request Interceptor: attach access token ----------
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('access_token');
+    // An HRMS login must belong to the tab that completed the SSO hand-off.
+    // localStorage is shared by every tab for this origin, which allowed a
+    // second tab opened directly at the HRMS IP to reuse an existing session.
+    const token = sessionStorage.getItem('access_token');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -43,11 +51,20 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      const refresh = localStorage.getItem('refresh_token');
+    // A 401 from a login or SSO-code exchange describes that request itself;
+    // it is not an expired HRMS session.  Let the caller show the provider's
+    // response rather than clearing storage and redirecting back to /login.
+    const requestUrl = originalRequest?.url || '';
+    const isAuthenticationRequest =
+      requestUrl.includes('/auth/token/') ||
+      requestUrl.includes('/auth/sso/') ||
+      requestUrl.includes('/auth/token/refresh/');
+
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthenticationRequest) {
+      const refresh = sessionStorage.getItem('refresh_token');
 
       if (!refresh) {
-        localStorage.clear();
+        sessionStorage.clear();
         window.location.href = '/login';
         return Promise.reject(error);
       }
@@ -73,8 +90,8 @@ api.interceptors.response.use(
         const { data } = await axios.post(`${API_BASE_URL}/auth/token/refresh/`, {
           refresh,
         });
-        localStorage.setItem('access_token', data.access);
-        if (data.refresh) localStorage.setItem('refresh_token', data.refresh);
+        sessionStorage.setItem('access_token', data.access);
+        if (data.refresh) sessionStorage.setItem('refresh_token', data.refresh);
 
         if (originalRequest.headers) {
           originalRequest.headers.Authorization = `Bearer ${data.access}`;
@@ -83,7 +100,7 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (err) {
         processQueue(err, null);
-        localStorage.clear();
+        sessionStorage.clear();
         window.location.href = '/login';
         return Promise.reject(err);
       } finally {

@@ -373,14 +373,9 @@ class RegisterUserSerializer(serializers.Serializer):
             employee=employee,
         )
 
-        if role_ids:
-            roles = Role.objects.filter(id__in=role_ids, is_active=True)
-            user.roles.set(roles)
-        else:
-            # Default to EMPLOYEE role
-            default_role = Role.objects.filter(role_name='EMPLOYEE', is_active=True).first()
-            if default_role:
-                user.roles.add(default_role)
+        # HRMS does not assign roles. NexusOne supplies them at the user's
+        # next SSO sign-in; role_ids is accepted only for backward-compatible
+        # employee form submissions.
 
         return user
 
@@ -1029,19 +1024,14 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
         )
 
         if role_ids:
-            roles = Role.objects.filter(id__in=role_ids, is_active=True)
-            user.roles.set(roles)
-        else:
-            default_role = Role.objects.filter(role_name='EMPLOYEE', is_active=True).first()
-            if default_role:
-                user.roles.add(default_role)
+            user.roles.set(Role.objects.filter(id__in=role_ids, is_active=True))
 
         return user
 
     def create(self, validated_data):
         create_account = validated_data.pop('create_user_account', False)
         password = validated_data.pop('password', None)
-        role_ids = validated_data.pop('role_ids', [])
+        role_ids = validated_data.pop('role_ids', None)
 
         # The Add Employee workflow always begins in probation; bulk imports
         # use their own importer and retain the status supplied in the file.
@@ -1079,10 +1069,15 @@ class EmployeeCreateUpdateSerializer(serializers.ModelSerializer):
             if user_account.email != instance.official_email:
                 user_account.email = instance.official_email
                 user_account.save(update_fields=['email'])
+            if role_ids is not None:
+                # HRMS owns all authorization. SSO only supplies identity and
+                # HRMS application access, so every active local role is
+                # editable here, including SYSTEM_ADMIN.
+                user_account.roles.set(Role.objects.filter(id__in=role_ids, is_active=True))
 
         # Create user account if requested (and doesn't exist)
         if create_account and password and not hasattr(instance, 'user_account'):
-            self._create_user_account(instance, password, role_ids)
+            self._create_user_account(instance, password, role_ids or [])
 
         return instance
 

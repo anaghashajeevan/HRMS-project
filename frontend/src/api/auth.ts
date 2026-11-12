@@ -8,6 +8,21 @@ export const authApi = {
     return data;
   },
 
+  loginWithNexus: async (code: string, state: string): Promise<LoginResponse> => {
+    const { data } = await api.post<LoginResponse>('/auth/sso/nexus/', { code, state });
+    return data;
+  },
+
+  nexusAuthorize: async (): Promise<{ authorize_url: string }> => {
+    const { data } = await api.get<{ authorize_url: string }>('/auth/sso/nexus/authorize/');
+    return data;
+  },
+
+  nexusLoginUrl: async (): Promise<{ login_url: string }> => {
+    const { data } = await api.get<{ login_url: string }>('/auth/sso/nexus/login-url/');
+    return data;
+  },
+
   logout: async (refresh: string): Promise<void> => {
     await api.post('/auth/logout/', { refresh });
   },

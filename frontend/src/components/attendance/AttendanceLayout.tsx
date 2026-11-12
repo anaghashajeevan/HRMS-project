@@ -1,23 +1,16 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { ArrowLeft, BarChart3, LogOut, RadioTower, Settings } from 'lucide-react';
+import { ArrowLeft, BarChart3, Home, RadioTower, Settings } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import toast from 'react-hot-toast';
 
 export function AttendanceLayout() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const userRoles = user?.role_codes || [];
   const isSuperuser = userRoles.includes('SYSTEM_ADMIN') || userRoles.includes('HR_ADMIN');
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-      toast.success('Logged out');
-      navigate('/login', { replace: true });
-    } catch {
-      toast.error('Logout failed');
-    }
+  const returnToPortal = () => {
+    window.location.assign(`${window.location.protocol}//${window.location.hostname}:7000`);
   };
 
   const navLinkClass = (isActive: boolean) =>
@@ -75,11 +68,11 @@ export function AttendanceLayout() {
               </p>
               <p className="mt-0.5 truncate text-xs text-slate-500">{user?.email}</p>
               <button
-                onClick={handleLogout}
+                onClick={returnToPortal}
                 className="mt-2 inline-flex items-center gap-2 text-sm font-semibold text-slate-400 transition hover:text-blue-300"
               >
-                <LogOut className="h-4 w-4" aria-hidden="true" />
-                Logout
+                <Home className="h-4 w-4" aria-hidden="true" />
+                Back to home
               </button>
             </div>
           </div>

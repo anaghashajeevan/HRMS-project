@@ -368,7 +368,7 @@ import EmployeeExitsPage from './pages/payroll/exits/EmployeeExitsPage';
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/hrms">
       <AuthProvider>
         <Toaster
           position="top-right"
