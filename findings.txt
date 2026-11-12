@@ -1,0 +1,151 @@
+Read-only diagnostics complete. Nothing was modified: no files changed, no containers stopped, no networks deleted, no firewall changes.
+Findings
+1. Docker networks and subnets
+4m-management_backend-network          172.26.0.0/16
+agentos-net                            172.22.0.0/16
+automatic-proposal-client_propello-net 192.168.0.0/20   <-- CONFLICT
+bdcrm-1_bdcrm_net                      172.20.0.0/16
+bridge                                 172.17.0.0/16
+checksheet_default                     172.21.0.0/16
+company-portal_default                 172.24.0.0/16
+demo_portal_default                    172.25.0.0/16
+digi-kaizen_digikaizen                 192.168.16.0/20
+dojo_network                           172.23.0.0/16
+host                                   (no subnet)
+hrms_hrms_network                      172.27.0.0/16
+lms-standard_lms_network               172.29.0.0/16
+maintenanc20_default                   172.28.0.0/16
+marketing_crm_network                  172.19.0.0/16
+nlts-pm_default                        192.168.32.0/20
+none                                   (no subnet)
+salespie_default                       172.18.0.0/16
+sdplus_dojo_network                    172.30.0.0/16
+sso-portal_default                     172.31.0.0/16
+tenneco_dojo_network                   192.168.80.0/20
+Only one network overlaps 192.168.1.0/24:
+Network	Subnet	Gateway	Overlap
+automatic-proposal-client_propello-net	192.168.0.0/20	192.168.0.1	192.168.0.0–192.168.15.255 contains the entire company LAN 192.168.1.0/24
+The other 192.168.x networks do not overlap:
+- digi-kaizen_digikaizen = 192.168.16.0/20 → 16–31
+- nlts-pm_default = 192.168.32.0/20 → 32–47
+- tenneco_dojo_network = 192.168.80.0/20 → 80–95
+2. Containers using the conflicting network
+Container	IP
+automatic-proposal-client-backend-1	192.168.0.5/20
+automatic-proposal-client-frontend-1	192.168.0.4/20
+automatic-proposal-client-automatic_proposal_db-1	192.168.0.2/20
+Application/Compose project: automatic-proposal-client.
+automatic-proposal-client-connector-1 is not on the conflicting network — it is on agentos-net (172.22.0.12). It is still affected by the overlap because the bad route is in the shared Docker host namespace.
+3. Compose file inspection
+File: C:\Vbs Agents\automatic-proposal\docker-compose.prod.yml
+Current network definition at lines 81–83:
+networks:
+  propello-net:
+    driver: bridge
+- The network name is explicitly defined in the Compose file.
+- The subnet is automatically assigned by Docker because there is no ipam block.
+- It is not externally managed.
+- Labels confirm it is Compose-managed: com.docker.compose.project=automatic-proposal-client, com.docker.compose.network=propello-net.
+Important operational note: the current Compose file defines only backend, frontend, watchtower, and automatic_proposal_db. The running connector container is an orphan relative to this file — it is on agentos-net and its labels reference the same Compose project. The deploy scripts also reference connector, worker, and beat, which are not in the current file. Confirm the authoritative Compose file before editing.
+4. Routing evidence
+Windows host routes:
+0.0.0.0/0          via 192.168.1.1      192.168.1.94
+192.168.1.0/24     On-link              192.168.1.94
+100.64.0.0/10      Tailscale host routes
+172.27.128.0/20    On-link              172.27.128.1  (Hyper-V)
+172.30.144.0/20    On-link              172.30.144.1  (WSL)
+No 10.x route exists. The Windows host can reach 192.168.1.19:85 successfully.
+Inside the shared Docker host network namespace:
+default via 192.168.65.1 dev eth0
+192.168.0.0/20 dev br-c9fc6e9d73ba scope link src 192.168.0.1
+And the decisive check:
+# ip route get 192.168.1.19
+192.168.1.19 dev br-c9fc6e9d73ba src 192.168.0.1
+Traffic from any container to the eSSL device is routed into the automatic-proposal-client_propello-net bridge instead of out to the LAN.
+5. Connectivity tests
+Source	192.168.1.19:85
+Windows host	success
+backend 192.168.0.5	EHOSTUNREACH (113)
+connector 172.22.0.12	timeout (11)
+nlts-pm backend 192.168.32.2	timeout (11)
+digi-kaizen backend 192.168.16.3	timeout (11)
+marketing backend 172.19.0.2	timeout (11)
+WSL itself can reach 192.168.1.19:85, so the underlying host/WSL/LAN path works.
+6. Is the subnet overlap the cause?
+Yes. The overlap is the direct root cause, and it is broader than the backend container. Because the 192.168.0.0/20 route lives in the shared Docker host namespace, it black-holes access to the entire company LAN for all containers, not just the three on that network.
+- Backend on the conflicting bridge gets EHOSTUNREACH because 192.168.1.19 is treated as on-link.
+- Containers on agentos-net, nlts-pm, digi-kaizen, and marketing time out because their packets are routed toward the conflicting bridge instead of eth0.
+- Internet access still works, confirming the default Docker route is healthy.
+Fixing the subnet should restore LAN access for the backend and the connector. Confidence is high because the host/WSL path to the device already works.
+7. Recommended replacement subnet
+10.77.0.0/24, gateway 10.77.0.1
+Why it is safe here:
+- Not in any existing Docker network (172.17–172.31/16, 192.168.0/20, 192.168.16/20, 192.168.32/20, 192.168.80/20).
+- Not in the Windows routing table (no 10.x route).
+- Outside Tailscale’s 100.64.0.0/10.
+- Outside the company LAN 192.168.1.0/24.
+Caveat: if a site-to-site VPN not currently connected uses 10.77.0.0/24, choose another free /24 such as 10.88.0.0/24. Do not use 172.16.0.0/12 or another 192.168.0.0/16 range.
+8. Exact Compose change required
+File: C:\Vbs Agents\automatic-proposal\docker-compose.prod.yml (lines 81–83)
+Replace:
+networks:
+  propello-net:
+    driver: bridge
+with:
+networks:
+  propello-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.77.0.0/24
+          gateway: 10.77.0.1
+No other Compose changes are required.
+9. Safe migration procedure
+Pre-check:
+docker network inspect automatic-proposal-client_propello-net --format "{{range .Containers}}{{.Name}} {{end}}"
+Expected: only frontend, backend, and automatic_proposal_db. If anything else is attached, stop and investigate.
+Back up the Compose file after approval:
+Copy-Item "C:\Vbs Agents\automatic-proposal\docker-compose.prod.yml" "C:\Vbs Agents\automatic-proposal\docker-compose.prod.yml.bak"
+Apply the Compose edit above, then recreate only this project:
+cd /d "C:\Vbs Agents\automatic-proposal"
+docker compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml up -d backend frontend automatic_proposal_db
+Notes:
+- Do not add --remove-orphans. That would remove the connector container, which is not defined in the current Compose file.
+- down without -v preserves the PostgreSQL and application volumes.
+- Only the automatic-proposal services are briefly interrupted. Other projects continue running.
+- The connector stays on agentos-net; it is not recreated.
+- If you normally run watchtower, add watchtower to the up command or run docker compose -f docker-compose.prod.yml up -d.
+- If Compose reports that the old network is still in use after down, verify no containers are attached and remove it with docker network rm automatic-proposal-client_propello-net. That is the only network deletion required and only after approval.
+10. Verification after migration
+Network subnet:
+docker network inspect automatic-proposal-client_propello-net --format "{{range .IPAM.Config}}{{.Subnet}} gw={{.Gateway}}{{end}}"
+Expected: 10.77.0.0/24 gw=10.77.0.1.
+Docker host route no longer hijacks the LAN:
+wsl -d docker-desktop -- sh -c "nsenter -t $(pgrep dockerd) -n ip route get 192.168.1.19"
+Expected: via 192.168.65.1 dev eth0, not dev br-....
+Confirm the old route is gone:
+wsl -d docker-desktop -- sh -c "nsenter -t $(pgrep dockerd) -n ip route | grep 192.168"
+The 192.168.0.0/20 line must be absent.
+Backend TCP test:
+docker exec automatic-proposal-client-backend-1 python3 -c "import socket; s=socket.socket(); s.settimeout(5); print('connect_ex=', s.connect_ex(('192.168.1.19',85))); s.close()"
+Expected: connect_ex= 0.
+Connector TCP test:
+docker exec automatic-proposal-client-connector-1 python3 -c "import socket; s=socket.socket(); s.settimeout(5); print('connect_ex=', s.connect_ex(('192.168.1.19',85))); s.close()"
+Expected: connect_ex= 0.
+Container route:
+docker exec automatic-proposal-client-backend-1 sh -c "cat /proc/net/route"
+Expected: default gateway 10.77.0.1 (01004D0A) and on-link 10.77.0.0/24 (00004D0A, mask 00FFFFFF); no 192.168.0.0/20.
+Windows host still works:
+powershell -NoProfile -Command "Test-NetConnection -ComputerName 192.168.1.19 -Port 85 -InformationLevel Quiet"
+Expected: True.
+Application-level test: trigger the eSSL sync/SOAP action, then check:
+docker logs --tail 100 automatic-proposal-client-backend-1
+docker logs --tail 100 automatic-proposal-client-connector-1
+Confirm other applications remain up:
+docker ps --format "table {{.Names}}\t{{.Status}}"
+Other observations
+- Other 192.168.x Docker networks are non-conflicting today but are in the same /16; review them if the company LAN expands.
+- There is a latent overlap between Windows Hyper-V/WSL routes (172.27.128.0/20, 172.30.144.0/20) and Docker networks (172.27.0.0/16, 172.30.0.0/16). It is not causing the eSSL issue, but worth reviewing separately.
+- The current Compose file is out of sync with the running connector and the deploy scripts. Confirm the intended Compose file before any redeploy.
+No changes have been implemented. Awaiting your approval to apply the Compose change and run the migration.
