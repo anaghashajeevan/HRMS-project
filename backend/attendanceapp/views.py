@@ -878,7 +878,7 @@ class TeamAttendanceMonthView(APIView):
         # Allow managers + HR admins
         if not (
             user.has_role('MANAGER') or user.has_role('HR_ADMIN')
-            or user.has_role('SYSTEM_ADMIN')
+            or user.has_role('SYSTEM_ADMIN') or user.has_role('REPORTING_MANAGER')
         ):
             return Response({'detail': 'Only managers or HR can access team view'}, status=403)
 
@@ -888,7 +888,7 @@ class TeamAttendanceMonthView(APIView):
         # HR can specify any manager, others see own team
         target_manager = employee
         manager_id = request.query_params.get('manager_id')
-        if manager_id and (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
+        if manager_id and (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN') or user.has_role('REPORTING_MANAGER')):
             try:
                 target_manager = Employee.objects.get(id=manager_id, is_deleted=False)
             except Employee.DoesNotExist:
@@ -925,6 +925,7 @@ class EmployeeAttendanceMonthView(APIView):
 
         # Permission: HR sees all, manager only sees their team, employee only sees self
         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+        is_reporting_manager = user.has_role('REPORTING_MANAGER')
         is_manager_of = (
             user.has_role('MANAGER') and
             target_employee.reporting_manager_id == employee.id
@@ -947,7 +948,10 @@ class EmployeeAttendanceMonthView(APIView):
                 month_end = datetime(year, 12, 31).date()
             else:
                 month_end = (date(year, month + 1, 1) - timedelta(days=1))
-            server_available = _ensure_attendance_processed_for_period(
+            # The All Employees page already performs one bulk sync before
+            # navigation. Avoid repeating the slow eSSL probe for each employee.
+            skip_device_sync = request.query_params.get('sync') == '0'
+            server_available = False if skip_device_sync else _ensure_attendance_processed_for_period(
                 month_start, month_end, employee=target_employee,
             )
             data = get_monthly_attendance_for_employee(

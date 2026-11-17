@@ -187,11 +187,12 @@ export const personalAttendanceApi = {
   getEmployeeMonth: async (
     employeeId: string,
     year: number,
-    month: number
+    month: number,
+    skipDeviceSync = false,
   ): Promise<MonthlyAttendanceData> => {
     const { data } = await api.get<MonthlyAttendanceData>(
       `${BASE}/employee-attendance/${employeeId}/month/`,
-      { params: { year, month } }
+      { params: { year, month, ...(skipDeviceSync ? { sync: 0 } : {}) } }
     );
     return data;
   },

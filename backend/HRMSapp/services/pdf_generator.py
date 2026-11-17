@@ -156,13 +156,28 @@ def draw_page_decorations(canvas_obj, doc):
     canvas_obj.setFillColor(primary)
     canvas_obj.rect(0, height - header_height, width, header_height, fill=1, stroke=0)
     
-    # Company name (left)
+    # Company logo and name (left). Fall back to the text letterhead when no logo is active.
+    company_text_x = 1.5 * cm
+    try:
+        from ..models import CompanyLogo
+        logo = CompanyLogo.objects.filter(is_active=True).first()
+        if logo and logo.logo:
+            logo_path = logo.logo.path
+            canvas_obj.setFillColor(colors.white)
+            canvas_obj.roundRect(1.2 * cm, height - 1.95 * cm, 1.75 * cm, 1.5 * cm, 4, fill=1, stroke=0)
+            canvas_obj.drawImage(logo_path, 1.28 * cm, height - 1.9 * cm, width=1.6 * cm, height=1.4 * cm,
+                                preserveAspectRatio=True, anchor='c', mask='auto')
+            company_text_x = 3.2 * cm
+    except Exception as exc:
+        logger.warning('Company logo could not be added to the PDF letterhead: %s', exc)
+
+    # Company name
     canvas_obj.setFillColor(colors.white)
     canvas_obj.setFont('Helvetica-Bold', 16)
-    canvas_obj.drawString(1.5 * cm, height - 1.1 * cm, cfg['name'])
+    canvas_obj.drawString(company_text_x, height - 1.1 * cm, cfg['name'])
     
     canvas_obj.setFont('Helvetica-Oblique', 8)
-    canvas_obj.drawString(1.5 * cm, height - 1.6 * cm, cfg['tagline'])
+    canvas_obj.drawString(company_text_x, height - 1.6 * cm, cfg['tagline'])
     
     # Contact (right)
     canvas_obj.setFont('Helvetica', 7.5)
@@ -626,3 +641,66 @@ def generate_performance_letter_pdf(scorecard) -> bytes:
 
     doc.build(story, onFirstPage=draw_page_decorations, onLaterPages=draw_page_decorations)
     return buffer.getvalue()
+
+
+def generate_recruitment_offer_pdf(offer) -> bytes:
+    """Render the configured recruitment offer letter on the branded company letterhead."""
+    from ..models import CompanyLogo, LetterTemplate
+
+    template = LetterTemplate.objects.filter(
+        template_type='OFFER_LETTER', is_active=True, is_default=True,
+    ).first() or LetterTemplate.objects.filter(template_type='OFFER_LETTER', is_active=True).first()
+    if template is None:
+        raise ValueError('Create and activate a Recruitment Offer Letter template in Settings → Letter Templates.')
+    if not CompanyLogo.objects.filter(is_active=True).exclude(logo='').exists():
+        raise ValueError('Upload and activate a company logo in Settings → Company Logo to create the offer letter PDF.')
+
+    application = offer.application
+    candidate = application.candidate
+    requisition = application.requisition
+    context = {
+        'candidate_name': candidate.full_name,
+        'candidate_email': candidate.email,
+        'position_title': requisition.position.title,
+        'department_name': requisition.department.name,
+        'location_name': requisition.location.name,
+        'grade_band': requisition.grade_band,
+        'annual_salary': f'{offer.annual_salary:,.2f}',
+        'signing_bonus': f'{offer.signing_bonus:,.2f}',
+        'currency': offer.currency,
+        'joining_date': offer.joining_date.strftime('%d %B %Y'),
+        'offer_expiry_date': offer.expires_on.strftime('%d %B %Y'),
+        'offer_date': timezone.localdate().strftime('%d %B %Y'),
+        'offer_reference': str(offer.pk),
+        'requisition_number': requisition.requisition_number,
+        'company_name': get_company()['name'],
+    }
+    rendered = render_template_with_variables(template.body_html, context)
+    blocks = html_to_blocks(rendered)
+    if not blocks:
+        raise ValueError('The recruitment offer letter template has no printable content.')
+
+    buffer = BytesIO()
+    document = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=2 * cm, leftMargin=2 * cm,
+                                 topMargin=3.2 * cm, bottomMargin=2.5 * cm)
+    styles = getSampleStyleSheet()
+    primary = colors.HexColor(get_company()['primary'])
+    body_style = ParagraphStyle('RecruitmentOfferBody', parent=styles['BodyText'], fontName='Helvetica',
+                                fontSize=10.5, leading=15, alignment=TA_JUSTIFY,
+                                textColor=colors.HexColor('#1F2937'), spaceAfter=8)
+    heading_style = ParagraphStyle('RecruitmentOfferHeading', parent=styles['Heading2'], fontName='Helvetica-Bold',
+                                   fontSize=15, textColor=primary, spaceAfter=12, spaceBefore=6)
+    subheading_style = ParagraphStyle('RecruitmentOfferSubheading', parent=styles['Heading3'], fontName='Helvetica-Bold',
+                                      fontSize=12, textColor=primary, spaceAfter=8)
+    story = []
+    for kind, content in blocks:
+        if not content:
+            continue
+        style = heading_style if kind in ('h1', 'h2') else subheading_style if kind == 'h3' else body_style
+        if kind == 'li':
+            content = f'• {content}'
+        story.append(Paragraph(content, style))
+    document.build(story, onFirstPage=draw_page_decorations, onLaterPages=draw_page_decorations)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes

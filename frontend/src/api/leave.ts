@@ -154,6 +154,17 @@ import type {
 } from '../types/leave';
 
 export const leaveApplicationsApi = {
+  recordForEmployee: async (payload: {
+    employee_id: string;
+    leave_type: string;
+    start_date: string;
+    end_date: string;
+    reason: string;
+  }): Promise<{ ok: boolean; application_id: string; total_days: string; lop_days: string; message: string }> => {
+    const { data } = await api.post(`${BASE}/leave-applications/record-for-employee/`, payload);
+    return data;
+  },
+
   list: async (params?: {
     status?: string;
     leave_type?: string;

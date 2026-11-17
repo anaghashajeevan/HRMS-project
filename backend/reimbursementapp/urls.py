@@ -39,8 +39,10 @@ from .views import (
     QuickClaimDraftExpenseListAPIView,
     QuickClaimDraftExpenseUpdateAPIView,
     QuickClaimStatusAPIView,
-    QuickClaimUploadAPIView,
+    QuickClaimUploadAPIView,ClaimProjectListAPIView,
 )
+
+
 
 router = DefaultRouter()
 router.register("batches", MonthlyReimbursementBatchViewSet, basename="reimbursement-batch")
@@ -147,6 +149,7 @@ urlpatterns = [
         ClaimGenerateEmployeePdfAPIView.as_view(),
         name="generate-employee-pdf",
     ),
+    path("claim-projects/", ClaimProjectListAPIView.as_view(), name="claim-projects"),
 ]
 
 urlpatterns += router.urls

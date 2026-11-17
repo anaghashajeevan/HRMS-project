@@ -325,6 +325,8 @@ export default function MyClaimsPage() {
     return (
       c.employee_name?.toLowerCase().includes(q) ||
       c.employee_code?.toLowerCase().includes(q) ||
+      c.project_code?.toLowerCase().includes(q) ||
+      c.project_name?.toLowerCase().includes(q) ||
       c.remarks?.toLowerCase().includes(q)
     );
   });
@@ -486,8 +488,13 @@ export default function MyClaimsPage() {
                             {claim.employee_name}
                           </h3>
                           <p className="mt-0.5 text-xs text-gray-500">
-                            {claim.employee_code} • Created {formatDate(claim.created_at)}
+                            {claim.employee_code} • Claim month: {new Date(2000, claim.claim_month - 1).toLocaleString('en-US', { month: 'long' })} {claim.claim_year}
                           </p>
+                          {(claim.project_code || claim.project_name) && (
+                            <p className="mt-1 text-xs font-medium text-indigo-700">
+                              Project: {[claim.project_code, claim.project_name].filter(Boolean).join(' — ')}
+                            </p>
+                          )}
 
                           {/* Amounts */}
                           <div className="mt-3 flex flex-wrap items-center gap-4">

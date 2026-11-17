@@ -400,6 +400,123 @@ class LeaveApplicationViewSet(ModelViewSet):
         )
         return Response(detail_serializer.data, status=201)
 
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='record-for-employee',
+        permission_classes=[IsAuthenticated, IsHRAdmin],
+    )
+    def record_for_employee(self, request):
+        """HR records already-approved leave directly from the attendance calendar."""
+        from datetime import date
+        from decimal import Decimal
+        import uuid
+        from django.db import transaction
+        from django.utils.dateparse import parse_date
+        from HRMSapp.models import Employee
+        from .models import LeaveApplication, LeaveApplicationApproval, LeaveBalance
+        from .services.leave_service import LeaveApplicationService
+
+        employee_id = request.data.get('employee_id')
+        leave_type_id = request.data.get('leave_type')
+        start_date = parse_date(str(request.data.get('start_date', '')))
+        end_date = parse_date(str(request.data.get('end_date', '')))
+        reason = str(request.data.get('reason', '')).strip()
+
+        if not employee_id or not leave_type_id or not start_date or not end_date or not reason:
+            return Response(
+                {'detail': 'Employee, leave type, start date, end date, and reason are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if start_date > end_date:
+            return Response({'detail': 'End date must be on or after start date.'}, status=400)
+
+        try:
+            employee = Employee.objects.get(pk=employee_id, is_deleted=False)
+            leave_type = LeaveType.objects.get(pk=leave_type_id, is_active=True)
+        except (Employee.DoesNotExist, LeaveType.DoesNotExist):
+            return Response({'detail': 'Employee or active leave type was not found.'}, status=404)
+
+        overlaps = LeaveApplication.objects.filter(
+            employee=employee,
+            status__in=['PENDING', 'APPROVED'],
+            start_date__lte=end_date,
+            end_date__gte=start_date,
+        ).first()
+        if overlaps:
+            return Response(
+                {'detail': f'Leave overlaps {overlaps.application_number} ({overlaps.start_date} to {overlaps.end_date}).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        yearly_days = {}
+        year_start = start_date.year
+        while year_start <= end_date.year:
+            period_start = max(start_date, date(year_start, 1, 1))
+            period_end = min(end_date, date(year_start, 12, 31))
+            days = LeaveApplicationService.calculate_working_days(period_start, period_end, employee)
+            if days > 0:
+                yearly_days[year_start] = days
+            year_start += 1
+        total_days = sum(yearly_days.values(), Decimal('0'))
+        if total_days <= 0:
+            return Response(
+                {'detail': 'The selected range contains no working days after weekends and holidays are excluded.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        hr_employee = getattr(request.user, 'employee', None)
+        lop_days = Decimal('0')
+        with transaction.atomic():
+            for year, days in yearly_days.items():
+                balance, _ = LeaveBalance.objects.get_or_create(
+                    employee=employee,
+                    leave_type=leave_type,
+                    year=year,
+                    defaults={'allocated': Decimal('0'), 'accrued_till_date': Decimal('0')},
+                )
+                if leave_type.is_paid:
+                    chargeable = min(max(balance.available, Decimal('0')), days)
+                    balance.used += chargeable
+                    lop_days += days - chargeable
+                else:
+                    lop_days += days
+                balance.save(update_fields=['used', 'updated_at'])
+
+            application_number = f"HR-{timezone.now():%Y%m%d}-{uuid.uuid4().hex[:8].upper()}"
+            application = LeaveApplication.objects.create(
+                application_number=application_number,
+                employee=employee,
+                leave_type=leave_type,
+                start_date=start_date,
+                end_date=end_date,
+                total_days=total_days,
+                reason=reason,
+                status='APPROVED',
+                approved_by=hr_employee,
+                approved_at=timezone.now(),
+                is_lop=lop_days > 0,
+                lop_days=lop_days,
+            )
+            if hr_employee:
+                LeaveApplicationApproval.objects.create(
+                    application=application,
+                    step_number=1,
+                    step_name='HR Recorded Leave',
+                    approver=hr_employee,
+                    status='APPROVED',
+                    acted_at=timezone.now(),
+                    comments=f'Recorded by HR: {reason}',
+                )
+
+        return Response({
+            'ok': True,
+            'application_id': str(application.id),
+            'total_days': str(total_days),
+            'lop_days': str(lop_days),
+            'message': f'{leave_type.name} recorded for {total_days} working day(s).',
+        }, status=status.HTTP_201_CREATED)
+
     @action(detail=False, methods=['post'], url_path='validate')
     def validate_leave(self, request):
         """Validate a leave request without creating it (for live preview)."""

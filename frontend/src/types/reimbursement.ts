@@ -32,6 +32,8 @@ export type ClaimStatus = 'DRAFT' | 'SUBMITTED' | 'REVIEWING' | 'APPROVED' | 'PA
 export interface ReimbursementClaim {
   id: number;
   batch: number;
+  claim_month: number;
+  claim_year: number;
   employee: number;
   employee_name: string;
   employee_code: string;
@@ -42,6 +44,9 @@ export interface ReimbursementClaim {
   remarks: string;
   created_at: string;
   updated_at: string;
+  project_management_project_id: number | null;
+  project_code: string;
+  project_name: string;
 }
 
 // ------------------------------------------------------------------------------
@@ -111,6 +116,11 @@ export interface ExpenseItem {
   employee_name: string;
   employee_code: string;
   batch_title: string;
+  claim_month: number;
+  claim_year: number;
+  project_management_project_id: number | null;
+  project_code: string;
+  project_name: string;
   expense_date: string | null;
   category: ExpenseCategory;
   vendor_name: string;

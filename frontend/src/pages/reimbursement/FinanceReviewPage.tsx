@@ -286,6 +286,7 @@ export default function FinanceReviewPage() {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Employee</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Project</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Vendor / Description</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Category</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Claimed</th>
@@ -309,6 +310,16 @@ export default function FinanceReviewPage() {
                           <td className="px-4 py-3">
                             <p className="text-sm font-medium text-gray-900">{item.employee_name}</p>
                             <p className="text-xs text-gray-500">{item.employee_code}</p>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {item.project_code || item.project_name ? (
+                              <>
+                                <p className="font-medium">{item.project_code || item.project_name}</p>
+                                {item.project_code && item.project_name && (
+                                  <p className="text-xs text-gray-500">{item.project_name}</p>
+                                )}
+                              </>
+                            ) : '—'}
                           </td>
                           <td className="px-4 py-3">
                             <p className="text-sm text-gray-900">{item.vendor_name || '—'}</p>

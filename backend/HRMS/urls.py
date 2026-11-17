@@ -39,6 +39,8 @@ urlpatterns = [
     path('api/v1/policies/', include('policyapp.urls')),
     path('api/v1/assets/', include('assetapp.urls')),
     path('api/v1/payroll/', include('payrollapp.urls')),
+    path('api/v1/recruitment/', include('recruitmentapp.urls')),
+    path('api/v1/onboarding/', include('onboardingapp.urls')),
 ]
 
 if settings.DEBUG:

@@ -22,7 +22,7 @@ from .models import (
     get_quick_claim_allowed_recipient_domains,
     normalize_quick_claim_allowed_recipient_domains,
 )
-
+from .project_management import ProjectManagementAPIError, find_project
 
 def validate_quick_claim_recipient_allowlist(recipient_email: str, cc_emails: list[str]) -> None:
     allowed_domains = get_quick_claim_allowed_recipient_domains()
@@ -132,6 +132,8 @@ class MonthlyReimbursementBatchSerializer(serializers.ModelSerializer):
 class ReimbursementClaimSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(source="employee.full_name", read_only=True)
     employee_code = serializers.CharField(source="employee.employee_id", read_only=True)
+    claim_month = serializers.IntegerField(source="batch.month", read_only=True)
+    claim_year = serializers.IntegerField(source="batch.year", read_only=True)
 
     def get_employee_name(self, obj):
         emp = obj.employee if obj else None
@@ -143,14 +145,20 @@ class ReimbursementClaimSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "batch",
+            "claim_month",
+            "claim_year",
             "employee",
             "employee_name",
             "status","employee_code",
+            "source",
             "total_claimed_amount",
             "total_approved_amount",
             "remarks",
             "created_at",
             "updated_at",
+             "project_management_project_id",
+            "project_code",
+            "project_name",
         ]
 
 
@@ -163,6 +171,13 @@ class ExpenseItemSerializer(serializers.ModelSerializer):
     employee_name = serializers.SerializerMethodField()
     employee_code = serializers.CharField(source="claim.employee.employee_id", read_only=True)
     batch_title = serializers.CharField(source="claim.batch.title", read_only=True)
+    claim_month = serializers.IntegerField(source="claim.batch.month", read_only=True)
+    claim_year = serializers.IntegerField(source="claim.batch.year", read_only=True)
+    project_management_project_id = serializers.IntegerField(
+        source="claim.project_management_project_id", read_only=True
+    )
+    project_code = serializers.CharField(source="claim.project_code", read_only=True)
+    project_name = serializers.CharField(source="claim.project_name", read_only=True)
 
     def get_employee_name(self, obj):
         emp = obj.claim.employee if obj.claim else None
@@ -198,6 +213,11 @@ class ExpenseItemSerializer(serializers.ModelSerializer):
             "employee_name",
             "employee_code",
             "batch_title",
+            "claim_month",
+            "claim_year",
+            "project_management_project_id",
+            "project_code",
+            "project_name",
             "expense_date",
             "category",
             "vendor_name",
@@ -390,7 +410,8 @@ class SmartUploadCreateSerializer(serializers.Serializer):
     recipient_email = serializers.EmailField(required=False, allow_blank=True)
     cc = serializers.CharField(required=False, allow_blank=True)
     auto_send = serializers.BooleanField(required=False, default=False)
-
+    project_management_project_id = serializers.IntegerField(min_value=1)
+    
     def validate(self, attrs):
         if not attrs.get("employee_name", "").strip() and not attrs.get("created_by_employee"):
             attrs["employee_name"] = ""
@@ -400,8 +421,24 @@ class SmartUploadCreateSerializer(serializers.Serializer):
             serializers.EmailField().run_validation(email)
         if attrs.get("auto_send") and not attrs.get("recipient_email"):
             raise serializers.ValidationError({"recipient_email": "Recipient email is required for auto-send."})
+        project = self.context.get("project_management_project")
+        if project is not None:
+            attrs["_project_management_project"] = project
         return attrs
+    
+    def validate_project_management_project_id(self, value):
+        try:
+            project = find_project(value)
+        except ProjectManagementAPIError as exc:
+            raise serializers.ValidationError(str(exc))
 
+        if not project:
+            raise serializers.ValidationError(
+                "Select a valid Project Management project."
+            )
+
+        self.context["project_management_project"] = project
+        return value
 
 class SmartUploadedBillFileSerializer(serializers.ModelSerializer):
     extraction_status = serializers.SerializerMethodField()

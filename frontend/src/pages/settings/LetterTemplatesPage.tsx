@@ -11,6 +11,8 @@ import type { LetterTemplate, LetterTemplateType } from '../../types/workflow';
 import toast from 'react-hot-toast';
 
 const templateTypeColors: Record<LetterTemplateType, string> = {
+  OFFER_EMAIL: 'bg-blue-100 text-blue-800',
+  OFFER_LETTER: 'bg-emerald-100 text-emerald-800',
   PROMOTION: 'bg-green-100 text-green-700',
   TRANSFER: 'bg-blue-100 text-blue-700',
   REDESIGNATION: 'bg-purple-100 text-purple-700',
@@ -32,6 +34,8 @@ const templateTypeColors: Record<LetterTemplateType, string> = {
 };
 
 const templateTypeLabels: Record<LetterTemplateType, string> = {
+  OFFER_EMAIL: 'Recruitment Offer Email',
+  OFFER_LETTER: 'Recruitment Offer Letter',
   PROMOTION: 'Promotion',
   TRANSFER: 'Transfer',
   REDESIGNATION: 'Re-designation',
@@ -136,6 +140,10 @@ export default function LetterTemplatesPage() {
               className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
             >
              <option value="">All Types</option>
+  <optgroup label="Recruitment">
+    <option value="OFFER_EMAIL">Recruitment Offer Email</option>
+    <option value="OFFER_LETTER">Recruitment Offer Letter</option>
+  </optgroup>
   <optgroup label="🔄 Lifecycle">
     <option value="PROMOTION">Promotion</option>
     <option value="TRANSFER">Transfer</option>

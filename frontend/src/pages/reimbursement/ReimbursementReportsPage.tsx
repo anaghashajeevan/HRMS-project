@@ -222,7 +222,7 @@ export default function ReimbursementReportsPage() {
                 <option value="">Select a claim...</option>
                 {claims.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.employee_name} ({c.employee_code}) — ₹{parseFloat(c.total_claimed_amount).toLocaleString()}
+                    {c.employee_name} ({c.employee_code}){c.project_code ? ` — ${c.project_code}` : ''}{c.project_name ? ` ${c.project_name}` : ''} — ₹{parseFloat(c.total_claimed_amount).toLocaleString()}
                   </option>
                 ))}
               </select>

@@ -758,6 +758,8 @@ class ApprovalWorkflow(models.Model):
          ('PAYROLL', 'Payroll Run'),
          ('PAYSLIP', 'Payslip Request'),
          ('EXIT', 'Employee Exit'),
+         ('RECRUITMENT', 'Hiring Requisition'),
+         ('RECRUITMENT_OFFER', 'Recruitment Offer'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -796,6 +798,7 @@ class ApprovalWorkflowStep(models.Model):
         ('DEPARTMENT_HEAD', 'Department Head'),
         ('HR_ADMIN', 'Any HR Admin'),
         ('SYSTEM_ADMIN', 'Any System Admin'),
+        ('FINANCE_ADMIN', 'Finance Approver'),
         ('SPECIFIC_EMPLOYEE', 'Specific Employee'),
     ]
 
@@ -824,6 +827,8 @@ class ApprovalWorkflowStep(models.Model):
 class LetterTemplate(models.Model):
     """AI-generated or manual letter templates for PDF generation."""
     TEMPLATE_TYPE_CHOICES = [
+        ('OFFER_EMAIL', 'Recruitment Offer Email'),
+        ('OFFER_LETTER', 'Recruitment Offer Letter'),
         ('PROMOTION', 'Promotion Letter'),
         ('TRANSFER', 'Transfer Letter'),
         ('REDESIGNATION', 'Re-designation Letter'),

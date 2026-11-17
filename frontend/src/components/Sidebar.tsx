@@ -1785,6 +1785,42 @@ const mainNav: NavEntry[] = [
     to: '/lifecycle-requests',
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','HOD'],
   },
+  {
+    label: 'Hiring Requisitions',
+    icon: Briefcase,
+    to: '/recruitment/requisitions',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER', 'HOD', 'FINANCE', 'FINANCE_ADMIN', 'FINANCE_HEAD', 'CFO'],
+  },
+  {
+    label: 'Candidate Applications',
+    icon: UserCheck,
+    to: '/recruitment/candidates',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  },
+  {
+    label: 'Interviews',
+    icon: Calendar,
+    to: '/recruitment/interviews',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER', 'HOD', 'EMPLOYEE'],
+  },
+  {
+    label: 'Reference Checks',
+    icon: ClipboardCheck,
+    to: '/recruitment/reference-checks',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  },
+  {
+    label: 'Candidate Offers',
+    icon: FileText,
+    to: '/recruitment/offers',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'FINANCE_ADMIN'],
+  },
+  {
+    label: 'My Onboarding Tasks',
+    icon: ClipboardCheck,
+    to: '/onboarding/my-tasks',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER', 'DEPARTMENT_HEAD', 'HOD', 'EMPLOYEE', 'FINANCE', 'FINANCE_ADMIN', 'FINANCE_HEAD', 'CFO', 'IT_ADMIN'],
+  },
 
   // ==================== KRA & KPIs (Dropdown) ====================
   // {
@@ -1942,7 +1978,7 @@ const mainNav: NavEntry[] = [
   {
   label: 'Attendance',
   icon: Calendar,
-  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE','HOD'],
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER', 'EMPLOYEE','HOD'],
   children: [
     {
       label: 'My Attendance',
@@ -2100,12 +2136,12 @@ const mainNav: NavEntry[] = [
     to: '/payslips',
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE', 'REPORTING_MANAGER', 'HOD'],
   },
-  {
-    label: 'My PF / ESI',
-    icon: FileText,
-    to: '/my-statutory-contributions',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE', 'REPORTING_MANAGER', 'HOD'],
-  },
+  // {
+  //   label: 'My PF / ESI',
+  //   icon: FileText,
+  //   to: '/my-statutory-contributions',
+  //   allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE', 'REPORTING_MANAGER', 'HOD'],
+  // },
   {
     label: 'Reports',
     icon: BarChart3,
@@ -2155,6 +2191,18 @@ const settingsNav: NavItem[] = [
     label: 'Approval Workflows',
     icon: Workflow,
     to: '/settings/approval-workflows',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  },
+  {
+    label: 'Recruitment Setup',
+    icon: Briefcase,
+    to: '/settings/recruitment',
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  },
+  {
+    label: 'Onboarding Setup',
+    icon: ClipboardCheck,
+    to: '/settings/onboarding',
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
   },
   {
@@ -2336,7 +2384,7 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="hidden h-screen w-64 flex-shrink-0 flex-col border-r border-white/5 bg-gradient-to-b from-[#1e1b4b] via-[#221c5c] to-[#191653] shadow-2xl shadow-indigo-950/40 md:flex"
+      className="sticky top-0 z-30 hidden h-screen w-64 flex-shrink-0 flex-col border-r border-white/5 bg-gradient-to-b from-[#1e1b4b] via-[#221c5c] to-[#191653] shadow-2xl shadow-indigo-950/40 md:flex"
       style={{ fontFamily: "'Plus Jakarta Sans', 'Segoe UI', sans-serif" }}
     >
       {/* Fonts + motion keyframes (scoped, presentation only) */}

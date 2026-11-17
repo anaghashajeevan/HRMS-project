@@ -50,7 +50,9 @@ export default function ClaimMonitorPage() {
     return claims.filter(
       (c) =>
         c.employee_name?.toLowerCase().includes(q) ||
-        c.employee_code?.toLowerCase().includes(q)
+        c.employee_code?.toLowerCase().includes(q) ||
+        c.project_code?.toLowerCase().includes(q) ||
+        c.project_name?.toLowerCase().includes(q)
     );
   }, [claims, search]);
 
@@ -124,6 +126,7 @@ export default function ClaimMonitorPage() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Employee</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Project</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Claimed</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Approved</th>
@@ -153,6 +156,16 @@ export default function ClaimMonitorPage() {
                               <p className="text-xs text-gray-500">{claim.employee_code}</p>
                             </div>
                           </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700">
+                          {claim.project_code || claim.project_name ? (
+                            <>
+                              <p className="font-medium">{claim.project_code || claim.project_name}</p>
+                              {claim.project_code && claim.project_name && (
+                                <p className="text-xs text-gray-500">{claim.project_name}</p>
+                              )}
+                            </>
+                          ) : '—'}
                         </td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${statusCfg.className}`}>
