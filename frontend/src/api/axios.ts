@@ -1,7 +1,8 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 
-// const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1';
-const API_BASE_URL = '/api/v1';
+// HRMS is served by the NexusOne proxy below `/hrms`.  Keep API calls under
+// that prefix so they reach the HRMS backend instead of the portal API.
+const API_BASE_URL = '/hrms/api/v1';
 
 
 
@@ -65,7 +66,7 @@ api.interceptors.response.use(
 
       if (!refresh) {
         sessionStorage.clear();
-        window.location.href = '/login';
+        window.location.href = '/hrms/login';
         return Promise.reject(error);
       }
 
@@ -101,7 +102,7 @@ api.interceptors.response.use(
       } catch (err) {
         processQueue(err, null);
         sessionStorage.clear();
-        window.location.href = '/login';
+        window.location.href = '/hrms/login';
         return Promise.reject(err);
       } finally {
         isRefreshing = false;

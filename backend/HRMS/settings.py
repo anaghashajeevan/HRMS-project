@@ -581,6 +581,10 @@ NEXUS_SSO_DIRECTORY_SYNC_SECRET = os.getenv(
     os.getenv('NEXUS_SSO_ROLE_SYNC_SECRET', ''),
 )
 
+# Tailscale terminates TLS before requests reach the Docker services. Trust
+# the proxy's explicit scheme header so Django generates HTTPS resource URLs.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # If running outside Docker, replace docker service name with localhost
 if not RUNNING_IN_DOCKER:
     from urllib.parse import urlparse

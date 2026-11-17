@@ -10,7 +10,7 @@ export function AttendanceLayout() {
   const isSuperuser = userRoles.includes('SYSTEM_ADMIN') || userRoles.includes('HR_ADMIN');
 
   const returnToPortal = () => {
-    window.location.assign(`${window.location.protocol}//${window.location.hostname}:7000`);
+    window.location.assign(window.location.origin);
   };
 
   const navLinkClass = (isActive: boolean) =>

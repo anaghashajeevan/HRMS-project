@@ -23,7 +23,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
  */
 const isSsoCallbackDocument = () => {
   const query = new URLSearchParams(window.location.search);
-  return window.location.pathname === '/login' && Boolean(query.get('code'));
+  return window.location.pathname === '/hrms/login' && Boolean(query.get('code'));
 };
 
 const isFreshDocumentNavigation = () => {
@@ -100,7 +100,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(null);
       // A CRM logout returns to the central NexusOne applications workspace.
       // Do not use the callback-only Company Portal URL here.
-      window.location.replace(`${window.location.protocol}//${window.location.hostname}:7000/login`);
+      window.location.replace(window.location.origin);
     }
   };
 

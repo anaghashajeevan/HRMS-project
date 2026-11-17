@@ -2376,7 +2376,9 @@ class CompanyLogoSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'uploaded_at']
 
     def get_logo_url(self, obj):
-        request = self.context.get('request')
         if obj.logo:
-            return request.build_absolute_uri(obj.logo.url) if request else obj.logo.url
+            # HRMS is mounted below /hrms by the NexusOne reverse proxy.
+            # Returning the internal Docker host (for example, backend) makes
+            # the logo unreachable from users' browsers.
+            return f'/hrms{obj.logo.url}'
         return None

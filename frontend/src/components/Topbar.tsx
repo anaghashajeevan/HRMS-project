@@ -187,7 +187,7 @@ export default function Topbar() {
   };
 
   const returnToPortal = () => {
-    window.location.assign(`${window.location.protocol}//${window.location.hostname}:7000`);
+    window.location.assign(window.location.origin);
   };
 
   const handleMarkRead = async (id: string, link?: string) => {

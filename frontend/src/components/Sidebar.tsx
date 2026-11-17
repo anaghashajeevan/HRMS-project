@@ -2373,9 +2373,7 @@ export default function Sidebar() {
           <button
             type="button"
             onClick={() =>
-              window.location.assign(
-                `${window.location.protocol}//${window.location.hostname}:7000`
-              )
+              window.location.assign(window.location.origin)
             }
             className="relative z-10 flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-lg text-indigo-100 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             aria-label="Go to My applications"
