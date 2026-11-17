@@ -284,6 +284,8 @@ import CandidateInterviewsPage from './pages/recruitment/CandidateInterviewsPage
 import ReferenceChecksPage from './pages/recruitment/ReferenceChecksPage';
 import CandidateOffersPage from './pages/recruitment/CandidateOffersPage';
 import RecruitmentSettingsPage from './pages/recruitment/RecruitmentSettingsPage';
+import OnboardingSetupPage from './pages/onboarding/OnboardingSetupPage';
+import MyOnboardingTasksPage from './pages/onboarding/MyOnboardingTasksPage';
 import RatingScalePage from './pages/settings/RatingScalePage';
 import OrgPrioritiesPage from './pages/settings/OrgPrioritiesPage';
 import DepartmentalKRAsPage from './pages/settings/DepartmentalKRAsPage';
@@ -636,6 +638,22 @@ export default function App() {
             element={
               <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
                 <RecruitmentSettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/onboarding"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+                <OnboardingSetupPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/onboarding/my-tasks"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER', 'DEPARTMENT_HEAD', 'HOD', 'EMPLOYEE', 'FINANCE', 'FINANCE_ADMIN', 'FINANCE_HEAD', 'CFO', 'IT_ADMIN']}>
+                <MyOnboardingTasksPage />
               </ProtectedRoute>
             }
           />

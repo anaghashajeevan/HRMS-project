@@ -13,7 +13,7 @@ export type ApproverType =
   | 'LEAVE_APPLICATION'   
   | 'LEAVE_APPROVAL'; 
 
-export type ModuleType = 'LIFECYCLE' | 'LEAVE'|'POLICY'| 'CALENDAR' | 'PAYROLL' | 'PAYSLIP' | 'EXIT' | 'RECRUITMENT';
+export type ModuleType = 'LIFECYCLE' | 'LEAVE'|'POLICY'| 'CALENDAR' | 'PAYROLL' | 'PAYSLIP' | 'EXIT' | 'RECRUITMENT' | 'RECRUITMENT_OFFER';
 
 export interface WorkflowStep {
   id?: string;

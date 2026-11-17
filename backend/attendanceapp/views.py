@@ -878,7 +878,7 @@ class TeamAttendanceMonthView(APIView):
         # Allow managers + HR admins
         if not (
             user.has_role('MANAGER') or user.has_role('HR_ADMIN')
-            or user.has_role('SYSTEM_ADMIN')
+            or user.has_role('SYSTEM_ADMIN') or user.has_role('REPORTING_MANAGER')
         ):
             return Response({'detail': 'Only managers or HR can access team view'}, status=403)
 
@@ -888,7 +888,7 @@ class TeamAttendanceMonthView(APIView):
         # HR can specify any manager, others see own team
         target_manager = employee
         manager_id = request.query_params.get('manager_id')
-        if manager_id and (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
+        if manager_id and (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN') or user.has_role('REPORTING_MANAGER')):
             try:
                 target_manager = Employee.objects.get(id=manager_id, is_deleted=False)
             except Employee.DoesNotExist:
@@ -925,6 +925,7 @@ class EmployeeAttendanceMonthView(APIView):
 
         # Permission: HR sees all, manager only sees their team, employee only sees self
         is_hr = user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+        is_reporting_manager = user.has_role('REPORTING_MANAGER')
         is_manager_of = (
             user.has_role('MANAGER') and
             target_employee.reporting_manager_id == employee.id

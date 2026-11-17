@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.views import APIView
 
-from HRMSapp.models import CompanyStructure, Employee, JobPosition
+from HRMSapp.models import ApprovalWorkflow, CompanyStructure, Employee, JobPosition, Notification, UserAccount
 from HRMSapp.permissions import IsHRAdmin
 from .models import (
     CandidateApplication, CandidateApplicationHistory, CandidateInterview,
@@ -58,6 +58,58 @@ from .offer_services import deliver_accepted_offer_letter, link_accepted_offer_t
 
 def _is_hr(user):
     return user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+
+
+def _offer_workflow_steps(workflow):
+    return [{
+        'step_number': step.step_number, 'step_name': step.step_name,
+        'approver_type': step.approver_type,
+        'specific_employee': str(step.specific_employee_id) if step.specific_employee_id else None,
+        'sla_hours': step.sla_hours,
+    } for step in workflow.steps.order_by('step_number')]
+
+
+def _offer_approvers_for_step(step, offer):
+    requester = offer.created_by
+    req = offer.application.requisition
+    kind = step['approver_type']
+    if kind == 'REPORTING_MANAGER':
+        people = [requester.reporting_manager] if requester and requester.reporting_manager_id else []
+    elif kind == 'SKIP_LEVEL_MANAGER':
+        manager = requester.reporting_manager if requester and requester.reporting_manager_id else None
+        people = [manager.reporting_manager] if manager and manager.reporting_manager_id else []
+    elif kind == 'DEPARTMENT_HEAD':
+        head = req.department.department_head
+        people = [head] if head else []
+    elif kind in {'HR_ADMIN', 'SYSTEM_ADMIN', 'FINANCE_ADMIN'}:
+        roles = {'HR_ADMIN'} if kind == 'HR_ADMIN' else {'SYSTEM_ADMIN'} if kind == 'SYSTEM_ADMIN' else {'FINANCE', 'FINANCE_ADMIN', 'FINANCE_HEAD', 'CFO'}
+        accounts = UserAccount.objects.filter(is_active=True, roles__role_name__in=roles).select_related('employee').distinct()
+        people = [account.employee for account in accounts if account.employee_id]
+    elif kind == 'SPECIFIC_EMPLOYEE':
+        people = list(Employee.objects.filter(pk=step.get('specific_employee'), is_deleted=False))
+    else:
+        people = []
+    return list({person.pk: person for person in people if person and (not requester or person.pk != requester.pk)}.values())
+
+
+def _create_offer_step_approvals(offer, step):
+    approvers = _offer_approvers_for_step(step, offer)
+    if not approvers:
+        raise ValidationError({'detail': f'No eligible approver was found for offer workflow step "{step["step_name"]}".'})
+    CandidateOfferApproval.objects.bulk_create([
+        CandidateOfferApproval(offer=offer, role_code=step['approver_type'], step_number=step['step_number'],
+                               step_name=step['step_name'], assigned_to=person)
+        for person in approvers
+    ])
+    for person in approvers:
+        Notification.objects.create(
+            recipient=person,
+            notification_type='APPROVAL_REQUEST',
+            title=f'Offer approval required: {offer.application.candidate.full_name}',
+            message=f'Review the offer for {offer.application.candidate.full_name} at step "{step["step_name"]}".',
+            link='/recruitment/offers',
+            metadata={'offer_id': str(offer.pk), 'step_number': step['step_number']},
+        )
 
 
 class RecruitmentSettingsView(APIView):
@@ -718,26 +770,21 @@ class CandidateOffersView(APIView):
             raise ValidationError({'annual_salary': f'Salary must be between {rule.currency} {rule.minimum_salary} and {rule.maximum_salary} for {rule.grade_band}.'})
         if bonus > rule.maximum_signing_bonus:
             raise ValidationError({'signing_bonus': f'Signing bonus cannot exceed {rule.currency} {rule.maximum_signing_bonus}.'})
-        approvers = {}
-        for role_code in rule.required_approvers:
-            employee = Employee.objects.filter(
-                is_deleted=False, user_account__is_active=True,
-                user_account__roles__role_name=role_code, user_account__roles__is_active=True,
-            ).distinct().order_by('first_name', 'last_name').first()
-            if employee is None:
-                raise ValidationError({'detail': f'No active employee account is assigned the required {role_code} role.'})
-            approvers[role_code] = employee
+        workflow = ApprovalWorkflow.objects.filter(module='RECRUITMENT_OFFER', is_active=True).prefetch_related('steps').first()
+        if workflow is None:
+            raise ValidationError({'detail': 'Configure and activate a Recruitment Offers workflow in Approval Workflow Settings before preparing offers.'})
+        workflow_steps = _offer_workflow_steps(workflow)
+        if not workflow_steps:
+            raise ValidationError({'detail': 'The active Recruitment Offers workflow has no approval steps.'})
         with transaction.atomic():
             offer = CandidateOffer.objects.create(
-                application=application, rule=rule, currency=rule.currency,
+                application=application, rule=rule, workflow=workflow,
+                workflow_steps_snapshot=workflow_steps, current_step_number=workflow_steps[0]['step_number'], currency=rule.currency,
                 annual_salary=salary, signing_bonus=bonus, joining_date=values['joining_date'],
                 expires_on=values['expires_on'], notes=values.get('notes', '').strip(),
                 created_by=getattr(request.user, 'employee', None),
             )
-            CandidateOfferApproval.objects.bulk_create([
-                CandidateOfferApproval(offer=offer, role_code=role, assigned_to=employee)
-                for role, employee in approvers.items()
-            ])
+            _create_offer_step_approvals(offer, workflow_steps[0])
         offer = CandidateOffer.objects.select_related('application', 'application__candidate', 'application__requisition', 'application__requisition__position', 'rule').prefetch_related('approvals__assigned_to').get(pk=offer.pk)
         return Response(CandidateOfferSerializer(offer, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
@@ -801,7 +848,9 @@ class CandidateOfferApprovalView(APIView):
                 return Response({'detail': 'Offer not found.'}, status=status.HTTP_404_NOT_FOUND)
             if offer.status != 'PENDING_APPROVAL':
                 raise ValidationError({'detail': 'This offer is no longer awaiting approval.'})
-            approval = CandidateOfferApproval.objects.select_for_update().filter(offer=offer, assigned_to=employee, status='PENDING').first()
+            approval = CandidateOfferApproval.objects.select_for_update().filter(
+                offer=offer, step_number=offer.current_step_number, assigned_to=employee, status='PENDING'
+            ).first()
             if approval is None:
                 raise PermissionDenied('You are not an assigned approver for this offer.')
             approval.status = 'APPROVED' if decision == 'APPROVE' else 'REJECTED'
@@ -810,10 +859,16 @@ class CandidateOfferApprovalView(APIView):
             approval.save(update_fields=['status', 'comments', 'acted_at'])
             if decision == 'REJECT':
                 offer.status = 'REJECTED'
-            elif not offer.approvals.filter(status='PENDING').exists():
-                offer.status = 'APPROVED'
-                offer.approved_at = timezone.now()
-            offer.save(update_fields=['status', 'approved_at', 'updated_at'])
+            elif not offer.approvals.filter(step_number=offer.current_step_number, status='PENDING').exists():
+                next_step = next((step for step in offer.workflow_steps_snapshot if step['step_number'] > offer.current_step_number), None)
+                if next_step:
+                    offer.current_step_number = next_step['step_number']
+                    offer.save(update_fields=['current_step_number', 'updated_at'])
+                    _create_offer_step_approvals(offer, next_step)
+                else:
+                    offer.status = 'APPROVED'
+                    offer.approved_at = timezone.now()
+            offer.save(update_fields=['status', 'approved_at', 'current_step_number', 'updated_at'])
         offer = CandidateOffer.objects.select_related('application', 'application__candidate', 'application__requisition', 'application__requisition__position', 'rule').prefetch_related('approvals__assigned_to').get(pk=pk)
         return Response(CandidateOfferSerializer(offer, context={'request': request}).data)
 

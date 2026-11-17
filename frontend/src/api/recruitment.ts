@@ -88,12 +88,13 @@ export interface AcceptedOfferEmployeeOption {
   department_id: string; location_id: string; employee_name: string | null;
 }
 export interface CandidateOfferApproval {
-  id: string; role_code: string; assigned_to: string; assigned_to_name: string;
+  id: string; role_code: string; step_number: number; step_name: string; assigned_to: string; assigned_to_name: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED'; comments: string; acted_at: string | null;
 }
 export interface CandidateOffer {
   id: string; application_id: string; candidate_name: string; candidate_email: string;
   requisition_number: string; position_title: string; grade_band: string; rule: string; rule_name: string;
+  workflow_name: string | null; current_step_number: number; workflow_steps_snapshot: { step_number: number; step_name: string }[];
   currency: string; annual_salary: string; signing_bonus: string; joining_date: string; expires_on: string;
   status: 'PENDING_APPROVAL' | 'APPROVED' | 'SENT' | 'ACCEPTED' | 'DECLINED' | 'REJECTED' | 'WITHDRAWN';
   notes: string; approvals: CandidateOfferApproval[]; my_approval_id: string | null;

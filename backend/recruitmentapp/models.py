@@ -345,6 +345,9 @@ class CandidateOffer(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     application = models.OneToOneField(CandidateApplication, on_delete=models.PROTECT, related_name='offer')
     rule = models.ForeignKey(OfferRule, on_delete=models.PROTECT, related_name='candidate_offers')
+    workflow = models.ForeignKey('HRMSapp.ApprovalWorkflow', on_delete=models.SET_NULL, null=True, blank=True, related_name='recruitment_offers')
+    workflow_steps_snapshot = models.JSONField(default=list, blank=True)
+    current_step_number = models.PositiveSmallIntegerField(default=1)
     employee = models.ForeignKey('HRMSapp.Employee', on_delete=models.SET_NULL, null=True, blank=True, related_name='recruitment_offers')
     employee_document = models.OneToOneField('HRMSapp.EmployeeDocument', on_delete=models.SET_NULL, null=True, blank=True, related_name='recruitment_offer')
     offer_letter = models.FileField(upload_to='recruitment/offers/%Y/%m/', blank=True)
@@ -373,7 +376,9 @@ class CandidateOfferApproval(models.Model):
     STATUS_CHOICES = [('PENDING', 'Pending'), ('APPROVED', 'Approved'), ('REJECTED', 'Rejected')]
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     offer = models.ForeignKey(CandidateOffer, on_delete=models.CASCADE, related_name='approvals')
-    role_code = models.CharField(max_length=30)
+    role_code = models.CharField(max_length=30, blank=True, default='')
+    step_number = models.PositiveSmallIntegerField(default=1)
+    step_name = models.CharField(max_length=100, default='Offer approval')
     assigned_to = models.ForeignKey('HRMSapp.Employee', on_delete=models.PROTECT, related_name='recruitment_offer_approvals')
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
     comments = models.TextField(blank=True)
@@ -383,7 +388,7 @@ class CandidateOfferApproval(models.Model):
     class Meta:
         db_table = 'candidate_offer_approvals'
         ordering = ['created_at']
-        constraints = [models.UniqueConstraint(fields=['offer', 'role_code'], name='unique_offer_approval_role')]
+        constraints = [models.UniqueConstraint(fields=['offer', 'step_number', 'role_code', 'assigned_to'], name='unique_offer_approval_assignee_step')]
 
 
 class CandidateInterview(models.Model):

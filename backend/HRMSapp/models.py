@@ -745,6 +745,7 @@ class ApprovalWorkflow(models.Model):
          ('PAYSLIP', 'Payslip Request'),
          ('EXIT', 'Employee Exit'),
          ('RECRUITMENT', 'Hiring Requisition'),
+         ('RECRUITMENT_OFFER', 'Recruitment Offer'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

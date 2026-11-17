@@ -660,6 +660,12 @@ const MODULE_CONFIG: Record<ModuleType, {
     defaultName: 'Standard Hiring Requisition Approval',
     helpText: 'Approved requisitions reserve their position openings. Configure sequential reporting manager, department head, HR, Finance, or named employee approvals.',
   },
+  RECRUITMENT_OFFER: {
+    label: 'Recruitment Offers',
+    description: 'For salary and offer terms before an offer is sent to a candidate',
+    defaultName: 'Standard Recruitment Offer Approval',
+    helpText: 'Offers move through these approvers in order. Every assigned approver at a step must approve before the next step begins. Rejection stops the offer; only final approval enables HR to send it.',
+  },
 };
 
 export default function ApprovalWorkflowSettingsPage() {

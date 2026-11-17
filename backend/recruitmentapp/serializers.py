@@ -204,7 +204,7 @@ class CandidateOfferApprovalSerializer(serializers.ModelSerializer):
     assigned_to_name = serializers.CharField(source='assigned_to.full_name', read_only=True)
     class Meta:
         model = CandidateOfferApproval
-        fields = ['id', 'role_code', 'assigned_to', 'assigned_to_name', 'status', 'comments', 'acted_at']
+        fields = ['id', 'role_code', 'step_number', 'step_name', 'assigned_to', 'assigned_to_name', 'status', 'comments', 'acted_at']
 
 
 class CandidateOfferSerializer(serializers.ModelSerializer):
@@ -215,6 +215,7 @@ class CandidateOfferSerializer(serializers.ModelSerializer):
     position_title = serializers.CharField(source='application.requisition.position.title', read_only=True)
     grade_band = serializers.CharField(source='application.requisition.grade_band', read_only=True)
     rule_name = serializers.CharField(source='rule.name', read_only=True)
+    workflow_name = serializers.CharField(source='workflow.name', read_only=True, allow_null=True)
     approvals = CandidateOfferApprovalSerializer(many=True, read_only=True)
     my_approval_id = serializers.SerializerMethodField()
     employee_id = serializers.UUIDField(read_only=True, allow_null=True)
@@ -223,7 +224,7 @@ class CandidateOfferSerializer(serializers.ModelSerializer):
     class Meta:
         model = CandidateOffer
         fields = ['id', 'application_id', 'candidate_name', 'candidate_email', 'requisition_number', 'position_title', 'grade_band',
-                  'rule', 'rule_name', 'currency', 'annual_salary', 'signing_bonus', 'joining_date', 'expires_on',
+                  'rule', 'rule_name', 'workflow_name', 'current_step_number', 'workflow_steps_snapshot', 'currency', 'annual_salary', 'signing_bonus', 'joining_date', 'expires_on',
                   'status', 'notes', 'approvals', 'my_approval_id', 'employee_id', 'employee_name',
                   'offer_letter_filename', 'offer_letter_sent_at', 'offer_letter_error',
                   'created_at', 'approved_at', 'sent_at', 'responded_at']
@@ -231,7 +232,7 @@ class CandidateOfferSerializer(serializers.ModelSerializer):
     def get_my_approval_id(self, offer):
         request = self.context.get('request')
         employee = getattr(getattr(request, 'user', None), 'employee', None)
-        approval = offer.approvals.filter(assigned_to=employee, status='PENDING').first() if employee else None
+        approval = offer.approvals.filter(assigned_to=employee, step_number=offer.current_step_number, status='PENDING').first() if employee else None
         return str(approval.pk) if approval else None
 
     def get_offer_letter_filename(self, offer):
