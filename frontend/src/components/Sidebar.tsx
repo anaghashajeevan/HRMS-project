@@ -2117,12 +2117,12 @@ const mainNav: NavEntry[] = [
   //   to: '/my-statutory-contributions',
   //   allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE', 'REPORTING_MANAGER', 'HOD'],
   // },
-  {
-    label: 'Reports',
-    icon: BarChart3,
-    to: '/reports',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
-  },
+  // {
+  //   label: 'Reports',
+  //   icon: BarChart3,
+  //   to: '/reports',
+  //   allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+  // },
 ];
 
 const settingsNav: NavItem[] = [
