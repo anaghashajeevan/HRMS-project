@@ -2391,17 +2391,6 @@ export default function Sidebar() {
         {/* Brand area shares the sidebar background; the HRMS product label
             sits directly below the active company logo. */}
         <div className="relative flex h-36 flex-shrink-0 flex-col items-center justify-center border-b border-white/10 px-4 pt-7">
-          <button
-            type="button"
-            onClick={() =>
-              window.location.assign(window.location.origin)
-            }
-            className="absolute left-4 top-3 flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-indigo-100 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
-            aria-label="Go to My applications"
-            title="Go to My applications"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </button>
           <div className="flex h-14 max-w-full items-center justify-center">
             {logo.logo_url ? (
               <img
@@ -2433,6 +2422,17 @@ export default function Sidebar() {
 
         {/* Scrollable Nav */}
         <nav className="flex-1 overflow-y-auto p-4">
+          <button
+            type="button"
+            onClick={() => window.location.assign(window.location.origin)}
+            className={`${itemBase} ${itemInactive} mb-2 w-full`}
+            aria-label="Go to My applications"
+            title="Go to My applications"
+          >
+            <ArrowLeft className={iconClass()} />
+            <span>Back to applications</span>
+          </button>
+
           {/* Main Navigation */}
           {visibleMainNav.length > 0 && (
             <div className="space-y-1">
