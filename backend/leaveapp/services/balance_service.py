@@ -161,6 +161,7 @@ Leave balance calculation service.
 from decimal import Decimal, InvalidOperation
 import logging
 
+from django.db import transaction
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -317,6 +318,90 @@ class LeaveBalanceService:
             )
         except LeaveBalance.DoesNotExist:
             return None
+
+    @staticmethod
+    @transaction.atomic
+    def recalculate_employee_balance(employee, year=None):
+        """Recalculate an employee's earned allocation for a calendar year.
+
+        Usage, pending requests, carry-forward, adjustments, and encashments are
+        deliberately left untouched. Only policy-derived allocation/accrual
+        fields are updated from the employee's current joining date.
+        """
+        from ..models import LeaveType, LeaveBalance
+
+        today = timezone.localdate()
+        year = int(year or today.year)
+        joining_date = employee.date_of_joining
+        changed = []
+
+        for leave_type in LeaveType.objects.filter(is_active=True):
+            quota = Decimal(str(leave_type.yearly_quota or 0))
+            per_period = Decimal(str(leave_type.accrual_per_period or 0))
+            allocated = Decimal('0')
+            accrued = Decimal('0')
+
+            if joining_date.year > year:
+                pass
+            elif leave_type.accrual_type == 'YEARLY':
+                if joining_date.year < year:
+                    allocated = quota
+                elif joining_date.year == year:
+                    months_remaining = 13 - joining_date.month
+                    allocated = (quota * Decimal(months_remaining) / Decimal('12')).quantize(Decimal('0.1'))
+                accrued = allocated
+
+            elif leave_type.accrual_type == 'MONTHLY':
+                allocated = quota
+                if year < today.year:
+                    months_accrued = 12 - joining_date.month + 1 if joining_date.year == year else 12
+                elif year == today.year and joining_date <= today:
+                    months_accrued = today.month - joining_date.month + 1 if joining_date.year == year else today.month
+                else:
+                    months_accrued = 0
+                accrued = min(
+                    quota,
+                    (per_period * Decimal(max(0, months_accrued))).quantize(Decimal('0.1')),
+                )
+
+            elif leave_type.accrual_type == 'QUARTERLY':
+                allocated = quota
+                quarters_from_joining = (joining_date.month - 1) // 3 + 1 if joining_date.year == year else 1
+                if year < today.year:
+                    quarters_accrued = 5 - quarters_from_joining
+                elif year == today.year and joining_date <= today:
+                    quarters_accrued = (today.month - 1) // 3 + 2 - quarters_from_joining
+                else:
+                    quarters_accrued = 0
+                accrued = min(
+                    quota,
+                    (per_period * Decimal(max(0, quarters_accrued))).quantize(Decimal('0.1')),
+                )
+
+            balance, _ = LeaveBalance.objects.get_or_create(
+                employee=employee,
+                leave_type=leave_type,
+                year=year,
+                defaults={
+                    'allocated': allocated,
+                    'accrued_till_date': accrued,
+                    'last_accrual_date': today,
+                },
+            )
+            if (
+                balance.allocated != allocated
+                or balance.accrued_till_date != accrued
+                or balance.last_accrual_date != today
+            ):
+                balance.allocated = allocated
+                balance.accrued_till_date = accrued
+                balance.last_accrual_date = today
+                balance.save(update_fields=[
+                    'allocated', 'accrued_till_date', 'last_accrual_date', 'updated_at',
+                ])
+            changed.append(balance)
+
+        return changed
 
     @staticmethod
     def accrue_monthly(year=None, month=None):

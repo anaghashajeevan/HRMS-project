@@ -354,13 +354,14 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
   Loader2, PlayCircle, CheckCircle2, AlertCircle,
-  RefreshCw, Search, Building2, Users, TrendingUp, TrendingDown,
+  RefreshCw, Search, Building2, Users, TrendingUp, TrendingDown, RotateCw,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Sidebar from '../../components/Sidebar';
 import Topbar from '../../components/Topbar';
 import { leaveBalancesApi } from '../../api/leave';
 import type { LeaveBalance, AllocateAllResult } from '../../types/leave';
+import { useAuth } from '../../context/AuthContext';
 
 interface LeaveTypeInfo {
   id: string;
@@ -381,6 +382,8 @@ interface EmployeeRow {
 }
 
 export default function LeaveBalancesPage() {
+  const { user } = useAuth();
+  const canRecalculate = Boolean(user?.role_codes?.some((role) => ['HR_ADMIN', 'SYSTEM_ADMIN'].includes(role)));
   const [balances, setBalances] = useState<LeaveBalance[]>([]);
   const [loading, setLoading] = useState(true);
   const [allocating, setAllocating] = useState(false);
@@ -388,6 +391,7 @@ export default function LeaveBalancesPage() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [lastResult, setLastResult] = useState<AllocateAllResult | null>(null);
   const [viewMode, setViewMode] = useState<'available' | 'detailed'>('available');
+  const [recalculatingEmployee, setRecalculatingEmployee] = useState<string | null>(null);
 
   useEffect(() => {
     loadBalances();
@@ -426,6 +430,24 @@ export default function LeaveBalancesPage() {
       toast.error(error?.response?.data?.detail || 'Allocation failed');
     } finally {
       setAllocating(false);
+    }
+  };
+
+  const handleRecalculate = async (row: EmployeeRow) => {
+    if (!window.confirm(
+      `Recalculate ${row.employeeName}'s ${year} leave balances from the current joining date?\n\n` +
+      'Only policy allocation and accrual are recalculated. Used, pending, carry-forward, adjustments, and encashments are preserved.'
+    )) return;
+
+    setRecalculatingEmployee(row.employeeId);
+    try {
+      const result = await leaveBalancesApi.recalculateEmployee(row.employeeId, year);
+      toast.success(result.message);
+      await loadBalances();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Could not recalculate leave balances');
+    } finally {
+      setRecalculatingEmployee(null);
     }
   };
 
@@ -714,6 +736,7 @@ export default function LeaveBalancesPage() {
                       <th className="border-l border-gray-300 bg-green-50 px-3 py-3 text-center text-xs font-bold uppercase text-green-800">
                         Total
                       </th>
+                      {canRecalculate && <th className="border-l border-gray-200 px-3 py-3 text-center text-xs font-bold uppercase text-gray-600">Actions</th>}
                     </tr>
 
                     {/* Sub-header (only for detailed mode) */}
@@ -736,6 +759,7 @@ export default function LeaveBalancesPage() {
                         <th className="border-l border-gray-300 bg-green-50 px-3 py-1.5 text-center text-green-800">
                           Avail
                         </th>
+                        {canRecalculate && <th className="border-l border-gray-200 bg-gray-50" />}
                       </tr>
                     )}
                   </thead>
@@ -880,6 +904,20 @@ export default function LeaveBalancesPage() {
                             {row.totalAvailable.toFixed(1)}
                           </span>
                         </td>
+                        {canRecalculate && <td className="border-l border-gray-100 px-3 py-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleRecalculate(row)}
+                            disabled={recalculatingEmployee === row.employeeId}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                            title={`Recalculate ${year} balance from joining date`}
+                          >
+                            {recalculatingEmployee === row.employeeId
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <RotateCw className="h-3.5 w-3.5" />}
+                            Recalculate
+                          </button>
+                        </td>}
                       </tr>
                     ))}
                   </tbody>
@@ -937,6 +975,7 @@ export default function LeaveBalancesPage() {
                           .reduce((sum, r) => sum + r.totalAvailable, 0)
                           .toFixed(1)}
                       </td>
+                      {canRecalculate && <td className="border-l border-gray-200 bg-gray-50" />}
                     </tr>
                   </tfoot>
                 </table>

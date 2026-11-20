@@ -24,6 +24,11 @@ def candidate_resume_path(instance, filename):
     return f'recruitment/resumes/{uuid.uuid4().hex}{suffix}'
 
 
+def candidate_document_path(instance, filename):
+    suffix = Path(filename).suffix.lower()
+    return f'recruitment/candidate_documents/{uuid.uuid4().hex}{suffix}'
+
+
 class RecruitmentSettings(models.Model):
     """Initial hiring controls. Configure permitted requisition creators."""
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
@@ -243,6 +248,41 @@ class RecruitmentCandidate(models.Model):
     @property
     def full_name(self):
         return f'{self.first_name} {self.last_name}'.strip()
+
+
+class CandidateDocument(models.Model):
+    """Private, HR-managed documents received for a candidate's offer."""
+    TYPE_CHOICES = [
+        ('ID_PROOF', 'ID Proof'), ('ADDRESS_PROOF', 'Address Proof'),
+        ('EDUCATION', 'Education Certificate'), ('EXPERIENCE', 'Experience Certificate'),
+        ('PAN', 'PAN Card'), ('AADHAAR', 'Aadhaar Card'), ('PASSPORT', 'Passport'),
+        ('MEDICAL', 'Medical Certificate'), ('OTHER', 'Other'),
+    ]
+    STATUS_CHOICES = [('RECEIVED', 'Received'), ('VERIFIED', 'Verified'), ('REJECTED', 'Needs replacement')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    candidate = models.ForeignKey(RecruitmentCandidate, on_delete=models.CASCADE, related_name='documents')
+    application = models.ForeignKey('CandidateApplication', on_delete=models.CASCADE, related_name='candidate_documents')
+    document_type = models.CharField(max_length=30, choices=TYPE_CHOICES, default='OTHER')
+    document_name = models.CharField(max_length=150)
+    file = models.FileField(upload_to=candidate_document_path, storage=PrivateResumeStorage())
+    original_filename = models.CharField(max_length=255)
+    file_size_kb = models.PositiveIntegerField(default=0)
+    mime_type = models.CharField(max_length=100, blank=True)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='RECEIVED')
+    review_notes = models.TextField(blank=True)
+    uploaded_by = models.ForeignKey('HRMSapp.Employee', on_delete=models.SET_NULL, null=True, blank=True, related_name='candidate_documents_uploaded')
+    reviewed_by = models.ForeignKey('HRMSapp.Employee', on_delete=models.SET_NULL, null=True, blank=True, related_name='candidate_documents_reviewed')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    employee_document = models.OneToOneField('HRMSapp.EmployeeDocument', on_delete=models.SET_NULL, null=True, blank=True, related_name='source_candidate_document')
+
+    class Meta:
+        db_table = 'candidate_documents'
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f'{self.document_name} - {self.candidate.full_name}'
 
 
 class CandidateApplication(models.Model):

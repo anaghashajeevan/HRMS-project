@@ -22,6 +22,7 @@ const statusColors: Record<string, string> = {
 
 const allocStatusColors: Record<string, string> = {
   ALLOCATED: 'bg-blue-100 text-blue-700',
+  NOT_RECEIVED: 'bg-red-100 text-red-700',
   RETURNED: 'bg-emerald-100 text-emerald-700',
   DAMAGED: 'bg-amber-100 text-amber-700',
   LOST: 'bg-red-100 text-red-700',
@@ -157,6 +158,24 @@ export default function AssetDetailPage() {
               </button>
             )}
           </div>
+
+          {(asset.photos?.length || asset.image_url) && (
+            <div className="mb-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
+              <h3 className="mb-4 text-sm font-semibold text-gray-900">Asset Photos</h3>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                {asset.image_url && (
+                  <a href={asset.image_url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg bg-gray-50 ring-1 ring-gray-200">
+                    <img src={asset.image_url} alt={`${asset.name} asset`} className="block h-36 w-full object-contain" />
+                  </a>
+                )}
+                {asset.photos?.map((photo) => (
+                  <a key={photo.id} href={photo.image_url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg bg-gray-50 ring-1 ring-gray-200">
+                    <img src={photo.image_url} alt={photo.caption || asset.name} className="block h-36 w-full object-contain" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             {/* Asset Details */}

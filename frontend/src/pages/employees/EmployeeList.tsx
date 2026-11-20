@@ -226,7 +226,7 @@
 
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Filter, Plus, Eye, Loader2, Users, Upload } from 'lucide-react';
+import { Search, Filter, Plus, Eye, Loader2, Users, Upload, Trash2 } from 'lucide-react';
 import Sidebar from '../../components/Sidebar';
 import Topbar from '../../components/Topbar';
 import BulkImportModal from '../../components/BulkImportModal';
@@ -255,11 +255,13 @@ export default function EmployeeList() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(true);
+  const [deletingEmployeeId, setDeletingEmployeeId] = useState<string | null>(null);
   const [showBulkImport, setShowBulkImport] = useState(false);   // ⬅️ NEW
 
   const pageSize = 20;
   const totalPages = Math.ceil(count / pageSize);
   const isHRAdmin = user?.role_codes.includes('HR_ADMIN') || user?.role_codes.includes('SYSTEM_ADMIN');
+  const isSystemAdmin = user?.role_codes.includes('SYSTEM_ADMIN') ?? false;
 
   const fetchEmployees = async () => {
     setLoading(true);
@@ -283,6 +285,26 @@ export default function EmployeeList() {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, search, status]);
+
+  const deleteEmployee = async (employee: EmployeeListItem) => {
+    const confirmed = window.confirm(
+      `Delete ${employee.full_name} (${employee.employee_id})? The employee record will be marked deleted, and their HRMS account will be deactivated.`
+    );
+    if (!confirmed) return;
+
+    setDeletingEmployeeId(employee.id);
+    try {
+      await employeesApi.delete(employee.id);
+      setEmployees((current) => current.filter((item) => item.id !== employee.id));
+      setCount((current) => Math.max(0, current - 1));
+      toast.success(`${employee.full_name} was deleted`);
+      if (employees.length === 1 && page > 1) setPage((current) => current - 1);
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Failed to delete employee');
+    } finally {
+      setDeletingEmployeeId(null);
+    }
+  };
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -458,6 +480,22 @@ export default function EmployeeList() {
                         >
                           <Eye className="h-4 w-4" />
                         </button>
+                        {isSystemAdmin && (
+                          <button
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void deleteEmployee(emp);
+                            }}
+                            disabled={deletingEmployeeId === emp.id}
+                            className="ml-1 rounded p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+                            title="Delete employee"
+                            aria-label={`Delete ${emp.full_name}`}
+                          >
+                            {deletingEmployeeId === emp.id
+                              ? <Loader2 className="h-4 w-4 animate-spin" />
+                              : <Trash2 className="h-4 w-4" />}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

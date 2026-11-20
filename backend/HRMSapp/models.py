@@ -760,6 +760,7 @@ class ApprovalWorkflow(models.Model):
          ('EXIT', 'Employee Exit'),
          ('RECRUITMENT', 'Hiring Requisition'),
          ('RECRUITMENT_OFFER', 'Recruitment Offer'),
+         ('ASSET_RECEIPT_REVIEW', 'Asset Receipt Flag Review'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -1018,6 +1019,7 @@ class Notification(models.Model):
         ('SYSTEM', 'System Notification'),
         ('ASSET_ALLOCATED', 'Asset Allocated'),
         ('ASSET_RETURNED', 'Asset Returned'),
+        ('ASSET_RECEIPT_REVIEW', 'Asset Receipt Review'),
         ('EMPLOYEE_ID_CHANGED', 'Employee ID Changed'),
         ('EMPLOYMENT_STATUS_CHANGED', 'Employment Status Changed'),
     ]
@@ -1548,6 +1550,8 @@ class MonthlyKRA(models.Model):
     kra_score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     display_order = models.IntegerField(default=0)
     peer_rating_required = models.BooleanField(default=False)
+    # Stable source key for idempotent integrations such as SalesPie budgets.
+    external_source_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
     class Meta:
         db_table = 'perf_monthly_kras'
         ordering = ['monthly_plan', 'display_order', 'name']

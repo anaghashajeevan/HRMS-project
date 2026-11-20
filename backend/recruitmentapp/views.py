@@ -22,6 +22,7 @@ from .models import (
     CandidateInterviewEvaluation, HiringApprovalAction, HiringRequisition,
     RecruitmentCandidate, RecruitmentStage, InterviewScorecard, CandidateBackgroundCheck,
     CandidateOffer, CandidateOfferApproval,
+    CandidateDocument,
 )
 from .serializers import (
     ApprovalDecisionSerializer,
@@ -43,6 +44,7 @@ from .serializers import (
     OfferRuleSerializer,
     CandidateBackgroundCheckSerializer,
     CandidateOfferCreateSerializer, CandidateOfferSerializer,
+    CandidateDocumentSerializer, CandidateDocumentUploadSerializer,
 )
 from .models import RecruitmentEmailTemplate, OfferRule
 from .services import (
@@ -819,7 +821,11 @@ class CandidateOfferOptionsView(APIView):
             'accepted_offers': [{
                 'id': str(offer.pk),
                 'candidate_name': offer.application.candidate.full_name,
+                'first_name': offer.application.candidate.first_name,
+                'last_name': offer.application.candidate.last_name,
                 'candidate_email': offer.application.candidate.email,
+                'phone_number': offer.application.candidate.phone,
+                'date_of_joining': offer.joining_date.isoformat(),
                 'position_id': str(offer.application.requisition.position_id),
                 'position_title': offer.application.requisition.position.title,
                 'department_id': str(offer.application.requisition.department_id),
@@ -1001,4 +1007,70 @@ class CandidateOfferLetterView(APIView):
         handle = offer.offer_letter.open('rb')
         filename = offer.offer_letter.name.rsplit('/', 1)[-1]
         return FileResponse(handle, as_attachment=True, filename=filename, content_type='application/pdf')
+
+
+class CandidateOfferDocumentsView(APIView):
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request, pk):
+        offer = CandidateOffer.objects.filter(pk=pk).first()
+        if offer is None:
+            return Response({'detail': 'Offer not found.'}, status=status.HTTP_404_NOT_FOUND)
+        documents = CandidateDocument.objects.filter(application=offer.application).select_related('uploaded_by', 'reviewed_by', 'employee_document')
+        return Response(CandidateDocumentSerializer(documents, many=True).data)
+
+    def post(self, request, pk):
+        offer = CandidateOffer.objects.select_related('application__candidate').filter(pk=pk).first()
+        if offer is None:
+            return Response({'detail': 'Offer not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = CandidateDocumentUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        uploaded_file = serializer.validated_data['file']
+        document = CandidateDocument(
+            candidate=offer.application.candidate,
+            application=offer.application,
+            document_type=serializer.validated_data['document_type'],
+            document_name=serializer.validated_data['document_name'].strip(),
+            original_filename=uploaded_file.name[:255],
+            file_size_kb=max(1, round(uploaded_file.size / 1024)),
+            mime_type=getattr(uploaded_file, 'content_type', '') or mimetypes.guess_type(uploaded_file.name)[0] or '',
+            uploaded_by=getattr(request.user, 'employee', None),
+        )
+        document.file.save(uploaded_file.name, uploaded_file, save=True)
+        return Response(CandidateDocumentSerializer(document).data, status=status.HTTP_201_CREATED)
+
+
+class CandidateOfferDocumentDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def get_object(self, pk, document_id):
+        return CandidateDocument.objects.filter(application__offer__pk=pk, pk=document_id).first()
+
+    def get(self, request, pk, document_id):
+        document = self.get_object(pk, document_id)
+        if document is None or not document.file:
+            return Response({'detail': 'Candidate document not found.'}, status=status.HTTP_404_NOT_FOUND)
+        filename = get_valid_filename(document.original_filename or document.document_name)
+        return FileResponse(document.file.open('rb'), as_attachment=True, filename=filename, content_type=document.mime_type or 'application/octet-stream')
+
+    def patch(self, request, pk, document_id):
+        document = self.get_object(pk, document_id)
+        if document is None:
+            return Response({'detail': 'Candidate document not found.'}, status=status.HTTP_404_NOT_FOUND)
+        decision = request.data.get('status')
+        if decision not in {'RECEIVED', 'VERIFIED', 'REJECTED'}:
+            raise ValidationError({'status': 'Choose Received, Verified, or Needs replacement.'})
+        document.status = decision
+        document.review_notes = str(request.data.get('review_notes', '')).strip()[:4000]
+        document.reviewed_by = getattr(request.user, 'employee', None)
+        document.reviewed_at = timezone.now()
+        document.save(update_fields=['status', 'review_notes', 'reviewed_by', 'reviewed_at'])
+        if decision == 'VERIFIED':
+            offer = CandidateOffer.objects.select_related('application__candidate', 'created_by').filter(pk=pk).first()
+            if offer and offer.employee_id:
+                from .offer_services import link_accepted_offer_to_employee
+                link_accepted_offer_to_employee(offer, offer.employee, uploaded_by=getattr(request.user, 'employee', None))
+                document.refresh_from_db()
+        return Response(CandidateDocumentSerializer(document).data)
 

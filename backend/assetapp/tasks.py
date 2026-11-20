@@ -103,6 +103,7 @@ import logging
 from celery import shared_task
 from django.core.mail import EmailMultiAlternatives
 from django.conf import settings
+from django.db import transaction
 from django.template import Template, Context
 from django.utils import timezone
 
@@ -134,7 +135,8 @@ def notify_asset_allocation(self, allocation_id):
         title='New Asset Allocated',
         message=(
             f'A new {asset.category.name} ({asset.name} — {asset.asset_tag}) '
-            f'has been allocated to you.'
+            f'has been allocated to you. Please confirm receipt by '
+            f"{allocation.response_due_at.strftime('%d %b %Y') if allocation.response_due_at else 'the due date'}."
         ),
         link='/assets/my-assets',
         metadata={
@@ -172,6 +174,7 @@ def notify_asset_allocation(self, allocation_id):
         ),
         'handover_notes': allocation.handover_notes or 'None',
         'allocated_by': allocation.allocated_by.full_name if allocation.allocated_by else 'HR Team',
+        'receipt_response_due': allocation.response_due_at.strftime('%d %B %Y') if allocation.response_due_at else 'N/A',
         'portal_url': portal_url,
     }
 
@@ -192,6 +195,10 @@ def notify_asset_allocation(self, allocation_id):
         logger.info(f"Using letter template: {template.name} ({template.id})")
         subject = Template(template.subject).render(Context(context_dict))
         html_body = Template(template.body_html).render(Context(context_dict))
+        html_body += (
+            f"<p>Please confirm physical receipt or raise a flag in My Assets by "
+            f"<strong>{context_dict['receipt_response_due']}</strong>.</p>"
+        )
     else:
         logger.warning(
             "No active ASSET_ALLOCATION letter template found. "
@@ -208,7 +215,9 @@ def notify_asset_allocation(self, allocation_id):
           <li><strong>Asset Tag:</strong> {asset.asset_tag}</li>
           <li><strong>Serial Number:</strong> {asset.serial_number}</li>
           <li><strong>Allocated On:</strong> {context_dict['allocated_date']}</li>
+          <li><strong>Please confirm receipt by:</strong> {context_dict['receipt_response_due']}</li>
         </ul>
+        <p>Please open My Assets to confirm physical receipt or raise a flag if you did not receive it.</p>
         <p>View your assets: <a href="{portal_url}/assets/my-assets">My Assets</a></p>
         <p>Regards,<br/>HR & IT — {company_name}</p>
         """
@@ -233,6 +242,36 @@ def notify_asset_allocation(self, allocation_id):
         logger.error(f"Failed to send asset allocation email: {e}")
         raise self.retry(exc=e)
 
+@shared_task
+def auto_accept_asset_receipts():
+    """Auto-accept allocations whose category response window has expired."""
+    now = timezone.now()
+    due_ids = list(AssetAllocation.objects.filter(
+        status='ALLOCATED', receipt_status='PENDING',
+        response_due_at__isnull=False, response_due_at__lte=now,
+    ).values_list('id', flat=True))
+    accepted = 0
+    for allocation_id in due_ids:
+        with transaction.atomic():
+            allocation = AssetAllocation.objects.select_for_update().select_related('asset', 'employee').filter(
+                id=allocation_id, status='ALLOCATED', receipt_status='PENDING',
+                response_due_at__lte=now,
+            ).first()
+            if not allocation:
+                continue
+            allocation.receipt_status = 'AUTO_ACCEPTED'
+            allocation.employee_response_at = now
+            allocation.save(update_fields=['receipt_status', 'employee_response_at', 'updated_at'])
+            Notification.objects.create(
+                recipient=allocation.employee,
+                notification_type='ASSET_RECEIPT_REVIEW',
+                title='Asset receipt auto-confirmed',
+                message=f'{allocation.asset.name} ({allocation.asset.asset_tag}) was auto-confirmed because the response window expired.',
+                link='/assets/my-assets',
+                metadata={'allocation_id': str(allocation.id), 'receipt_status': 'AUTO_ACCEPTED'},
+            )
+            accepted += 1
+    return {'auto_accepted': accepted}
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)

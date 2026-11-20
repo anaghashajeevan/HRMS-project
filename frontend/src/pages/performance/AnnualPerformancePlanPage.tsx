@@ -4571,6 +4571,7 @@ export default function AnnualPerformancePlanPage() {
 
   const [annualPlan, setAnnualPlan] = useState<AnnualPerformancePlanDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncingSalesPie, setSyncingSalesPie] = useState(false);
 
   // Selections
   const [activeMonthNum, setActiveMonthNum] = useState<number>(4);
@@ -4607,8 +4608,8 @@ export default function AnnualPerformancePlanPage() {
   const [carryReasonInput, setCarryReasonInput] = useState('');
   const [submittingCarry, setSubmittingCarry] = useState(false);
 
-  const loadPlan = async () => {
-    setLoading(true);
+  const loadPlan = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     try {
       let data: AnnualPerformancePlanDetail;
       if (planId) {
@@ -4624,7 +4625,30 @@ export default function AnnualPerformancePlanPage() {
         toast.error(err.response?.data?.detail || 'Failed to load Annual Performance Plan');
       }
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
+    }
+  };
+
+  const syncSalesPieBudgets = async () => {
+    if (!annualPlan || syncingSalesPie) return;
+    setSyncingSalesPie(true);
+    try {
+      const result = await annualPlansApi.syncSalesPieBudgets(annualPlan.financial_year);
+      const messages = [
+        `${result.created} created`,
+        `${result.updated} updated`,
+        `${result.skipped} skipped`,
+      ];
+      if (result.errors?.length) {
+        toast.error(`SalesPie sync completed with row errors: ${result.errors.join(' ')}`);
+      } else {
+        toast.success(`SalesPie sync: ${messages.join(', ')}.`);
+      }
+      await loadPlan();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'SalesPie budget sync failed. Check HRMS backend configuration and logs.');
+    } finally {
+      setSyncingSalesPie(false);
     }
   };
 
@@ -4803,9 +4827,10 @@ export default function AnnualPerformancePlanPage() {
         employee_comment: comment,
       });
       toast.success('Progress saved');
-      loadPlan();
-    } catch {
+      await loadPlan(false);
+    } catch (error) {
       toast.error('Failed to save progress');
+      throw error;
     }
   };
 
@@ -4903,15 +4928,29 @@ export default function AnnualPerformancePlanPage() {
                 </div>
               </div>
 
-              {annualPlan.annual_score !== null && (
-                <div className="flex items-center gap-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 p-4 text-white shadow-sm">
-                  <Award className="h-8 w-8" />
-                  <div>
-                    <div className="text-xs font-medium uppercase opacity-90">Annual Score</div>
-                    <div className="text-2xl font-bold">{annualPlan.annual_score}%</div>
+              <div className="flex flex-wrap items-center gap-3">
+                {isHR && (
+                  <button
+                    type="button"
+                    onClick={syncSalesPieBudgets}
+                    disabled={syncingSalesPie}
+                    className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    title="Fetch and upsert this financial year's budgets from every configured SalesPie tenant"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${syncingSalesPie ? 'animate-spin' : ''}`} />
+                    {syncingSalesPie ? 'Syncing budgets…' : 'Sync SalesPie budgets'}
+                  </button>
+                )}
+                {annualPlan.annual_score !== null && (
+                  <div className="flex items-center gap-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 p-4 text-white shadow-sm">
+                    <Award className="h-8 w-8" />
+                    <div>
+                      <div className="text-xs font-medium uppercase opacity-90">Annual Score</div>
+                      <div className="text-2xl font-bold">{annualPlan.annual_score}%</div>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
 
@@ -5285,7 +5324,7 @@ export default function AnnualPerformancePlanPage() {
                               kpi={kpi}
                               isLocked={currentMonthlyPlan.is_locked}
                               onSave={handleSaveActual}
-                              onUploadSuccess={loadPlan}
+                              onUploadSuccess={() => loadPlan(false)}
                             />
                           ))}
                         </div>
@@ -5364,6 +5403,12 @@ export default function AnnualPerformancePlanPage() {
 
                   {/* Actions & Weight Validation Warning */}
                   <div className="mt-6 border-t border-gray-100 pt-6 flex flex-col gap-4">
+                    {currentMonthlyPlan.status === 'RETURNED' && currentMonthlyPlan.manager_comments && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                        <p className="font-bold">Changes requested by your manager</p>
+                        <p className="mt-1 whitespace-pre-wrap">{currentMonthlyPlan.manager_comments}</p>
+                      </div>
+                    )}
                     {currentMonthlyPlan.status === 'DRAFT' && isManager && (
                       <div>
                         <button
@@ -5375,14 +5420,14 @@ export default function AnnualPerformancePlanPage() {
                       </div>
                     )}
 
-                    {(currentMonthlyPlan.status === 'OPEN' || currentMonthlyPlan.status === 'DRAFT') && (
+                    {(currentMonthlyPlan.status === 'OPEN' || currentMonthlyPlan.status === 'DRAFT' || currentMonthlyPlan.status === 'RETURNED') && (
                       <div className="space-y-2">
                         <button
                           onClick={() => handleUpdateStatus('EMPLOYEE_SUBMITTED')}
                           disabled={!weightValidation.isValid}
                           className="rounded-xl bg-purple-600 px-5 py-2.5 text-sm font-bold text-white shadow hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          Submit Monthly Review to Manager
+                          {currentMonthlyPlan.status === 'RETURNED' ? 'Resubmit Monthly Review to Manager' : 'Submit Monthly Review to Manager'}
                         </button>
 
                         {!weightValidation.isValid && (
@@ -6034,6 +6079,8 @@ function ProgressInputRow({
   const [actual, setActual] = useState(kpi.actual_value || '');
   const [comment, setComment] = useState(kpi.employee_comment || '');
   const [uploading, setUploading] = useState(false);
+  const [savingProgress, setSavingProgress] = useState(false);
+  const [progressSaved, setProgressSaved] = useState(false);
 
   useEffect(() => {
     setActual(kpi.actual_value || '');
@@ -6079,8 +6126,20 @@ function ProgressInputRow({
     }
   };
 
+  const handleSaveProgress = async () => {
+    setSavingProgress(true);
+    try {
+      await onSave(kpi.id, actual, comment);
+      setProgressSaved(true);
+    } catch {
+      // The parent shows the API error message.
+    } finally {
+      setSavingProgress(false);
+    }
+  };
+
   return (
-    <div className="rounded-xl bg-gray-50 p-4 border border-gray-200">
+    <div className={`rounded-xl border p-4 transition-colors ${progressSaved ? 'border-emerald-300 bg-emerald-50/70' : 'border-gray-200 bg-gray-50'}`}>
       <div className="flex items-center justify-between">
         <div>
           <h5 className="font-bold text-gray-900">{kpi.name}</h5>
@@ -6098,7 +6157,7 @@ function ProgressInputRow({
           type="text"
           placeholder="Actual Value achieved"
           value={actual}
-          onChange={(e) => setActual(e.target.value)}
+          onChange={(e) => { setActual(e.target.value); setProgressSaved(false); }}
           disabled={isLocked}
           className="rounded-xl border border-gray-300 p-2.5 text-xs bg-white focus:border-indigo-500 focus:outline-none"
         />
@@ -6106,7 +6165,7 @@ function ProgressInputRow({
           type="text"
           placeholder="Your comments / notes"
           value={comment}
-          onChange={(e) => setComment(e.target.value)}
+          onChange={(e) => { setComment(e.target.value); setProgressSaved(false); }}
           disabled={isLocked}
           className="rounded-xl border border-gray-300 p-2.5 text-xs bg-white focus:border-indigo-500 focus:outline-none"
         />
@@ -6177,10 +6236,11 @@ function ProgressInputRow({
       {!isLocked && (
         <div className="mt-3 flex justify-end">
           <button
-            onClick={() => onSave(kpi.id, actual, comment)}
-            className="flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white shadow hover:bg-indigo-700"
+            onClick={handleSaveProgress}
+            disabled={savingProgress}
+            className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold text-white shadow disabled:opacity-60 ${progressSaved ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
           >
-            <Check className="h-3.5 w-3.5" /> Save Progress
+            {savingProgress ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {savingProgress ? 'Saving...' : progressSaved ? 'Saved' : 'Save Progress'}
           </button>
         </div>
       )}

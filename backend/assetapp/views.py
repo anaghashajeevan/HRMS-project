@@ -17,8 +17,9 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction, models
 from django.db.models import Count, Sum, Q
 from django.utils import timezone
+from datetime import timedelta
 
-from .models import AssetCategory, Asset, AssetAllocation
+from .models import AssetCategory, Asset, AssetAllocation, AssetPhoto
 from .serializers import (
     AssetCategorySerializer,
     AssetListSerializer, AssetDetailSerializer,
@@ -26,7 +27,8 @@ from .serializers import (
     AllocateAssetPayloadSerializer, ReturnAssetPayloadSerializer,
 )
 from HRMSapp.permissions import IsHRAdmin
-from HRMSapp.models import Employee
+from HRMSapp.models import Employee, Notification, ApprovalWorkflow
+from HRMSapp.services.workflow_service import WorkflowService
 
 
 # ==============================================================================
@@ -99,6 +101,20 @@ class AssetViewSet(ModelViewSet):
             )
         return super().destroy(request, *args, **kwargs)
 
+    @action(detail=True, methods=['delete'], url_path=r'photos/(?P<photo_id>[^/.]+)')
+    def delete_photo(self, request, pk=None, photo_id=None):
+        """Delete one gallery photo from an asset."""
+        asset = self.get_object()
+        photo = AssetPhoto.objects.filter(asset=asset, id=photo_id).first()
+        if not photo:
+            return Response({'detail': 'Photo not found for this asset.'}, status=status.HTTP_404_NOT_FOUND)
+
+        image = photo.image
+        photo.delete()
+        if image:
+            image.delete(save=False)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     # --------------------------------------------------------------------------
     # ESS: My Assets
     # --------------------------------------------------------------------------
@@ -111,7 +127,7 @@ class AssetViewSet(ModelViewSet):
 
         allocations = AssetAllocation.objects.filter(
             employee=user.employee,
-            status='ALLOCATED',
+            status__in=['ALLOCATED', 'NOT_RECEIVED'],
         ).select_related('asset', 'asset__category', 'allocated_by')
 
         serializer = AssetAllocationSerializer(allocations, many=True, context={'request': request})
@@ -149,7 +165,7 @@ class AssetViewSet(ModelViewSet):
 
         allocations = AssetAllocation.objects.filter(
             employee_id=employee_id,
-            status='ALLOCATED',
+            status__in=['ALLOCATED', 'NOT_RECEIVED'],
         ).select_related('asset', 'asset__category', 'allocated_by')
 
         serializer = AssetAllocationSerializer(allocations, many=True, context={'request': request})
@@ -189,9 +205,20 @@ class AssetAllocationViewSet(ModelViewSet):
     http_method_names = ['get', 'post', 'patch']
 
     def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
+        if self.action in ['list', 'retrieve', 'confirm_receipt', 'receipt_reviews', 'review_receipt']:
             return [IsAuthenticated()]
         return [IsAuthenticated(), IsHRAdmin()]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN'):
+            return qs
+        if hasattr(user, 'employee') and user.employee:
+            if user.has_role('MANAGER'):
+                return qs.filter(Q(employee=user.employee) | Q(employee__reporting_manager=user.employee))
+            return qs.filter(employee=user.employee)
+        return qs.none()
 
     # --------------------------------------------------------------------------
     # ALLOCATE (Assign asset to employee)
@@ -241,6 +268,7 @@ class AssetAllocationViewSet(ModelViewSet):
             handover_notes=serializer.validated_data.get('handover_notes', ''),
             allocated_by=allocator,
             status='ALLOCATED',
+            response_due_at=timezone.now() + timedelta(days=asset.category.employee_response_days),
         )
 
         # Update asset status
@@ -253,6 +281,151 @@ class AssetAllocationViewSet(ModelViewSet):
             AssetAllocationSerializer(allocation, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=['post'], url_path='confirm-receipt')
+    @transaction.atomic
+    def confirm_receipt(self, request, pk=None):
+        """Employee confirms physical handover or flags that it did not occur."""
+        allocation = AssetAllocation.objects.select_for_update().select_related('employee', 'asset').filter(pk=pk).first()
+        if not allocation:
+            return Response({'detail': 'Allocation not found.'}, status=404)
+        employee = getattr(request.user, 'employee', None)
+        if not employee or allocation.employee_id != employee.id:
+            return Response({'detail': 'Only the assigned employee can respond.'}, status=403)
+        is_final_confirmation = allocation.receipt_status == 'AWAITING_EMPLOYEE_CONFIRMATION'
+        if allocation.status != 'ALLOCATED' or allocation.receipt_status not in ('PENDING', 'AWAITING_EMPLOYEE_CONFIRMATION'):
+            return Response({'detail': 'This allocation is no longer awaiting a response.'}, status=400)
+        if not is_final_confirmation and allocation.response_due_at and timezone.now() > allocation.response_due_at:
+            return Response({'detail': 'The response window has expired.'}, status=400)
+
+        response = str(request.data.get('response') or '').upper()
+        note = str(request.data.get('note') or '').strip()
+        if response not in ('ACCEPT', 'FLAG'):
+            return Response({'detail': 'response must be ACCEPT or FLAG.'}, status=400)
+        if response == 'FLAG' and not note:
+            return Response({'detail': 'Explain why you did not receive the asset.'}, status=400)
+
+        if is_final_confirmation:
+            allocation.final_employee_response_at = timezone.now()
+            allocation.final_employee_response_note = note
+            allocation.receipt_status = 'ACCEPTED' if response == 'ACCEPT' else 'FLAGGED'
+            allocation.save(update_fields=[
+                'final_employee_response_at', 'final_employee_response_note',
+                'receipt_status', 'updated_at',
+            ])
+        else:
+            allocation.employee_response_at = timezone.now()
+            allocation.employee_response_note = note
+            allocation.receipt_status = 'ACCEPTED' if response == 'ACCEPT' else 'FLAGGED'
+            allocation.save(update_fields=['employee_response_at', 'employee_response_note', 'receipt_status', 'updated_at'])
+        if response == 'FLAG':
+            self._notify_receipt_reviewers(allocation)
+        return Response(AssetAllocationSerializer(allocation, context={'request': request}).data)
+
+    @staticmethod
+    def _notify_receipt_reviewers(allocation):
+        current_flag_note = allocation.final_employee_response_note or allocation.employee_response_note
+        workflow = ApprovalWorkflow.objects.filter(module='ASSET_RECEIPT_REVIEW', is_active=True).prefetch_related('steps').first()
+        if workflow and workflow.steps.exists():
+            reviewers = set()
+            for step in workflow.steps.all():
+                reviewers.update(WorkflowService.resolve_approvers(step, allocation.employee))
+        else:
+            reviewers = set(Employee.objects.filter(
+                user_account__is_active=True,
+                user_account__roles__role_name__in=['HR_ADMIN', 'SYSTEM_ADMIN'],
+            ).distinct())
+        for reviewer in reviewers:
+            Notification.objects.create(
+                recipient=reviewer,
+                notification_type='ASSET_RECEIPT_REVIEW',
+                title='Asset receipt flag needs review',
+                message=f'{allocation.employee.full_name} says they did not receive {allocation.asset.asset_tag}: {current_flag_note}',
+                link='/assets/receipt-reviews',
+                metadata={'allocation_id': str(allocation.id)},
+            )
+
+    @action(detail=False, methods=['get'], url_path='receipt-reviews')
+    def receipt_reviews(self, request):
+        flagged = AssetAllocation.objects.filter(receipt_status='FLAGGED').select_related(
+            'asset', 'asset__category', 'employee', 'allocated_by'
+        )
+        workflow = ApprovalWorkflow.objects.filter(module='ASSET_RECEIPT_REVIEW', is_active=True).prefetch_related('steps').first()
+        if workflow and workflow.steps.exists():
+            reviewer = getattr(request.user, 'employee', None)
+            if not reviewer:
+                return Response({'detail': 'Reviewer employee profile is required.'}, status=403)
+            visible_ids = []
+            for allocation in flagged:
+                allowed = set()
+                for step in workflow.steps.all():
+                    allowed.update(person.id for person in WorkflowService.resolve_approvers(step, allocation.employee))
+                if reviewer.id in allowed:
+                    visible_ids.append(allocation.id)
+            flagged = flagged.filter(id__in=visible_ids)
+        elif not (request.user.has_role('HR_ADMIN') or request.user.has_role('SYSTEM_ADMIN')):
+            return Response({'detail': 'Management access required.'}, status=403)
+        return Response(AssetAllocationSerializer(flagged, many=True, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='review-receipt')
+    @transaction.atomic
+    def review_receipt(self, request, pk=None):
+        allocation = AssetAllocation.objects.select_for_update().select_related('asset', 'employee').filter(pk=pk).first()
+        if not allocation:
+            return Response({'detail': 'Allocation not found.'}, status=404)
+        if allocation.receipt_status != 'FLAGGED':
+            return Response({'detail': 'This allocation has no pending receipt flag.'}, status=400)
+
+        reviewer = getattr(request.user, 'employee', None)
+        workflow = ApprovalWorkflow.objects.filter(module='ASSET_RECEIPT_REVIEW', is_active=True).prefetch_related('steps').first()
+        if workflow and workflow.steps.exists() and reviewer:
+            allowed = set()
+            for step in workflow.steps.all():
+                allowed.update(person.id for person in WorkflowService.resolve_approvers(step, allocation.employee))
+            if reviewer.id not in allowed:
+                return Response({'detail': 'You are not an assigned reviewer for asset receipt flags.'}, status=403)
+        elif not (request.user.has_role('HR_ADMIN') or request.user.has_role('SYSTEM_ADMIN')):
+            return Response({'detail': 'Management access required.'}, status=403)
+
+        decision = str(request.data.get('decision') or '').upper()
+        note = str(request.data.get('note') or '').strip()
+        if decision not in ('CONFIRM_NOT_RECEIVED', 'CONFIRM_RECEIVED'):
+            return Response({'detail': 'decision must be CONFIRM_NOT_RECEIVED or CONFIRM_RECEIVED.'}, status=400)
+        if not note:
+            return Response({'detail': 'A management decision note is required.'}, status=400)
+
+        allocation.review_note = note
+        allocation.reviewed_by = reviewer
+        allocation.reviewed_at = timezone.now()
+        if decision == 'CONFIRM_NOT_RECEIVED':
+            allocation.receipt_status = 'REVIEW_NOT_RECEIVED'
+            allocation.status = 'NOT_RECEIVED'
+            allocation.asset.status = 'AVAILABLE'
+            allocation.asset.save(update_fields=['status', 'updated_at'])
+        else:
+            allocation.receipt_status = 'AWAITING_EMPLOYEE_CONFIRMATION'
+            allocation.response_due_at = None
+            allocation.final_employee_response_at = None
+            allocation.final_employee_response_note = ''
+        allocation.save(update_fields=[
+            'receipt_status', 'status', 'review_note', 'reviewed_by', 'reviewed_at',
+            'response_due_at', 'final_employee_response_at', 'final_employee_response_note',
+            'updated_at',
+        ])
+        employee_message = (
+            f'Management confirmed the handover of {allocation.asset.asset_tag}. Please confirm in My Assets whether you received it.'
+            if decision == 'CONFIRM_RECEIVED'
+            else f'Management confirmed that {allocation.asset.asset_tag} was not received. It has been returned to available inventory.'
+        )
+        Notification.objects.create(
+            recipient=allocation.employee,
+            notification_type='ASSET_RECEIPT_REVIEW',
+            title='Asset receipt review completed',
+            message=f'{employee_message} Management note: {note}',
+            link='/assets/my-assets',
+            metadata={'allocation_id': str(allocation.id), 'decision': decision},
+        )
+        return Response(AssetAllocationSerializer(allocation, context={'request': request}).data)
 
     # --------------------------------------------------------------------------
     # RETURN (Process asset return)

@@ -951,6 +951,7 @@ import type {
   MonthlyKPI,
   MonthlyKPIEvidence,
   CarryForwardRecord,
+  TeamPerformanceReviewRow,
 } from '../types/performance';
 
 function unwrap<T>(data: { results: T[] } | T[]): T[] {
@@ -1018,6 +1019,30 @@ export const annualPlansApi = {
   },
   generate: async (payload: { employee_id: string; financial_year: string }): Promise<AnnualPerformancePlanDetail> => {
     const { data } = await api.post<AnnualPerformancePlanDetail>('/annual-plans/generate/', payload);
+    return data;
+  },
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/annual-plans/${id}/`);
+  },
+  syncSalesPieBudgets: async (financial_year: string): Promise<{
+    tenants: number[];
+    created: number;
+    updated: number;
+    skipped: number;
+    errors: string[];
+  }> => {
+    const { data } = await api.post('/salespie/budgets/sync/', { financial_year });
+    return data;
+  },
+};
+
+export const teamPerformanceReviewApi = {
+  list: async (params: { financial_year: string; month: number }): Promise<TeamPerformanceReviewRow[]> => {
+    const { data } = await api.get<TeamPerformanceReviewRow[]>('/team-performance-review/', { params });
+    return data;
+  },
+  decide: async (monthlyPlanId: string, payload: { status: 'UNDER_REVIEW' | 'APPROVED' | 'RETURNED'; manager_comments?: string }): Promise<MonthlyPerformancePlan> => {
+    const { data } = await api.post<MonthlyPerformancePlan>(`/team-performance-review/${monthlyPlanId}/decision/`, payload);
     return data;
   },
 };

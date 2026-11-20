@@ -4,7 +4,8 @@
 
 export type AssetStatus = 'AVAILABLE' | 'ALLOCATED' | 'MAINTENANCE' | 'DISPOSED';
 export type AssetCondition = 'NEW' | 'GOOD' | 'FAIR' | 'POOR';
-export type AllocationStatus = 'ALLOCATED' | 'RETURNED' | 'DAMAGED' | 'LOST';
+export type AllocationStatus = 'ALLOCATED' | 'NOT_RECEIVED' | 'RETURNED' | 'DAMAGED' | 'LOST';
+export type AssetReceiptStatus = 'PENDING' | 'ACCEPTED' | 'FLAGGED' | 'AWAITING_EMPLOYEE_CONFIRMATION' | 'AUTO_ACCEPTED' | 'REVIEW_CONFIRMED' | 'REVIEW_NOT_RECEIVED';
 
 export interface AssetCategory {
   id: string;
@@ -15,6 +16,7 @@ export interface AssetCategory {
   asset_count: number;
   allocated_count: number;
   available_count: number;
+  employee_response_days: number;
   created_at: string;
   updated_at: string;
 }
@@ -79,6 +81,7 @@ export interface AssetDetail {
   condition_notes?: string;
   image?: string;
   image_url?: string;
+  photos: Array<{ id: string; image: string; image_url: string; caption: string; uploaded_at: string }>;
   current_allocation: AssetCurrentAllocation | null;
   created_by?: string;
   created_by_name?: string;
@@ -113,6 +116,15 @@ export interface AssetAllocation {
   returned_to?: string;
   returned_to_name?: string;
   created_at: string;
+  receipt_status: AssetReceiptStatus;
+  response_due_at?: string;
+  employee_response_at?: string;
+  employee_response_note?: string;
+  final_employee_response_at?: string;
+  final_employee_response_note?: string;
+  current_employee_flag_note?: string;
+  review_note?: string;
+  reviewed_at?: string;
 }
 
 export interface AllocateAssetPayload {

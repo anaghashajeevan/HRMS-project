@@ -1592,7 +1592,11 @@ export default function EmployeeForm() {
                         ...current,
                         accepted_recruitment_offer: offer?.id || null,
                         position: offer?.position_id || current.position,
+                        first_name: offer?.first_name || current.first_name,
+                        last_name: offer?.last_name || current.last_name,
                         personal_email: offer?.candidate_email || current.personal_email,
+                        phone_number: offer?.phone_number || current.phone_number,
+                        date_of_joining: offer?.date_of_joining || current.date_of_joining,
                       }));
                       if (offer) {
                         setSelectedDepartment(offer.department_id);
@@ -1605,7 +1609,7 @@ export default function EmployeeForm() {
                       {offer.candidate_name} — {offer.position_title}{offer.employee_name ? ` (currently linked to ${offer.employee_name})` : ''}
                     </option>)}
                   </select>
-                  <p className="mt-1 text-xs text-gray-500">Select the accepted offer to use its reserved opening and link the offer letter to this employee profile.</p>
+                  <p className="mt-1 text-xs text-gray-500">Selecting an accepted offer fills the candidate’s name, personal email, phone, position, department, location, and joining date. You can review these fields before saving; enter the company email separately if it differs.</p>
                 </Field>}
                 <Field label="Position" error={errors.position}>
                   <select value={form.position || ''}

@@ -86,6 +86,7 @@ export interface CandidateOfferEmployeeOption { id: string; employee_id: string;
 export interface AcceptedOfferEmployeeOption {
   id: string; candidate_name: string; candidate_email: string; position_id: string; position_title: string;
   department_id: string; location_id: string; employee_name: string | null;
+  first_name: string; last_name: string; phone_number: string; date_of_joining: string;
 }
 export interface CandidateOfferApproval {
   id: string; role_code: string; step_number: number; step_name: string; assigned_to: string; assigned_to_name: string;
@@ -101,6 +102,13 @@ export interface CandidateOffer {
   employee_id: string | null; employee_name: string | null; offer_letter_filename: string;
   offer_letter_sent_at: string | null; offer_letter_error: string;
   created_at: string; approved_at: string | null; sent_at: string | null; responded_at: string | null;
+}
+
+export interface CandidateDocument {
+  id: string; document_type: string; document_name: string; original_filename: string;
+  file_size_kb: number; mime_type: string; status: 'RECEIVED' | 'VERIFIED' | 'REJECTED';
+  review_notes: string; uploaded_by_name: string | null; reviewed_by_name: string | null;
+  uploaded_at: string; reviewed_at: string | null; employee_document_id: string | null;
 }
 
 export interface HiringApprovalAction {
@@ -218,6 +226,10 @@ export const recruitmentApi = {
   retryAcceptedOfferLetter: async (id: string) => (await api.post<CandidateOffer>(`/recruitment/offers/${id}/retry-letter/`)).data,
   linkCandidateOfferEmployee: async (id: string, employee: string) => (await api.post<CandidateOffer>(`/recruitment/offers/${id}/employee/`, { employee })).data,
   downloadAcceptedOfferLetter: async (id: string) => (await api.get<Blob>(`/recruitment/offers/${id}/letter/`, { responseType: 'blob' })).data,
+  candidateOfferDocuments: async (id: string) => (await api.get<CandidateDocument[]>(`/recruitment/offers/${id}/documents/`)).data,
+  uploadCandidateOfferDocument: async (id: string, formData: FormData) => (await api.post<CandidateDocument>(`/recruitment/offers/${id}/documents/`, formData, { headers: { 'Content-Type': 'multipart/form-data' } })).data,
+  reviewCandidateOfferDocument: async (offerId: string, documentId: string, status: CandidateDocument['status'], review_notes: string) => (await api.patch<CandidateDocument>(`/recruitment/offers/${offerId}/documents/${documentId}/`, { status, review_notes })).data,
+  downloadCandidateOfferDocument: async (offerId: string, documentId: string) => (await api.get<Blob>(`/recruitment/offers/${offerId}/documents/${documentId}/`, { responseType: 'blob' })).data,
   list: async (statusFilter?: string) => unwrap((await api.get<HiringRequisition[] | { results: HiringRequisition[] }>(
     '/recruitment/requisitions/', { params: statusFilter ? { status: statusFilter } : {} },
   )).data),

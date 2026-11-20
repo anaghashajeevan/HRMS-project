@@ -244,7 +244,7 @@ export default function Topbar() {
   return (
     <header className="flex h-16 items-center justify-between border-b border-gray-200 bg-white px-6">
       <h2 className="text-lg font-semibold text-gray-800">
-        Welcome back, {user?.employee?.first_name || user?.username || 'User'} 👋
+        {/* Welcome back, {user?.employee?.first_name || user?.username || 'User'} 👋 */}
       </h2>
 
       <div className="flex items-center gap-4">

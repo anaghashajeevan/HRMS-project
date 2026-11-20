@@ -4,9 +4,11 @@ from django.core.mail import EmailMultiAlternatives
 from django.template import Context, Template
 from django.utils.html import format_html, strip_tags
 from django.utils import timezone
+from django.utils.text import get_valid_filename
 
 from HRMSapp.models import EmployeeDocument, LetterTemplate
 from HRMSapp.services.pdf_generator import generate_recruitment_offer_pdf, get_company
+from .models import CandidateDocument
 
 
 def _offer_context(offer):
@@ -146,3 +148,28 @@ def link_accepted_offer_to_employee(offer, employee, uploaded_by=None):
     offer.employee = employee
     offer.save(update_fields=['employee', 'updated_at'])
     _attach_offer_letter_to_employee(offer, uploaded_by=uploaded_by)
+    _attach_verified_candidate_documents(offer, employee, uploaded_by=uploaded_by)
+
+
+def _attach_verified_candidate_documents(offer, employee, uploaded_by=None):
+    """Copy verified offer-stage documents once into the employee repository."""
+    documents = CandidateDocument.objects.filter(
+        application=offer.application, candidate=offer.application.candidate,
+        status='VERIFIED', employee_document__isnull=True,
+    ).order_by('uploaded_at')
+    for source in documents:
+        with source.file.open('rb') as uploaded_file:
+            content = uploaded_file.read()
+        destination = EmployeeDocument(
+            employee=employee,
+            document_type=source.document_type,
+            document_name=source.document_name,
+            file_size_kb=source.file_size_kb,
+            mime_type=source.mime_type,
+            uploaded_by=uploaded_by or offer.created_by,
+        )
+        safe_name = get_valid_filename(source.original_filename.rsplit('/', 1)[-1].rsplit('\\', 1)[-1])
+        filename = f'Candidate_{source.pk.hex[:8]}_{safe_name}'
+        destination.file_path.save(filename, ContentFile(content), save=True)
+        source.employee_document = destination
+        source.save(update_fields=['employee_document'])

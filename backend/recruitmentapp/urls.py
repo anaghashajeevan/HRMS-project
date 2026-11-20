@@ -11,6 +11,7 @@ from .views import (
     CandidateOffersView, CandidateOfferApprovalView, CandidateOfferActionView,
     CandidateOfferOptionsView,
     CandidateOfferEmployeeLinkView, CandidateOfferLetterView,
+    CandidateOfferDocumentsView, CandidateOfferDocumentDetailView,
 )
 
 router = DefaultRouter()
@@ -40,6 +41,8 @@ urlpatterns = [
     path('offers/<uuid:pk>/approve/', CandidateOfferApprovalView.as_view(), name='candidate-offer-approval'),
     path('offers/<uuid:pk>/employee/', CandidateOfferEmployeeLinkView.as_view(), name='candidate-offer-employee-link'),
     path('offers/<uuid:pk>/letter/', CandidateOfferLetterView.as_view(), name='candidate-offer-letter'),
+    path('offers/<uuid:pk>/documents/', CandidateOfferDocumentsView.as_view(), name='candidate-offer-documents'),
+    path('offers/<uuid:pk>/documents/<uuid:document_id>/', CandidateOfferDocumentDetailView.as_view(), name='candidate-offer-document-detail'),
     path('offers/<uuid:pk>/<str:action>/', CandidateOfferActionView.as_view(), name='candidate-offer-action'),
     path('', include(router.urls)),
 ]

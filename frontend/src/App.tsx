@@ -351,8 +351,10 @@ import AssetListPage from './pages/assets/AssetListPage';
 import AssetDetailPage from './pages/assets/AssetDetailPage';
 import AssetFormPage from './pages/assets/AssetFormPage';
 import AssetCategoriesPage from './pages/assets/AssetCategoriesPage';
+import AssetReceiptReviewsPage from './pages/assets/AssetReceiptReviewsPage';
 import AnnualPerformancePlanPage from './pages/performance/AnnualPerformancePlanPage';
 import AnnualPlansDirectoryPage from './pages/performance/AnnualPlansDirectoryPage';
+import TeamPerformanceReviewPage from './pages/performance/TeamPerformanceReviewPage';
 import CommonKRAMasterPage from './pages/settings/CommonKRAMasterPage';
 
 import CompanyLogoPage from './pages/settings/CompanyLogoPage';
@@ -770,6 +772,14 @@ export default function App() {
     </ProtectedRoute>
   }
 />
+<Route
+  path="/performance/team-review"
+  element={
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER', 'HOD']}>
+      <TeamPerformanceReviewPage />
+    </ProtectedRoute>
+  }
+/>
 {/* <Route
   path="/my-performance/self-review/:scorecardId"
   element={
@@ -1162,6 +1172,15 @@ export default function App() {
   element={
     <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
       <AssetCategoriesPage />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/assets/receipt-reviews"
+  element={
+    <ProtectedRoute>
+      <AssetReceiptReviewsPage />
     </ProtectedRoute>
   }
 />

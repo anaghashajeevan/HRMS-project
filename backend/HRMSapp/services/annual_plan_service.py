@@ -255,6 +255,7 @@ auto-injection of Common and Departmental KRAs, and score calculations.
 """
 import logging
 from datetime import date
+from django.db.models import Max, Q
 from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
@@ -285,6 +286,77 @@ class AnnualPlanService:
         start_date = date(start_year, 4, 1)        # Apr 1
         end_date = date(start_year + 1, 3, 31)     # Mar 31
         return start_date, end_date
+
+    @staticmethod
+    def get_active_departmental_kras(employee: Employee, financial_year: str):
+        """Return active KRAs for the employee's department, including
+        duplicate department records that share the same displayed name.
+
+        Some installations have a separate CompanyStructure row for each
+        location (for example, Gurugram / SALES and Kochi / SALES), while the
+        KRA master is attached to only one of those rows.
+        """
+        department = employee.department or employee.structure_location
+        if not department or department.type != 'DEPARTMENT':
+            return DepartmentalKRAMaster.objects.none()
+
+        return DepartmentalKRAMaster.objects.filter(
+            financial_year=financial_year,
+            is_active=True,
+            department__type='DEPARTMENT',
+            department__name__iexact=department.name.strip(),
+        ).prefetch_related('kpis')
+
+    @classmethod
+    @transaction.atomic
+    def sync_departmental_kras(cls, annual_plan: AnnualPerformancePlan) -> int:
+        """Add any missing active departmental master KRAs to draft months.
+
+        Existing SalesPie KRAs are retained; they have no source master FK.
+        Returns the number of master KRAs added across the plan's months.
+        """
+        dept_kras = cls.get_active_departmental_kras(
+            annual_plan.employee, annual_plan.financial_year
+        )
+        created_count = 0
+
+        for monthly_plan in annual_plan.monthly_plans.filter(status='DRAFT'):
+            max_order = monthly_plan.kras.filter(
+                Q(source_common_kra__isnull=False)
+                | Q(source_dept_kra__isnull=False)
+            ).aggregate(max_order=Max('display_order'))['max_order']
+            order = (max_order + 1) if max_order is not None else 0
+
+            for dept_kra in dept_kras:
+                if monthly_plan.kras.filter(source_dept_kra=dept_kra).exists():
+                    continue
+
+                monthly_kra = MonthlyKRA.objects.create(
+                    monthly_plan=monthly_plan,
+                    kra_type='DEPARTMENTAL',
+                    source_common_kra=None,
+                    source_dept_kra=dept_kra,
+                    name=dept_kra.name,
+                    description=dept_kra.description,
+                    weight=dept_kra.default_weight,
+                    kra_start_date=monthly_plan.month_start_date,
+                    kra_end_date=monthly_plan.month_end_date,
+                    display_order=order,
+                )
+                order += 1
+                MonthlyKPI.objects.bulk_create([
+                    MonthlyKPI(
+                        monthly_kra=monthly_kra,
+                        name=kpi.name,
+                        metric_type=kpi.metric_type,
+                        weight_in_kra=kpi.weight_in_kra,
+                        target_value=kpi.default_target,
+                    )
+                    for kpi in dept_kra.kpis.all()
+                ])
+                created_count += 1
+
+        return created_count
 
     @classmethod
     @transaction.atomic
@@ -339,12 +411,7 @@ class AnnualPlanService:
             financial_year=financial_year, is_active=True
         ).prefetch_related('kpis')
 
-        dept = employee.department or employee.structure_location
-        dept_kras = []
-        if dept and dept.type == 'DEPARTMENT':
-            dept_kras = DepartmentalKRAMaster.objects.filter(
-                financial_year=financial_year, department=dept, is_active=True
-            ).prefetch_related('kpis')
+        dept_kras = cls.get_active_departmental_kras(employee, financial_year)
 
         # 5. Create 12 Monthly Plans (Apr through Mar)
         monthly_sequence = [

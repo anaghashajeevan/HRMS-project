@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   Package, Laptop, Monitor, Smartphone, IdCard,
-  Key, Loader2, Calendar, User, Info, ArrowLeft,
+  Key, Loader2, Calendar, User, Info, ArrowLeft, CheckCircle2, AlertTriangle, Clock,
 } from 'lucide-react';
 import Sidebar from '../../components/Sidebar';
 import Topbar from '../../components/Topbar';
-import { assetsApi } from '../../api/assets';
+import { assetsApi, assetAllocationsApi } from '../../api/assets';
 import type { AssetAllocation } from '../../types/asset';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
@@ -78,10 +78,9 @@ export default function MyAssetsPage() {
           <div className="mb-6 flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
             <Info className="h-5 w-5 flex-shrink-0 text-blue-600" />
             <div className="text-sm text-blue-800">
-              <p className="font-medium">Important</p>
+              <p className="font-medium">Confirm physical handover</p>
               <p className="mt-1">
-                If any item is missing, damaged, or incorrect, please contact HR immediately.
-                All items must be returned upon exit or when requested.
+                Confirm each asset only after you physically receive it. If it was not handed over, raise a flag here for management review.
               </p>
             </div>
           </div>
@@ -171,6 +170,33 @@ export default function MyAssetsPage() {
                         "{alloc.handover_notes}"
                       </div>
                     )}
+                    <div className="mt-4 rounded-lg border border-gray-100 bg-gray-50 p-3">
+                      <div className="flex items-center justify-between gap-2 text-sm">
+                        <span className="font-medium text-gray-700">Receipt status</span>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${['PENDING', 'AWAITING_EMPLOYEE_CONFIRMATION'].includes(alloc.receipt_status) ? 'bg-amber-100 text-amber-800' : alloc.receipt_status === 'FLAGGED' ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                          {alloc.receipt_status.replaceAll('_', ' ')}
+                        </span>
+                      </div>
+                      {alloc.receipt_status === 'PENDING' && alloc.response_due_at && (
+                        <p className="mt-2 flex items-center gap-1 text-xs text-gray-500"><Clock className="h-3.5 w-3.5" /> Respond by {new Date(alloc.response_due_at).toLocaleDateString('en-IN')}</p>
+                      )}
+                      {alloc.receipt_status === 'FLAGGED' && alloc.current_employee_flag_note && <p className="mt-2 text-xs text-red-700">Your latest flag: {alloc.current_employee_flag_note}</p>}
+                      {alloc.receipt_status === 'AWAITING_EMPLOYEE_CONFIRMATION' && alloc.employee_response_note && <p className="mt-2 text-xs text-gray-600">Your original flag: {alloc.employee_response_note}</p>}
+                      {alloc.review_note && <p className="mt-2 text-xs text-indigo-700">Management decision: {alloc.review_note}</p>}
+                      {alloc.receipt_status === 'AWAITING_EMPLOYEE_CONFIRMATION' && <p className="mt-2 text-xs font-medium text-amber-800">Management confirmed the handover. Please make your final receipt confirmation.</p>}
+                      {alloc.receipt_status === 'PENDING' && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button onClick={async () => { try { await assetAllocationsApi.confirmReceipt(alloc.id, 'ACCEPT'); toast.success('Receipt confirmed'); await loadMyAssets(); } catch (err: any) { toast.error(err.response?.data?.detail || 'Could not confirm receipt'); } }} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white"><CheckCircle2 className="h-3.5 w-3.5" /> I received this</button>
+                          <button onClick={async () => { const note = window.prompt('Tell management why you did not receive this asset:'); if (!note?.trim()) return; try { await assetAllocationsApi.confirmReceipt(alloc.id, 'FLAG', note.trim()); toast.success('Flag sent to management for review'); await loadMyAssets(); } catch (err: any) { toast.error(err.response?.data?.detail || 'Could not raise flag'); } }} className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700"><AlertTriangle className="h-3.5 w-3.5" /> I did not receive this</button>
+                        </div>
+                      )}
+                      {alloc.receipt_status === 'AWAITING_EMPLOYEE_CONFIRMATION' && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button onClick={async () => { try { await assetAllocationsApi.confirmReceipt(alloc.id, 'ACCEPT'); toast.success('Final receipt confirmed; this asset is now confirmed as received'); await loadMyAssets(); } catch (err: any) { toast.error(err.response?.data?.detail || 'Could not confirm receipt'); } }} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white"><CheckCircle2 className="h-3.5 w-3.5" /> Yes, I received it</button>
+                          <button onClick={async () => { const note = window.prompt('Tell management why you still did not receive this asset:'); if (!note?.trim()) return; try { await assetAllocationsApi.confirmReceipt(alloc.id, 'FLAG', note.trim()); toast.success('Flag sent back to management for another review'); await loadMyAssets(); } catch (err: any) { toast.error(err.response?.data?.detail || 'Could not raise flag'); } }} className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700"><AlertTriangle className="h-3.5 w-3.5" /> I still did not receive it</button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}

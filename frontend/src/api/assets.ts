@@ -93,6 +93,10 @@ export const assetsApi = {
     await api.delete(`/assets/${id}/`);
   },
 
+  deletePhoto: async (assetId: string, photoId: string): Promise<void> => {
+    await api.delete(`/assets/${assetId}/photos/${photoId}/`);
+  },
+
   // ESS
   getMyAssets: async (): Promise<AssetAllocation[]> => {
     const { data } = await api.get<AssetAllocation[]>('/assets/my-assets/');
@@ -161,6 +165,21 @@ export const assetAllocationsApi = {
       `/assets/allocations/${allocationId}/return/`,
       payload
     );
+    return data;
+  },
+
+  confirmReceipt: async (id: string, response: 'ACCEPT' | 'FLAG', note = ''): Promise<AssetAllocation> => {
+    const { data } = await api.post<AssetAllocation>(`/assets/allocations/${id}/confirm-receipt/`, { response, note });
+    return data;
+  },
+
+  receiptReviews: async (): Promise<AssetAllocation[]> => {
+    const { data } = await api.get<AssetAllocation[]>('/assets/allocations/receipt-reviews/');
+    return data;
+  },
+
+  reviewReceipt: async (id: string, decision: 'CONFIRM_NOT_RECEIVED' | 'CONFIRM_RECEIVED', note: string): Promise<AssetAllocation> => {
+    const { data } = await api.post<AssetAllocation>(`/assets/allocations/${id}/review-receipt/`, { decision, note });
     return data;
   },
 };

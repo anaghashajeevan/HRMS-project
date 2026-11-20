@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import render
 from django.conf import settings
 # Create your views here.
@@ -284,6 +285,33 @@ class LeaveBalanceViewSet(ModelViewSet):
             })
         except Exception as exc:
             return Response({'ok': False, 'message': str(exc)}, status=500)
+
+    @action(detail=False, methods=['post'], url_path='recalculate-employee')
+    def recalculate_employee(self, request):
+        """Recompute earned balances after an employee's joining date is corrected."""
+        user = request.user
+        if not (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
+            return Response({'detail': 'HR Admin only'}, status=403)
+
+        from HRMSapp.models import Employee
+
+        employee_id = request.data.get('employee_id')
+        try:
+            year = int(request.data.get('year', timezone.localdate().year))
+        except (TypeError, ValueError):
+            return Response({'detail': 'year must be a valid calendar year'}, status=400)
+
+        try:
+            employee = Employee.objects.get(id=employee_id, is_deleted=False)
+        except (Employee.DoesNotExist, DjangoValidationError, ValueError, TypeError):
+            return Response({'detail': 'Employee not found'}, status=404)
+
+        balances = LeaveBalanceService.recalculate_employee_balance(employee, year)
+        return Response({
+            'ok': True,
+            'message': f'Balances recalculated from {employee.date_of_joining} for {year}.',
+            'balances': LeaveBalanceSerializer(balances, many=True).data,
+        })
 
     @action(detail=True, methods=['post'], url_path='adjust')
     def adjust(self, request, pk=None):

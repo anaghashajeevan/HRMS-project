@@ -1771,7 +1771,7 @@ const mainNav: NavEntry[] = [
     label: 'Employees',
     icon: Users,
     to: '/employees',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER','HOD'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER','REPORTING_MANAGER'],
   },
   {
     label: 'My Approvals',
@@ -1795,7 +1795,7 @@ const mainNav: NavEntry[] = [
     label: 'Candidate Applications',
     icon: UserCheck,
     to: '/recruitment/candidates',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER', 'REPORTING_MANAGER'],
   },
   {
     label: 'Interviews',
@@ -1807,13 +1807,13 @@ const mainNav: NavEntry[] = [
     label: 'Reference Checks',
     icon: ClipboardCheck,
     to: '/recruitment/reference-checks',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER', 'REPORTING_MANAGER'],
   },
   {
     label: 'Candidate Offers',
     icon: FileText,
     to: '/recruitment/offers',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'FINANCE_ADMIN'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'FINANCE_ADMIN','MANAGER', 'REPORTING_MANAGER'],
   },
   {
     label: 'My Onboarding Tasks',
@@ -1822,44 +1822,7 @@ const mainNav: NavEntry[] = [
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER', 'DEPARTMENT_HEAD', 'HOD', 'EMPLOYEE', 'FINANCE', 'FINANCE_ADMIN', 'FINANCE_HEAD', 'CFO', 'IT_ADMIN'],
   },
 
-  // ==================== KRA & KPIs (Dropdown) ====================
-  // {
-  //   label: 'KRA & KPIs',
-  //   icon: Target,
-  //   allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
-  //   children: [
-  //     {
-  //       label: 'My Performance',
-  //       icon: ClipboardCheck,
-  //       to: '/my-performance',
-  //       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
-  //     },
-  //     {
-  //       label: 'Team Performance',
-  //       icon: UserCheck,
-  //       to: '/team-performance',
-  //       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
-  //     },
-  //     {
-  //       label: 'Performance Calibration',
-  //       icon: BarChart3,
-  //       to: '/hr/calibration',
-  //       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
-  //     },
-  //     {
-  //       label: 'Peer Reviews',
-  //       icon: Users2,
-  //       to: '/peer-reviews',
-  //       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'EMPLOYEE'],
-  //     },
-  //     {
-  //       label: 'Performance Reports',
-  //       icon: PieChart,
-  //       to: '/performance-reports',
-  //       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
-  //     },
-  //   ],
-  // },
+  
 {
   label: 'Performance',
   icon: Target,
@@ -1876,6 +1839,12 @@ const mainNav: NavEntry[] = [
       icon: FileText,
       to: '/performance/annual-plans',
       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER'],
+    },
+    {
+      label: 'Team Review',
+      icon: ClipboardCheck,
+      to: '/performance/team-review',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER', 'HOD'],
     },
     {
       label: 'Peer Reviews',
@@ -1971,6 +1940,12 @@ const mainNav: NavEntry[] = [
       icon: FileText,
       to: '/assets/categories',
       allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    },
+    {
+      label: 'Receipt Reviews',
+      icon: ClipboardCheck,
+      to: '/assets/receipt-reviews',
+      allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER', 'HOD'],
     },
   ],
 },
@@ -2155,7 +2130,7 @@ const settingsNav: NavItem[] = [
     label: 'Roles',
     icon: Shield,
     to: '/settings/roles',
-    allowedRoles: ['SYSTEM_ADMIN'],
+    allowedRoles: ['SYSTEM_ADMIN','HR_ADMIN','MANAGER', 'REPORTING_MANAGER'],
   },
   {
     label: 'Company Structures',
@@ -2167,37 +2142,37 @@ const settingsNav: NavItem[] = [
     label: 'Job Positions',
     icon: Briefcase,
     to: '/settings/positions',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER', 'REPORTING_MANAGER'],
   },
   {
   label: 'WhatsApp',
   icon: MessageCircle, // import from lucide-react
   to: '/settings/whatsapp',
-  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER', 'REPORTING_MANAGER'],
 },
   {
     label: 'Employee Code',
     icon: IdCard,
     to: '/settings/employee-code',
-    allowedRoles: ['SYSTEM_ADMIN'],
+    allowedRoles: ['SYSTEM_ADMIN','HR_ADMIN'],
   },
   {
     label: 'Probation Settings',
     icon: Clock,
     to: '/settings/probation',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER'],
   },
   {
     label: 'Approval Workflows',
     icon: Workflow,
     to: '/settings/approval-workflows',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER', 'REPORTING_MANAGER'],
   },
   {
     label: 'Recruitment Setup',
     icon: Briefcase,
     to: '/settings/recruitment',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER', 'REPORTING_MANAGER'],
   },
   {
     label: 'Onboarding Setup',
@@ -2209,7 +2184,7 @@ const settingsNav: NavItem[] = [
     label: 'Letter Templates',
     icon: FileText,
     to: '/settings/letter-templates',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER', 'REPORTING_MANAGER'],
   },
   {
   label: 'Common KRAs (Master)',
@@ -2230,19 +2205,19 @@ const settingsNav: NavItem[] = [
     to: '/settings/rating-scale',
     allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN','HOD'],
   },
-  {
-    label: 'Org Priorities',
-    icon: Target,
-    to: '/settings/organizational-priorities',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
-  },
+  // {
+  //   label: 'Org Priorities',
+  //   icon: Target,
+  //   to: '/settings/organizational-priorities',
+  //   allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  // },
  
-  {
-    label: 'KRA Library',
-    icon: TrendingUp,
-    to: '/settings/kra-library',
-    allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
-  },
+  // {
+  //   label: 'KRA Library',
+  //   icon: TrendingUp,
+  //   to: '/settings/kra-library',
+  //   allowedRoles: ['SYSTEM_ADMIN', 'HR_ADMIN'],
+  // },
   {
   label: 'Company Logo',
   icon: Image,
@@ -2413,48 +2388,46 @@ export default function Sidebar() {
       `}</style>
 
       <div className="hrms-sidebar flex h-full flex-col">
-        {/* Fixed Header — logo sits on its own light card so a dark/navy
-            logo mark stays legible against the dark sidebar background.
-            "HRMS" (the product name) is shown separately from the company
-            logo, since the logo image already carries the company name. */}
-        <div className="flex h-20 flex-shrink-0 items-center gap-3 border-b border-white/10 px-4">
+        {/* Brand area shares the sidebar background; the HRMS product label
+            sits directly below the active company logo. */}
+        <div className="relative flex h-36 flex-shrink-0 flex-col items-center justify-center border-b border-white/10 px-4 pt-7">
           <button
             type="button"
             onClick={() =>
               window.location.assign(window.location.origin)
             }
-            className="relative z-10 flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-lg text-indigo-100 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+            className="absolute left-4 top-3 flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-indigo-100 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             aria-label="Go to My applications"
             title="Go to My applications"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-4 w-4" />
           </button>
-          <div className="flex h-11 flex-shrink-0 items-center justify-center rounded-xl bg-white px-2.5 py-1.5 shadow-md shadow-black/30 ring-1 ring-black/5">
+          <div className="flex h-14 max-w-full items-center justify-center">
             {logo.logo_url ? (
               <img
                 src={logo.logo_url}
                 alt={logo.name}
-                className="h-7 w-auto max-w-[132px] object-contain"
+                className="max-h-14 w-auto max-w-[190px] object-contain"
               />
             ) : (
               <div
-                className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 text-white"
+                className="flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-300/30 bg-white/[0.06] text-amber-300"
                 style={{ animation: 'logoGlow 2.8s ease-in-out infinite' }}
               >
-                <Building2 className="h-4 w-4" />
+                <Building2 className="h-6 w-6" />
               </div>
             )}
           </div>
           <div
-            className="flex min-w-0 flex-col justify-center"
+            className="mt-2 flex items-center gap-2"
             style={{ animation: 'brandFadeIn 0.5s ease-out both' }}
           >
+            <span className="h-px w-5 bg-amber-300/60" />
             <span
-              className="text-lg font-extrabold leading-tight tracking-tight text-white"
+              className="text-xs font-bold uppercase leading-none tracking-[0.32em] text-indigo-100"
               style={{ fontFamily: "'Sora', 'Segoe UI', sans-serif" }}
-            >
-              HRMS
-            </span>
+            >HRMS</span>
+            <span className="h-px w-5 bg-amber-300/60" />
           </div>
         </div>
 
