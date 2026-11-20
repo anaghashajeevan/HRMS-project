@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Loader2, Plus, ArrowRight, Search, FileText, Users, X,
+  Loader2, Plus, ArrowRight, Search, FileText, Users, X, Trash2,
 } from 'lucide-react';
 import Sidebar from '../../components/Sidebar';
 import Topbar from '../../components/Topbar';
@@ -9,6 +9,7 @@ import { annualPlansApi } from '../../api/performance';
 import { employeesApi, type ManagerOption } from '../../api/employees';
 import type { AnnualPerformancePlanListItem } from '../../types/performance';
 import toast from 'react-hot-toast';
+import { useAuth } from '../../context/AuthContext';
 
 const STATUS_COLOR: Record<string, string> = {
   DRAFT: 'bg-gray-100 text-gray-700',
@@ -20,11 +21,14 @@ const FY_OPTIONS = ['2026-27', '2025-26', '2024-25'];
 
 export default function AnnualPlansDirectoryPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isSystemAdmin = Boolean(user?.role_codes?.includes('SYSTEM_ADMIN'));
   const [plans, setPlans] = useState<AnnualPerformancePlanListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedFY, setSelectedFY] = useState('2026-27');
   const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
 
   const loadPlans = async () => {
     setLoading(true);
@@ -46,6 +50,25 @@ export default function AnnualPlansDirectoryPage() {
     p.employee_name.toLowerCase().includes(search.toLowerCase()) ||
     p.employee_id_display.toLowerCase().includes(search.toLowerCase())
   );
+
+  const handleDeletePlan = async (plan: AnnualPerformancePlanListItem) => {
+    const confirmed = window.confirm(
+      `Permanently delete the FY ${plan.financial_year} annual plan for ${plan.employee_name}?\n\n` +
+      'This also deletes its quarterly reviews, monthly plans, KRAs, KPIs, and plan-linked carry-forward records. This cannot be undone.'
+    );
+    if (!confirmed) return;
+
+    setDeletingPlanId(plan.id);
+    try {
+      await annualPlansApi.delete(plan.id);
+      setPlans((current) => current.filter((item) => item.id !== plan.id));
+      toast.success(`Annual plan for ${plan.employee_name} deleted`);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Could not delete annual plan');
+    } finally {
+      setDeletingPlanId(null);
+    }
+  };
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -109,31 +132,50 @@ export default function AnnualPlansDirectoryPage() {
               {filteredPlans.map((plan) => (
                 <div
                   key={plan.id}
-                  onClick={() => navigate(`/performance/annual-plans/${plan.id}`)}
-                  className="cursor-pointer rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 hover:shadow-md hover:ring-indigo-300 transition-all"
+                  className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 hover:shadow-md hover:ring-indigo-300 transition-all"
                 >
-                  <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${STATUS_COLOR[plan.status]}`}>
-                      {plan.status_display}
-                    </span>
-                    <span className="text-xs font-bold text-gray-500">FY {plan.financial_year}</span>
-                  </div>
-
-                  <div className="mt-3">
-                    <h3 className="font-bold text-gray-900 text-lg">{plan.employee_name}</h3>
-                    <p className="text-xs text-gray-500">{plan.employee_id_display}</p>
-                  </div>
-
-                  {plan.annual_score && (
-                    <div className="mt-3 rounded-xl bg-emerald-50 p-2 text-center">
-                      <span className="text-xs text-gray-600">Annual Score:</span>
-                      <span className="ml-2 font-bold text-emerald-700 text-lg">{plan.annual_score}%</span>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/performance/annual-plans/${plan.id}`)}
+                    className="block w-full cursor-pointer text-left"
+                    aria-label={`View ${plan.employee_name}'s FY ${plan.financial_year} annual plan`}
+                  >
+                    <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${STATUS_COLOR[plan.status]}`}>
+                        {plan.status_display}
+                      </span>
+                      <span className="text-xs font-bold text-gray-500">FY {plan.financial_year}</span>
                     </div>
-                  )}
 
-                  <div className="mt-4 flex items-center justify-end text-xs font-bold text-indigo-600">
-                    View Plan <ArrowRight className="ml-1 h-3 w-3" />
-                  </div>
+                    <div className="mt-3">
+                      <h3 className="font-bold text-gray-900 text-lg">{plan.employee_name}</h3>
+                      <p className="text-xs text-gray-500">{plan.employee_id_display}</p>
+                    </div>
+
+                    {plan.annual_score && (
+                      <div className="mt-3 rounded-xl bg-emerald-50 p-2 text-center">
+                        <span className="text-xs text-gray-600">Annual Score:</span>
+                        <span className="ml-2 font-bold text-emerald-700 text-lg">{plan.annual_score}%</span>
+                      </div>
+                    )}
+
+                    <div className="mt-4 flex items-center justify-end text-xs font-bold text-indigo-600">
+                      View Plan <ArrowRight className="ml-1 h-3 w-3" />
+                    </div>
+                  </button>
+                  {isSystemAdmin && <div className="mt-3 flex justify-end border-t border-gray-100 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => handleDeletePlan(plan)}
+                      disabled={deletingPlanId === plan.id}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      {deletingPlanId === plan.id
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <Trash2 className="h-3.5 w-3.5" />}
+                      Delete plan
+                    </button>
+                  </div>}
                 </div>
               ))}
             </div>

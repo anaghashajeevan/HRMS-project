@@ -666,6 +666,12 @@ const MODULE_CONFIG: Record<ModuleType, {
     defaultName: 'Standard Recruitment Offer Approval',
     helpText: 'Offers move through these approvers in order. Every assigned approver at a step must approve before the next step begins. Rejection stops the offer; only final approval enables HR to send it.',
   },
+  ASSET_RECEIPT_REVIEW: {
+    label: 'Asset Receipt Flag Reviews',
+    description: 'For employee reports that an assigned asset was not physically handed over',
+    defaultName: 'Asset Receipt Reviewers',
+    helpText: 'Employees assigned in any configured step can review a receipt flag. When no workflow is active, HR and system administrators can review flags.',
+  },
 };
 
 export default function ApprovalWorkflowSettingsPage() {

@@ -1152,6 +1152,15 @@ export interface MonthlyPerformancePlan {
   kras: MonthlyKRA[];
 }
 
+export interface TeamPerformanceReviewRow {
+  employee_id: string;
+  employee_code: string;
+  employee_name: string;
+  position: string;
+  department: string;
+  monthly_plan: MonthlyPerformancePlan | null;
+}
+
 export interface QuarterlyReview {
   id: string;
   annual_plan: string;

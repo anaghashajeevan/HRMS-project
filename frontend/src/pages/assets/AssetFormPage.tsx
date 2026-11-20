@@ -1,11 +1,40 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Package } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Package, ImagePlus, X } from 'lucide-react';
 import Sidebar from '../../components/Sidebar';
 import Topbar from '../../components/Topbar';
 import { assetsApi, assetCategoriesApi } from '../../api/assets';
-import type { AssetCategory } from '../../types/asset';
+import type { AssetCategory, AssetDetail } from '../../types/asset';
 import toast from 'react-hot-toast';
+
+const normalizePhotoForUpload = async (file: File): Promise<File> => {
+  const isAvif = file.type.toLowerCase() === 'image/avif' || /\.avif$/i.test(file.name);
+  if (!isAvif) return file;
+
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new Error(`This browser could not read ${file.name}. Open the AVIF file in a supported browser or convert it to JPEG/PNG.`);
+  }
+
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Could not prepare the AVIF image for upload.');
+    context.drawImage(bitmap, 0, 0);
+
+    const jpegBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Could not convert the AVIF image to JPEG.')), 'image/jpeg', 0.92);
+    });
+    const jpegName = file.name.replace(/\.avif$/i, '') || 'asset-photo';
+    return new File([jpegBlob], `${jpegName}.jpg`, { type: 'image/jpeg', lastModified: file.lastModified });
+  } finally {
+    bitmap.close();
+  }
+};
 
 export default function AssetFormPage() {
   const { id } = useParams<{ id: string }>();
@@ -15,6 +44,9 @@ export default function AssetFormPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<AssetCategory[]>([]);
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [existingPhotos, setExistingPhotos] = useState<AssetDetail['photos']>([]);
+  const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     asset_tag: '',
@@ -54,6 +86,7 @@ export default function AssetFormPage() {
     setLoading(true);
     try {
       const data = await assetsApi.getById(id);
+      setExistingPhotos(data.photos || []);
       setForm({
         asset_tag: data.asset_tag,
         name: data.name,
@@ -75,6 +108,20 @@ export default function AssetFormPage() {
       navigate('/assets');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const deleteExistingPhoto = async (photoId: string) => {
+    if (!id || !window.confirm('Delete this uploaded photo? This cannot be undone.')) return;
+    setDeletingPhotoId(photoId);
+    try {
+      await assetsApi.deletePhoto(id, photoId);
+      setExistingPhotos((current) => current.filter((photo) => photo.id !== photoId));
+      toast.success('Photo deleted');
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to delete photo');
+    } finally {
+      setDeletingPhotoId(null);
     }
   };
 
@@ -100,18 +147,27 @@ export default function AssetFormPage() {
 
     setSaving(true);
     try {
+      const uploadPhotos = await Promise.all(photos.map(normalizePhotoForUpload));
       const payload: any = {
         ...form,
         purchase_cost: form.purchase_cost ? parseFloat(form.purchase_cost) : null,
         purchase_date: form.purchase_date || null,
         warranty_expiry: form.warranty_expiry || null,
       };
+      const formData = new FormData();
+      Object.entries(payload).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) formData.append(key, String(value));
+      });
+      uploadPhotos.forEach((photo) => formData.append('new_photos', photo));
+      // Keep ordinary edits on the existing JSON path. Use multipart only
+      // when the request actually includes uploaded photo files.
+      const requestPayload = uploadPhotos.length > 0 ? formData : payload;
 
       if (isEdit && id) {
-        await assetsApi.update(id, payload);
+        await assetsApi.update(id, requestPayload);
         toast.success('Asset updated successfully');
       } else {
-        await assetsApi.create(payload);
+        await assetsApi.create(requestPayload);
         toast.success('Asset created successfully');
       }
       navigate('/assets');
@@ -124,7 +180,10 @@ export default function AssetFormPage() {
         });
         setErrors(fieldErrors);
       }
-      toast.error(data?.detail || 'Failed to save asset');
+      const fieldMessages = data && typeof data === 'object'
+        ? Object.entries(data).map(([field, message]) => `${field}: ${Array.isArray(message) ? message.join(', ') : String(message)}`).join(' ')
+        : '';
+      toast.error(data?.detail || fieldMessages || err.message || 'Failed to save asset');
     } finally {
       setSaving(false);
     }
@@ -227,6 +286,52 @@ export default function AssetFormPage() {
                     placeholder="MBP16-M3-2024"
                   />
                 </div>
+              </div>
+
+              {/* Multiple asset photos */}
+              <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
+                <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-900">
+                  <ImagePlus className="h-4 w-4 text-indigo-500" /> Asset Photos
+                </h2>
+                <p className="mb-4 text-xs text-gray-500">Select multiple photos. Remove an existing or newly selected photo if needed.</p>
+                {existingPhotos.length > 0 && (
+                  <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                    {existingPhotos.map((photo) => (
+                      <div key={photo.id} className="relative overflow-hidden rounded-lg bg-gray-50 ring-1 ring-gray-200">
+                        <img src={photo.image_url} alt={photo.caption || 'Asset photo'} className="block h-28 w-full object-contain" />
+                        <button
+                          type="button"
+                          onClick={() => deleteExistingPhoto(photo.id)}
+                          disabled={deletingPhotoId === photo.id}
+                          className="absolute right-1 top-1 rounded-full bg-white/95 p-1.5 text-red-600 shadow hover:bg-red-50 disabled:opacity-50"
+                          aria-label="Delete uploaded photo"
+                          title="Delete photo"
+                        >
+                          {deletingPhotoId === photo.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(event) => setPhotos((current) => [...current, ...Array.from(event.target.files || [])])}
+                  className="block w-full rounded-lg border border-gray-300 p-2 text-sm"
+                />
+                {photos.length > 0 && (
+                  <ul className="mt-3 space-y-2">
+                    {photos.map((photo, index) => (
+                      <li key={`${photo.name}-${index}`} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                        <span className="truncate">{photo.name}</span>
+                        <button type="button" onClick={() => setPhotos((current) => current.filter((_, i) => i !== index))} className="ml-3 text-red-600" aria-label={`Remove ${photo.name}`}>
+                          <X className="h-4 w-4" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
 
               {/* Financial Section */}

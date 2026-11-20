@@ -60,7 +60,7 @@ export interface OnboardingTask {
   status: string; status_display: string; assigned_to: string | null; assigned_to_name: string | null;
   completion_notes: string; completed_at: string | null; case_id: string; employee_name: string;
   employee_number: string; joining_date: string;
-  submissions: { id: string; document_id: string; document_name: string; document_url: string | null; status: string; review_comments: string; submitted_at: string }[];
+  submissions: { id: string; document_id: string; document_name: string; document_url: string | null; status: string; review_comments: string; submitted_at: string; source: 'RECRUITMENT' | 'ONBOARDING' }[];
 }
 
 export interface OnboardingCase {
@@ -84,7 +84,9 @@ export const onboardingApi = {
   assignTask: async (id: string, assigned_to: string | null) => (await api.post<OnboardingTask>(`/onboarding/tasks/${id}/assign/`, { assigned_to })).data,
   uploadTaskDocument: async (id: string, file: File, document_name: string) => {
     const payload = new FormData(); payload.append('file', file); payload.append('document_name', document_name);
-    return (await api.post<OnboardingTask>(`/onboarding/tasks/${id}/upload-document/`, payload)).data;
+    return (await api.post<OnboardingTask>(`/onboarding/tasks/${id}/upload-document/`, payload, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })).data;
   },
   reviewTaskDocument: async (id: string, submission_id: string, decision: 'VERIFY' | 'REJECT', comments = '') =>
     (await api.post<OnboardingTask>(`/onboarding/tasks/${id}/review-document/`, { submission_id, decision, comments })).data,

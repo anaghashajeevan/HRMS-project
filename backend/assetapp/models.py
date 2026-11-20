@@ -24,6 +24,10 @@ class AssetCategory(models.Model):
         max_length=50, default='package',
         help_text="Lucide icon name for UI (e.g., 'laptop', 'monitor', 'phone')"
     )
+    employee_response_days = models.PositiveSmallIntegerField(
+        default=10,
+        help_text='Days the employee has to confirm receipt or raise a flag after allocation.',
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -120,6 +124,19 @@ class Asset(models.Model):
         return self.warranty_expiry >= timezone.now().date()
 
 
+class AssetPhoto(models.Model):
+    """Additional photos attached to an asset record."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name='photos')
+    image = models.ImageField(upload_to='assets/gallery/%Y/%m/')
+    caption = models.CharField(max_length=200, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'asset_photos'
+        ordering = ['uploaded_at']
+
+
 # ==============================================================================
 # ASSET ALLOCATION
 # ==============================================================================
@@ -128,9 +145,19 @@ class AssetAllocation(models.Model):
     """Records asset assignments to employees + full return history."""
     STATUS_CHOICES = [
         ('ALLOCATED', 'Allocated'),
+        ('NOT_RECEIVED', 'Not Received'),
         ('RETURNED', 'Returned'),
         ('DAMAGED', 'Damaged'),
         ('LOST', 'Lost / Stolen'),
+    ]
+    RECEIPT_STATUS_CHOICES = [
+        ('PENDING', 'Awaiting Employee Response'),
+        ('ACCEPTED', 'Receipt Confirmed'),
+        ('FLAGGED', 'Raised for Management Review'),
+        ('AWAITING_EMPLOYEE_CONFIRMATION', 'Awaiting Final Employee Confirmation'),
+        ('AUTO_ACCEPTED', 'Auto-Accepted After Timeout'),
+        ('REVIEW_CONFIRMED', 'Management Confirmed Receipt'),
+        ('REVIEW_NOT_RECEIVED', 'Management Confirmed Not Received'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -146,6 +173,18 @@ class AssetAllocation(models.Model):
     returned_date = models.DateField(null=True, blank=True)
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='ALLOCATED')
+    receipt_status = models.CharField(max_length=40, choices=RECEIPT_STATUS_CHOICES, default='PENDING')
+    response_due_at = models.DateTimeField(null=True, blank=True)
+    employee_response_at = models.DateTimeField(null=True, blank=True)
+    employee_response_note = models.TextField(blank=True)
+    final_employee_response_at = models.DateTimeField(null=True, blank=True)
+    final_employee_response_note = models.TextField(blank=True)
+    review_note = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        Employee, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='asset_receipt_reviews',
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
 
     # Handover notes
     handover_notes = models.TextField(

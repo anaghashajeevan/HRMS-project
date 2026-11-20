@@ -787,6 +787,13 @@ class EmployeeViewSet(ModelViewSet):
     ordering = ['employee_id']
     http_method_names = ['get', 'post', 'patch', 'delete']
 
+    def get_permissions(self):
+        # Employee deletion is reserved for System Admins. HR admins retain
+        # their existing create and update permissions.
+        if self.action == 'destroy':
+            return [IsAuthenticated(), IsSystemAdmin()]
+        return super().get_permissions()
+
     def get_queryset(self):
         user = self.request.user
         # Keep HRMS employment history intact, but do not show an SSO-linked
@@ -1003,6 +1010,14 @@ class EmployeeViewSet(ModelViewSet):
         instance.status = 'TERMINATED'
         instance.save(update_fields=['is_deleted', 'status'])
         instance.probation_cycles.filter(is_current=True).update(is_current=False)
+
+        # A deleted employee must no longer be able to sign in with an HRMS
+        # account that was created alongside the employee record.
+        if hasattr(instance, 'user_account'):
+            account = instance.user_account
+            account.is_active = False
+            account.save(update_fields=['is_active'])
+            account.active_sessions.filter(is_valid=True).update(is_valid=False)
 
         # Decrement position count
         if instance.position:
@@ -1733,13 +1748,17 @@ class ApprovalWorkflowViewSet(ModelViewSet):
         # Specific employees (with their roles for identification)
         employees = Employee.objects.filter(
             is_deleted=False,
-            status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'],
             user_account__isnull=False,
+            user_account__is_active=True,
         ).select_related('user_account').prefetch_related('user_account__roles').order_by('first_name')
         
         for emp in employees:
-            role_names = list(emp.user_account.roles.values_list('role_name', flat=True))
-            role_str = ', '.join(role_names) if role_names else 'EMPLOYEE'
+            role_names = list(emp.user_account.roles.filter(is_active=True).values_list('role_name', flat=True))
+            # Leave ordinary Employee-only accounts out, while retaining users
+            # who also hold a manager, HR, finance, or other approver role.
+            if role_names and not any(role.upper() != 'EMPLOYEE' for role in role_names):
+                continue
+            role_str = ', '.join(role_names) if role_names else 'No assigned role'
             options.append({
                 'id': f'SPECIFIC_EMPLOYEE:{emp.id}',
                 'label': f'👤 {role_str} — {emp.full_name} ({emp.employee_id})',
@@ -2311,6 +2330,24 @@ from .serializers import (
     MonthlyPerformancePlanSerializer, MonthlyKRASerializer, MonthlyKPISerializer
 )
 from .services.annual_plan_service import AnnualPlanService
+
+
+class SalesPieBudgetSyncView(APIView):
+    """Manually import monthly budgets from all configured SalesPie tenants."""
+    permission_classes = [IsAuthenticated, IsHRAdmin]
+
+    def post(self, request):
+        from .services.salespie_budget_sync import SalesPieSyncError, sync_salespie_budgets
+
+        financial_year = str(request.data.get('financial_year') or '').strip()
+        if not financial_year:
+            return Response({'detail': 'financial_year is required (for example 2026-27).'}, status=400)
+        try:
+            return Response(sync_salespie_budgets(financial_year))
+        except SalesPieSyncError as exc:
+            return Response({'detail': str(exc)}, status=503)
+
+
 class AnnualPerformancePlanViewSet(ModelViewSet):
     """Manage annual plans."""
     queryset = AnnualPerformancePlan.objects.select_related('employee').prefetch_related(
@@ -2339,6 +2376,30 @@ class AnnualPerformancePlanViewSet(ModelViewSet):
         if hasattr(user, 'employee'):
             return qs.filter(employee=user.employee)
         return qs.none()
+
+    def destroy(self, request, *args, **kwargs):
+        # Removing an annual plan cascades to its quarters, monthly plans,
+        # KRAs, KPIs, and plan-linked carry-forward records. Keep this
+        # destructive operation exclusive to System Admins.
+        if not request.user.has_role('SYSTEM_ADMIN'):
+            return Response({'detail': 'Only System Admin can delete an annual plan.'}, status=403)
+        plan = self.get_object()
+        with transaction.atomic():
+            # Carry-forward source KPIs use PROTECT so their review trail
+            # cannot be removed accidentally through a KPI-only delete.
+            # An explicit annual-plan deletion includes that trail by design.
+            plan.carry_forwards.all().delete()
+            plan.delete()
+        return Response(status=204)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        AnnualPlanService.sync_departmental_kras(instance)
+        # Reload prefetched monthly KRAs so the response includes records just
+        # added for this draft plan.
+        instance = self.get_queryset().get(pk=instance.pk)
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
     
     @action(detail=False, methods=['post'], url_path='generate')
     def generate(self, request):
@@ -2358,8 +2419,21 @@ class AnnualPerformancePlanViewSet(ModelViewSet):
                 financial_year=financial_year,
                 created_by_user=request.user
             )
+            # The plan is already committed before the external request. A
+            # SalesPie outage must not undo successful annual-plan creation.
+            salespie_sync = None
+            salespie_sync_error = None
+            try:
+                from .services.salespie_budget_sync import SalesPieSyncError, sync_salespie_budgets
+                salespie_sync = sync_salespie_budgets(financial_year)
+            except SalesPieSyncError as exc:
+                salespie_sync_error = str(exc)
             return Response(
-                AnnualPerformancePlanDetailSerializer(plan).data,
+                {
+                    **AnnualPerformancePlanDetailSerializer(plan).data,
+                    'salespie_budget_sync': salespie_sync,
+                    'salespie_budget_sync_error': salespie_sync_error,
+                },
                 status=201
             )
         except ValueError as ve:
@@ -2383,7 +2457,112 @@ class AnnualPerformancePlanViewSet(ModelViewSet):
         if not plan:
             return Response({'detail': f'No annual plan generated for FY {fy} yet.'}, status=404)
 
+        AnnualPlanService.sync_departmental_kras(plan)
+        plan = AnnualPerformancePlan.objects.filter(pk=plan.pk).select_related('employee').prefetch_related(
+            'quarterly_reviews__monthly_plans__kras__kpis'
+        ).first()
         return Response(AnnualPerformancePlanDetailSerializer(plan, context={'request': request}).data)    
+
+
+def can_review_employee_performance(user, employee):
+    """Limit consolidated review access to HR or the employee's manager chain."""
+    if user.has_role('SYSTEM_ADMIN') or user.has_role('HR_ADMIN'):
+        return True
+    if not getattr(user, 'employee_id', None):
+        return False
+    if user.has_role('MANAGER') or user.has_role('REPORTING_MANAGER'):
+        if employee.reporting_manager_id == user.employee_id:
+            return True
+    if user.has_role('HOD') or user.has_role('DEPARTMENT_HEAD'):
+        headed_department_ids = user.employee.headed_departments.values_list('id', flat=True)
+        if employee.department_id in headed_department_ids:
+            return True
+    return False
+
+
+class TeamPerformanceReviewView(APIView):
+    """Consolidated monthly review data, scoped to the reviewer's team."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import Employee
+
+        financial_year = (request.query_params.get('financial_year') or '').strip()
+        try:
+            month = int(request.query_params.get('month', ''))
+        except (TypeError, ValueError):
+            return Response({'detail': 'A valid month (1-12) is required.'}, status=400)
+        if not financial_year or not 1 <= month <= 12:
+            return Response({'detail': 'financial_year and a month from 1 to 12 are required.'}, status=400)
+
+        employees = Employee.objects.filter(is_deleted=False).select_related(
+            'position', 'department'
+        ).order_by('first_name', 'last_name')
+        if request.user.has_role('SYSTEM_ADMIN') or request.user.has_role('HR_ADMIN'):
+            pass
+        elif getattr(request.user, 'employee_id', None) and (
+            request.user.has_role('MANAGER') or request.user.has_role('REPORTING_MANAGER')
+        ):
+            employees = employees.filter(reporting_manager_id=request.user.employee_id)
+        elif getattr(request.user, 'employee_id', None) and (
+            request.user.has_role('HOD') or request.user.has_role('DEPARTMENT_HEAD')
+        ):
+            headed_department_ids = request.user.employee.headed_departments.values_list('id', flat=True)
+            employees = employees.filter(department_id__in=headed_department_ids)
+        else:
+            return Response({'detail': 'You do not have access to team performance reviews.'}, status=403)
+
+        employee_ids = list(employees.values_list('id', flat=True))
+        plans = MonthlyPerformancePlan.objects.filter(
+            annual_plan__employee_id__in=employee_ids,
+            annual_plan__financial_year=financial_year,
+            month=month,
+        ).select_related('annual_plan').prefetch_related('kras__kpis')
+        plans_by_employee = {plan.annual_plan.employee_id: plan for plan in plans}
+
+        results = []
+        for employee in employees:
+            monthly_plan = plans_by_employee.get(employee.id)
+            results.append({
+                'employee_id': str(employee.id),
+                'employee_code': employee.employee_id,
+                'employee_name': employee.full_name,
+                'position': employee.position.title if employee.position else '',
+                'department': employee.department.name if employee.department else '',
+                'monthly_plan': MonthlyPerformancePlanSerializer(monthly_plan, context={'request': request}).data if monthly_plan else None,
+            })
+        return Response(results)
+
+    def post(self, request, monthly_plan_id):
+        from django.utils import timezone
+
+        try:
+            monthly_plan = MonthlyPerformancePlan.objects.select_related('annual_plan__employee').get(pk=monthly_plan_id)
+        except MonthlyPerformancePlan.DoesNotExist:
+            return Response({'detail': 'Monthly plan not found.'}, status=404)
+        employee = monthly_plan.annual_plan.employee
+        if employee.id == getattr(request.user, 'employee_id', None) or not can_review_employee_performance(request.user, employee):
+            return Response({'detail': 'You do not have permission to review this employee.'}, status=403)
+
+        status = str(request.data.get('status') or '').upper()
+        allowed_statuses = {'UNDER_REVIEW', 'APPROVED', 'RETURNED'}
+        if status not in allowed_statuses:
+            return Response({'detail': 'Choose UNDER_REVIEW, APPROVED, or RETURNED.'}, status=400)
+        if monthly_plan.status not in {'EMPLOYEE_SUBMITTED', 'UNDER_REVIEW'}:
+            return Response({'detail': 'This monthly plan is not ready for manager review.'}, status=400)
+        manager_comments = str(request.data.get('manager_comments') or '').strip()
+        if status == 'RETURNED' and not manager_comments:
+            return Response({'detail': 'Add a comment explaining what the employee should update.'}, status=400)
+
+        monthly_plan.status = status
+        if 'manager_comments' in request.data:
+            monthly_plan.manager_comments = manager_comments
+        if status == 'APPROVED':
+            monthly_plan.manager_reviewed_at = timezone.now()
+        monthly_plan.save(update_fields=['status', 'manager_comments', 'manager_reviewed_at'])
+        return Response(MonthlyPerformancePlanSerializer(monthly_plan, context={'request': request}).data)
+
+
 class MonthlyPerformancePlanViewSet(ModelViewSet):
     queryset = MonthlyPerformancePlan.objects.prefetch_related('kras__kpis').all()
     serializer_class = MonthlyPerformancePlanSerializer

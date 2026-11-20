@@ -68,6 +68,7 @@ from .views import (
 
     AnnualPerformancePlanViewSet,MonthlyPerformancePlanViewSet,MonthlyKRAViewSet,MonthlyKPIViewSet,MonthlyPeerNominationViewSet,MonthlyPeerRatingViewSet,CommonKRAMasterViewSet,
     DepartmentalKRAMasterViewSet,CommonKPIMasterViewSet,MonthlyKPIEvidenceViewSet,CarryForwardRecordViewSet,
+    SalesPieBudgetSyncView, TeamPerformanceReviewView,
     
     
 )
@@ -147,6 +148,9 @@ urlpatterns = [
     path('dashboard/stats/', DashboardStatsView.as_view(), name='dashboard-stats'),
     path('reports/data/', PerformanceReportsView.as_view(), name='performance-reports'),
     path('reports/export/', ReportExportView.as_view(), name='report-export'),
+    path('salespie/budgets/sync/', SalesPieBudgetSyncView.as_view(), name='salespie-budget-sync'),
+    path('team-performance-review/', TeamPerformanceReviewView.as_view(), name='team-performance-review'),
+    path('team-performance-review/<uuid:monthly_plan_id>/decision/', TeamPerformanceReviewView.as_view(), name='team-performance-review-decision'),
     
     # ---------- Audit Logs ----------
     path('auth/audit-logs/', AuthAuditLogListView.as_view(), name='audit_logs'),

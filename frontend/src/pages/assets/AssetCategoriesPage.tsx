@@ -25,6 +25,9 @@ export default function AssetCategoriesPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<AssetCategory | null>(null);
+  const [activeTab, setActiveTab] = useState<'categories' | 'response-window'>('categories');
+  const [responseDays, setResponseDays] = useState<Record<string, number>>({});
+  const [savingResponseFor, setSavingResponseFor] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     name: '',
@@ -42,10 +45,29 @@ export default function AssetCategoriesPage() {
     try {
       const data = await assetCategoriesApi.list();
       setCategories(data);
+      setResponseDays(Object.fromEntries(data.map((category) => [category.id, category.employee_response_days || 10])));
     } catch {
       toast.error('Failed to load categories');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const saveResponseWindow = async (category: AssetCategory) => {
+    const days = Number(responseDays[category.id]);
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      toast.error('Set a response period between 1 and 365 days.');
+      return;
+    }
+    setSavingResponseFor(category.id);
+    try {
+      await assetCategoriesApi.update(category.id, { employee_response_days: days });
+      toast.success(`${category.name} response period saved.`);
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.employee_response_days?.[0] || 'Could not save the response period.');
+    } finally {
+      setSavingResponseFor(null);
     }
   };
 
@@ -132,8 +154,30 @@ export default function AssetCategoriesPage() {
             </button>
           </div>
 
+          <div className="mb-6 flex gap-2 border-b border-gray-200">
+            <button onClick={() => setActiveTab('categories')} className={`border-b-2 px-4 py-2 text-sm font-semibold ${activeTab === 'categories' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500'}`}>Categories</button>
+            <button onClick={() => setActiveTab('response-window')} className={`border-b-2 px-4 py-2 text-sm font-semibold ${activeTab === 'response-window' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500'}`}>Response Time Settings</button>
+          </div>
+
           {/* List */}
-          {loading ? (
+          {activeTab === 'response-window' ? (
+            <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
+              <h2 className="text-lg font-semibold text-gray-900">Employee receipt response period</h2>
+              <p className="mb-5 mt-1 text-sm text-gray-500">Employees can confirm receipt or flag a missing handover within this many days after allocation. Pending allocations are auto-accepted after the deadline.</p>
+              <div className="divide-y divide-gray-100">
+                {categories.map((category) => (
+                  <div key={category.id} className="flex flex-wrap items-center justify-between gap-3 py-4">
+                    <div><p className="font-medium text-gray-900">{category.name}</p><p className="text-xs text-gray-500">Current setting: {category.employee_response_days} days</p></div>
+                    <div className="flex items-center gap-2">
+                      <input type="number" min={1} max={365} value={responseDays[category.id] ?? 10} onChange={(event) => setResponseDays({ ...responseDays, [category.id]: Number(event.target.value) })} className="w-24 rounded-lg border border-gray-300 px-3 py-2 text-sm" aria-label={`${category.name} response days`} />
+                      <span className="text-sm text-gray-500">days</span>
+                      <button onClick={() => void saveResponseWindow(category)} disabled={savingResponseFor === category.id} className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">{savingResponseFor === category.id ? 'Saving…' : 'Save'}</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : loading ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
             </div>

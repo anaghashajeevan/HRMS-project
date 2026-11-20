@@ -10,6 +10,7 @@ from .models import (
     CandidateInterviewEvaluation,
     CandidateBackgroundCheck,
     CandidateOffer, CandidateOfferApproval,
+    CandidateDocument,
 )
 from .services import available_openings
 
@@ -237,6 +238,32 @@ class CandidateOfferSerializer(serializers.ModelSerializer):
 
     def get_offer_letter_filename(self, offer):
         return offer.offer_letter.name.rsplit('/', 1)[-1] if offer.offer_letter else ''
+
+
+class CandidateDocumentSerializer(serializers.ModelSerializer):
+    uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True, default=None)
+    reviewed_by_name = serializers.CharField(source='reviewed_by.full_name', read_only=True, default=None)
+
+    class Meta:
+        model = CandidateDocument
+        fields = ['id', 'document_type', 'document_name', 'original_filename', 'file_size_kb', 'mime_type',
+                  'status', 'review_notes', 'uploaded_by_name', 'reviewed_by_name', 'uploaded_at', 'reviewed_at',
+                  'employee_document_id']
+        read_only_fields = fields
+
+
+class CandidateDocumentUploadSerializer(serializers.Serializer):
+    document_type = serializers.ChoiceField(choices=CandidateDocument.TYPE_CHOICES)
+    document_name = serializers.CharField(max_length=150)
+    file = serializers.FileField()
+
+    def validate_file(self, value):
+        if value.size > 10 * 1024 * 1024:
+            raise serializers.ValidationError('Candidate documents must be 10 MB or smaller.')
+        suffix = Path(value.name).suffix.lower()
+        if suffix not in {'.pdf', '.jpg', '.jpeg', '.png'}:
+            raise serializers.ValidationError('Upload a PDF, JPG, or PNG document.')
+        return value
 
 
 class CandidateApplicationCreateSerializer(serializers.Serializer):

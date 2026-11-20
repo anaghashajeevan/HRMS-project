@@ -2,7 +2,7 @@
 Asset Management Serializers.
 """
 from rest_framework import serializers
-from .models import AssetCategory, Asset, AssetAllocation
+from .models import AssetCategory, Asset, AssetAllocation, AssetPhoto
 from HRMSapp.models import Employee
 
 
@@ -20,9 +20,15 @@ class AssetCategorySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'description', 'icon', 'is_active',
             'asset_count', 'allocated_count', 'available_count',
+            'employee_response_days',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_employee_response_days(self, value):
+        if value < 1 or value > 365:
+            raise serializers.ValidationError('Response window must be between 1 and 365 days.')
+        return value
 
     def get_asset_count(self, obj):
         return obj.assets.count()
@@ -97,6 +103,18 @@ class AssetListSerializer(serializers.ModelSerializer):
 # ASSET DETAIL SERIALIZER
 # ------------------------------------------------------------------------------
 
+class AssetPhotoSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AssetPhoto
+        fields = ['id', 'image', 'image_url', 'caption', 'uploaded_at']
+        read_only_fields = ['id', 'uploaded_at']
+
+    def get_image_url(self, obj):
+        request = self.context.get('request')
+        return request.build_absolute_uri(obj.image.url) if request else obj.image.url
+
 class AssetDetailSerializer(serializers.ModelSerializer):
     category_detail = AssetCategorySerializer(source='category', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -104,6 +122,11 @@ class AssetDetailSerializer(serializers.ModelSerializer):
     current_allocation = serializers.SerializerMethodField()
     is_warranty_valid = serializers.BooleanField(read_only=True)
     image_url = serializers.SerializerMethodField()
+    photos = AssetPhotoSerializer(many=True, read_only=True)
+    new_photos = serializers.ListField(
+        child=serializers.ImageField(), write_only=True, required=False,
+        allow_empty=True,
+    )
     created_by_name = serializers.CharField(
         source='created_by.full_name', read_only=True, default=None
     )
@@ -118,12 +141,26 @@ class AssetDetailSerializer(serializers.ModelSerializer):
             'warranty_expiry', 'is_warranty_valid',
             'status', 'status_display',
             'condition', 'condition_display', 'condition_notes',
-            'image', 'image_url',
+            'image', 'image_url', 'photos', 'new_photos',
             'current_allocation',
             'created_by', 'created_by_name',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        photos = validated_data.pop('new_photos', [])
+        asset = super().create(validated_data)
+        for photo in photos:
+            AssetPhoto.objects.create(asset=asset, image=photo)
+        return asset
+
+    def update(self, instance, validated_data):
+        photos = validated_data.pop('new_photos', [])
+        asset = super().update(instance, validated_data)
+        for photo in photos:
+            AssetPhoto.objects.create(asset=asset, image=photo)
+        return asset
 
     def get_current_allocation(self, obj):
         active = obj.allocations.filter(status='ALLOCATED').select_related(
@@ -168,6 +205,10 @@ class AssetAllocationSerializer(serializers.ModelSerializer):
         source='returned_to.full_name', read_only=True, default=None
     )
     duration_days = serializers.IntegerField(read_only=True)
+    current_employee_flag_note = serializers.SerializerMethodField()
+
+    def get_current_employee_flag_note(self, obj):
+        return obj.final_employee_response_note or obj.employee_response_note
 
     class Meta:
         model = AssetAllocation
@@ -177,12 +218,18 @@ class AssetAllocationSerializer(serializers.ModelSerializer):
             'allocated_date', 'expected_return_date', 'returned_date',
             'status', 'status_display', 'duration_days',
             'handover_notes', 'return_notes', 'recovery_cost',
+            'receipt_status', 'response_due_at', 'employee_response_at',
+            'employee_response_note', 'final_employee_response_at', 'final_employee_response_note',
+            'current_employee_flag_note', 'review_note', 'reviewed_by', 'reviewed_at',
             'allocated_by', 'allocated_by_name',
             'returned_to', 'returned_to_name',
             'created_at',
         ]
         read_only_fields = [
             'id', 'allocated_by', 'returned_to', 'created_at',
+            'receipt_status', 'response_due_at', 'employee_response_at',
+            'employee_response_note', 'final_employee_response_at', 'final_employee_response_note',
+            'current_employee_flag_note', 'review_note', 'reviewed_by', 'reviewed_at',
         ]
 
 

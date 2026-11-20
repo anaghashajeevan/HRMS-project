@@ -25,10 +25,45 @@ Including another URLconf
 #     path('api/v1/', include('HRMSapp.urls')),
 # ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
+# from django.conf import settings
+# from django.conf.urls.static import static
+# from django.contrib import admin
+# from django.urls import include, path
+
+# urlpatterns = [
+#     path('admin/', admin.site.urls),
+#     path('api/v1/', include('HRMSapp.urls')),
+#     path('api/v1/reimbursements/', include('reimbursementapp.urls')),
+#     path('api/v1/attendance/', include('attendanceapp.urls')), 
+#     path('api/v1/leave/', include('leaveapp.urls')),
+#     path('api/v1/policies/', include('policyapp.urls')),
+#     path('api/v1/assets/', include('assetapp.urls')),
+#     path('api/v1/payroll/', include('payrollapp.urls')),
+#     path('api/v1/recruitment/', include('recruitmentapp.urls')),
+#     path('api/v1/onboarding/', include('onboardingapp.urls')),
+# ]
+
+# if settings.DEBUG:
+#     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+#     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+
+
+
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from django.http import HttpResponseRedirect
 from django.urls import include, path
+
+
+def local_sso_frontend_callback(request):
+    """Forward a local Nexus callback received by Django to the Vite app."""
+    frontend_url = getattr(settings, 'HRMS_FRONTEND_URL', 'http://localhost:5173').rstrip('/')
+    callback_url = f'{frontend_url}/hrms/login'
+    query = request.META.get('QUERY_STRING', '')
+    if query:
+        callback_url = f'{callback_url}?{query}'
+    return HttpResponseRedirect(callback_url)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -44,6 +79,12 @@ urlpatterns = [
 ]
 
 if settings.DEBUG:
+    # Local Nexus configurations may send the callback to Django on :8000.
+    # Vite owns the /hrms/login route and exchanges the returned code with HRMS.
+    urlpatterns += [
+        path('hrms/login', local_sso_frontend_callback, name='local-sso-frontend-callback'),
+        path('hrms/login/', local_sso_frontend_callback),
+    ]
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 

@@ -109,7 +109,9 @@ class OnboardingTaskSerializer(serializers.ModelSerializer):
     def get_submissions(self, task):
         request = self.context.get('request')
         rows = []
-        for submission in task.submissions.select_related('employee_document').all():
+        for submission in task.submissions.select_related(
+            'employee_document', 'employee_document__source_candidate_document',
+        ).all():
             document_url = submission.employee_document.file_path.url if submission.employee_document.file_path else None
             if document_url and request:
                 document_url = request.build_absolute_uri(document_url)
@@ -121,6 +123,7 @@ class OnboardingTaskSerializer(serializers.ModelSerializer):
                 'status': submission.status,
                 'review_comments': submission.review_comments,
                 'submitted_at': submission.submitted_at,
+                'source': 'RECRUITMENT' if hasattr(submission.employee_document, 'source_candidate_document') else 'ONBOARDING',
             })
         return rows
 
@@ -182,6 +185,15 @@ class OnboardingStartSerializer(serializers.Serializer):
             started_by=getattr(getattr(self.context.get('request'), 'user', None), 'employee', None),
         )
         task_rows = []
+        verified_documents = list(
+            offer.application.candidate_documents.filter(
+                status='VERIFIED', employee_document__isnull=False,
+                employee_document__employee=offer.employee,
+            ).select_related('employee_document').order_by('uploaded_at')
+        )
+        used_document_ids = set()
+        inherited_submissions = []
+        now = timezone.now()
         for task in template.tasks.all():
             if task.owner_type == 'EMPLOYEE':
                 assigned_to = offer.employee
@@ -191,17 +203,38 @@ class OnboardingStartSerializer(serializers.Serializer):
                 assigned_to = offer.employee.reporting_manager
             else:
                 assigned_to = task.owner_employee
-            task_rows.append(OnboardingTask(
+            task_row = OnboardingTask(
                 case=case, source_template_task=task, title=task.title,
                 description=task.description, task_type=task.task_type,
                 owner_type=task.owner_type, assigned_to=assigned_to,
                 employee_document_type=task.employee_document_type,
                 due_date=offer.joining_date + timedelta(days=task.due_days_from_joining),
                 is_required=task.is_required, order=task.order,
-            ))
+            )
+            if task.task_type == 'DOCUMENT':
+                matching_document = next((
+                    candidate_doc for candidate_doc in verified_documents
+                    if candidate_doc.employee_document.document_type == task.employee_document_type
+                    and candidate_doc.employee_document_id not in used_document_ids
+                ), None)
+                if matching_document:
+                    used_document_ids.add(matching_document.employee_document_id)
+                    task_row.status = 'COMPLETED'
+                    task_row.completed_at = now
+                    task_row.completion_notes = 'Satisfied by a verified document collected during Recruitment.'
+                    inherited_submissions.append((task_row, matching_document.employee_document))
+            task_rows.append(task_row)
         OnboardingTask.objects.bulk_create(task_rows)
+        OnboardingTaskSubmission.objects.bulk_create([
+            OnboardingTaskSubmission(
+                task=task_row, employee_document=document, status='VERIFIED',
+                review_comments='Verified in Recruitment and carried into onboarding.',
+                reviewed_by=case.started_by, reviewed_at=now,
+            )
+            for task_row, document in inherited_submissions
+        ])
         for row in task_rows:
-            if row.assigned_to_id:
+            if row.assigned_to_id and row.status != 'COMPLETED':
                 Notification.objects.create(
                     recipient=row.assigned_to,
                     notification_type='SYSTEM',

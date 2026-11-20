@@ -248,64 +248,19 @@ def is_postgres_reachable(host, port, timeout=1.5):
     except (OSError, ValueError):
         return False
 
-DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "django.db.backends.postgresql")
+# DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "django.db.backends.postgresql")
 
-database_host = os.getenv("DATABASE_HOST", "postgres")
-if not RUNNING_IN_DOCKER and database_host == "postgres":
-    database_host = "127.0.0.1"
+# database_host = os.getenv("DATABASE_HOST", "postgres")
+# if not RUNNING_IN_DOCKER and database_host == "postgres":
+#     database_host = "127.0.0.1"
 
-database_port = os.getenv("DATABASE_PORT", "5432")
+# database_port = os.getenv("DATABASE_PORT", "5432")
 
-postgres_configured = DATABASE_ENGINE == "django.db.backends.postgresql"
-postgres_available = postgres_configured and is_postgres_reachable(database_host, database_port)
+# postgres_configured = DATABASE_ENGINE == "django.db.backends.postgresql"
+# postgres_available = postgres_configured and is_postgres_reachable(database_host, database_port)
 
-if postgres_available:
-    # ---------------- PostgreSQL (Production) ----------------
-    DATABASES = {
-        "default": {
-            "ENGINE": DATABASE_ENGINE,
-            "NAME": os.getenv("DATABASE_NAME", "hrms_prod"),
-            "USER": os.getenv("DATABASE_USER", "postgres"),
-            "PASSWORD": os.getenv("DATABASE_PASSWORD", ""),
-            "HOST": database_host,
-            "PORT": database_port,
-        }
-    }
-    print(f"[HRMS Settings] Database: PostgreSQL (Production) - Host: {database_host}")
-
-else:
-    # ---------------- SQLite (Local Dev Fallback) ----------------
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / os.getenv("SQLITE_NAME", "db.sqlite3"),
-        }
-    }
-    if postgres_configured:
-        print(f"[HRMS Settings] PostgreSQL unreachable at {database_host}:{database_port} → falling back to SQLite (Local Dev)")
-    else:
-        print("[HRMS Settings] Database: SQLite (Local Dev)")
-
-# DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "django.db.backends.sqlite3")
-
-# if DATABASE_ENGINE == "django.db.backends.sqlite3":
-#     # ---------------- SQLite (Development) ----------------
-#     DATABASES = {
-#         "default": {
-#             "ENGINE": DATABASE_ENGINE,
-#             "NAME": BASE_DIR / os.getenv("DATABASE_NAME", "db.sqlite3"),
-#         }
-#     }
-#     print("[HRMS Settings] Database: SQLite (Development)")
-
-# else:
+# if postgres_available:
 #     # ---------------- PostgreSQL (Production) ----------------
-#     database_host = os.getenv("DATABASE_HOST", "postgres")
-    
-#     # If not running in Docker, use localhost instead of 'postgres'
-#     if not RUNNING_IN_DOCKER and database_host == "postgres":
-#         database_host = "127.0.0.1"
-
 #     DATABASES = {
 #         "default": {
 #             "ENGINE": DATABASE_ENGINE,
@@ -313,10 +268,55 @@ else:
 #             "USER": os.getenv("DATABASE_USER", "postgres"),
 #             "PASSWORD": os.getenv("DATABASE_PASSWORD", ""),
 #             "HOST": database_host,
-#             "PORT": os.getenv("DATABASE_PORT", "5432"),
+#             "PORT": database_port,
 #         }
 #     }
 #     print(f"[HRMS Settings] Database: PostgreSQL (Production) - Host: {database_host}")
+
+# else:
+#     # ---------------- SQLite (Local Dev Fallback) ----------------
+#     DATABASES = {
+#         "default": {
+#             "ENGINE": "django.db.backends.sqlite3",
+#             "NAME": BASE_DIR / os.getenv("SQLITE_NAME", "db.sqlite3"),
+#         }
+#     }
+#     if postgres_configured:
+#         print(f"[HRMS Settings] PostgreSQL unreachable at {database_host}:{database_port} → falling back to SQLite (Local Dev)")
+#     else:
+#         print("[HRMS Settings] Database: SQLite (Local Dev)")
+
+DATABASE_ENGINE = os.getenv("DATABASE_ENGINE", "django.db.backends.sqlite3")
+
+if DATABASE_ENGINE == "django.db.backends.sqlite3":
+    # ---------------- SQLite (Development) ----------------
+    DATABASES = {
+        "default": {
+            "ENGINE": DATABASE_ENGINE,
+            "NAME": BASE_DIR / os.getenv("DATABASE_NAME", "db.sqlite3"),
+        }
+    }
+    print("[HRMS Settings] Database: SQLite (Development)")
+
+else:
+    # ---------------- PostgreSQL (Production) ----------------
+    database_host = os.getenv("DATABASE_HOST", "postgres")
+    
+    # If not running in Docker, use localhost instead of 'postgres'
+    if not RUNNING_IN_DOCKER and database_host == "postgres":
+        database_host = "127.0.0.1"
+
+    DATABASES = {
+        "default": {
+            "ENGINE": DATABASE_ENGINE,
+            "NAME": os.getenv("DATABASE_NAME", "hrms_prod"),
+            "USER": os.getenv("DATABASE_USER", "postgres"),
+            "PASSWORD": os.getenv("DATABASE_PASSWORD", ""),
+            "HOST": database_host,
+            "PORT": os.getenv("DATABASE_PORT", "5432"),
+        }
+    }
+    print(f"[HRMS Settings] Database: PostgreSQL (Production) - Host: {database_host}")
 
 # ==============================================================================
 # CORS / CSRF SETTINGS
@@ -583,6 +583,17 @@ NEXUS_SSO_DIRECTORY_SYNC_SECRET = os.getenv(
     os.getenv('NEXUS_SSO_ROLE_SYNC_SECRET', ''),
 )
 
+# Server-to-server SalesPie monthly budget feed. Tenant IDs are fixed
+# integration configuration; HRMS users do not select a tenant.
+SALESPIE_BACKEND_URL = os.getenv('SALESPIE_BACKEND_URL', '').rstrip('/')
+SALESPIE_BUDGET_FEED_PATH = os.getenv('SALESPIE_BUDGET_FEED_PATH', 'budgets/monthly/')
+SALESPIE_BUDGET_TENANT_IDS = tuple(
+    int(value.strip()) for value in os.getenv('SALESPIE_BUDGET_TENANT_IDS', '').split(',')
+    if value.strip().isdigit() and int(value.strip()) > 0
+)
+SALESPIE_BUDGET_TIMEOUT_SECONDS = int(os.getenv('SALESPIE_BUDGET_TIMEOUT_SECONDS', '15'))
+HRMS_BUDGET_FEED_TOKEN = os.getenv('HRMS_BUDGET_FEED_TOKEN', '').strip()
+
 # Tailscale terminates TLS before requests reach the Docker services. Trust
 # the proxy's explicit scheme header so Django generates HTTPS resource URLs.
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
@@ -601,6 +612,10 @@ if not RUNNING_IN_DOCKER:
 from celery.schedules import crontab
 
 CELERY_BEAT_SCHEDULE = {
+    'auto-accept-asset-receipts-daily': {
+        'task': 'assetapp.tasks.auto_accept_asset_receipts',
+        'schedule': crontab(minute=0),
+    },
     'daily-compoff-scan': {
         'task': 'leaveapp.tasks.scan_and_credit_compoff',
         'schedule': crontab(hour=23, minute=0),
