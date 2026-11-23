@@ -17,6 +17,18 @@ export interface RecruitmentEmailTemplate {
 export interface InterviewScorecard {
   id: string; name: string; description: string; criteria: Array<{ label: string; weight: number; guidance?: string }>; is_active: boolean;
 }
+export interface RecruitmentTaskScorecard {
+  id: string; name: string; description: string; criteria: Array<{ label: string; guidance?: string }>; is_active: boolean;
+}
+export interface CandidateTaskAssessment {
+  id: string; application_id: string; candidate_name: string; scorecard: string; scorecard_name: string;
+  task_title: string; task_details: string; criteria_snapshot: Array<{ label: string; guidance?: string }>;
+  ratings: Record<string, number>; comments: string; is_assessed: boolean; assessed_by_name: string; created_at: string;
+}
+export interface CandidateTaskApplicationOption {
+  id: string; candidate_name: string; candidate_email: string; requisition_number: string;
+  position_title: string; current_stage_code: string; is_current_task_stage: boolean;
+}
 export interface OfferRule {
   id: string; name: string; grade_band: string; currency: string; minimum_salary: string;
   maximum_salary: string; maximum_signing_bonus: string; required_approvers: string[]; is_active: boolean;
@@ -77,6 +89,7 @@ export interface CandidateBackgroundCheck {
 }
 export interface ReferenceCheckApplicationOption {
   id: string; candidate_name: string; candidate_email: string; requisition_number: string; position_title: string;
+  current_stage_code: string; is_current_reference_stage: boolean;
 }
 export interface CandidateOfferApplicationOption {
   id: string; candidate_name: string; candidate_email: string; requisition_number: string;
@@ -207,6 +220,13 @@ export const recruitmentApi = {
   }) => (await api.post<CandidateInterviewEvaluation>(`/recruitment/interviews/${interviewId}/evaluate/`, payload)).data,
   recordInterviewOutcome: async (applicationId: string, decision: 'PASS' | 'HOLD' | 'REJECT', notes: string) =>
     (await api.post<CandidateApplication>(`/recruitment/applications/${applicationId}/interview-outcome/`, { decision, notes })).data,
+  taskData: async () => (await api.get<{ applications: CandidateTaskApplicationOption[]; scorecards: RecruitmentTaskScorecard[]; assessments: CandidateTaskAssessment[] }>('/recruitment/task-assessments/')).data,
+  createTaskAssessment: async (payload: { application: string; scorecard: string; task_title: string; task_details: string }) =>
+    (await api.post<CandidateTaskAssessment>('/recruitment/task-assessments/', payload)).data,
+  saveTaskAssessmentResult: async (assessmentId: string, payload: { ratings: Record<string, number>; comments: string }) =>
+    (await api.patch<CandidateTaskAssessment>(`/recruitment/task-assessments/${assessmentId}/result/`, payload)).data,
+  recordTaskOutcome: async (applicationId: string, decision: 'PASS' | 'HOLD' | 'REJECT', notes: string) =>
+    (await api.post<CandidateApplication>(`/recruitment/applications/${applicationId}/task-outcome/`, { decision, notes })).data,
   referenceCheckData: async () => (await api.get<{ applications: ReferenceCheckApplicationOption[]; checks: CandidateBackgroundCheck[] }>('/recruitment/background-checks/')).data,
   createBackgroundCheck: async (payload: { application: string; check_type: 'REFERENCE' | 'BACKGROUND'; label: string; contact_or_provider: string; requested_date: string; is_required: boolean; notes: string }) =>
     (await api.post<CandidateBackgroundCheck>('/recruitment/background-checks/', payload)).data,
@@ -253,6 +273,10 @@ export const recruitmentApi = {
   saveScorecard: async (id: string | null, payload: Omit<InterviewScorecard, 'id'>) =>
     (await (id ? api.patch<InterviewScorecard>(`/recruitment/scorecards/${id}/`, payload) : api.post<InterviewScorecard>('/recruitment/scorecards/', payload))).data,
   deleteScorecard: async (id: string) => { await api.delete(`/recruitment/scorecards/${id}/`); },
+  taskScorecards: async () => unwrap((await api.get<RecruitmentTaskScorecard[] | { results: RecruitmentTaskScorecard[] }>('/recruitment/task-scorecards/')).data),
+  saveTaskScorecard: async (id: string | null, payload: Omit<RecruitmentTaskScorecard, 'id'>) =>
+    (await (id ? api.patch<RecruitmentTaskScorecard>(`/recruitment/task-scorecards/${id}/`, payload) : api.post<RecruitmentTaskScorecard>('/recruitment/task-scorecards/', payload))).data,
+  deleteTaskScorecard: async (id: string) => { await api.delete(`/recruitment/task-scorecards/${id}/`); },
   offerRules: async () => unwrap((await api.get<OfferRule[] | { results: OfferRule[] }>('/recruitment/offer-rules/')).data),
   saveOfferRule: async (id: string | null, payload: Omit<OfferRule, 'id'>) =>
     (await (id ? api.patch<OfferRule>(`/recruitment/offer-rules/${id}/`, payload) : api.post<OfferRule>('/recruitment/offer-rules/', payload))).data,

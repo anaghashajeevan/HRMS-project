@@ -7,6 +7,12 @@ import type { JobPosition, CompanyStructure } from '../../types/masterData';
 import toast from 'react-hot-toast';
 import { AxiosError } from 'axios';
 
+function departmentLabel(name: string, path?: string | null) {
+  const parts = (path || '').split('/').filter(Boolean);
+  const context = parts.length > 1 ? parts[parts.length - 2] : '';
+  return context ? `${name} — ${context}` : name;
+}
+
 export default function PositionsPage() {
   const [positions, setPositions] = useState<JobPosition[]>([]);
   const [departments, setDepartments] = useState<CompanyStructure[]>([]);
@@ -145,7 +151,7 @@ export default function PositionsPage() {
                     <tr key={p.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium">{p.title}</td>
                       <td className="px-4 py-3"><span className="rounded bg-primary-50 px-2 py-0.5 text-xs text-primary-700">{p.grade_band}</span></td>
-                      <td className="px-4 py-3 text-gray-600">{p.department_name}</td>
+                      <td className="px-4 py-3 text-gray-600">{departmentLabel(p.department_name, p.department_path)}</td>
                       <td className="px-4 py-3">
                         <span className={p.is_full ? 'text-red-600' : 'text-gray-900'}>
                           {p.actual_count} / {p.budgeted_count}
@@ -196,7 +202,7 @@ export default function PositionsPage() {
                 <label className="mb-1 block text-sm font-medium">Department *</label>
                 <select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100">
                   <option value="">Select...</option>
-                  {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  {departments.map((d) => <option key={d.id} value={d.id}>{departmentLabel(d.name, d.path)}</option>)}
                 </select>
               </div>
               <div>

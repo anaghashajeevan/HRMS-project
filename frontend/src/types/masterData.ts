@@ -34,6 +34,7 @@ export interface JobPosition {
   grade_band: string;
   department: string;
   department_name: string;
+  department_path: string;
   budgeted_count: number;
   actual_count: number;
   vacancy_count: number;

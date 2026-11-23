@@ -16,13 +16,14 @@ from rest_framework.viewsets import ModelViewSet
 from rest_framework.views import APIView
 
 from HRMSapp.models import ApprovalWorkflow, CompanyStructure, Employee, JobPosition, Notification, UserAccount
-from HRMSapp.permissions import IsHRAdmin
+from HRMSapp.permissions import IsHRAdmin, IsHRAdminOrRecruitmentManager
 from .models import (
     CandidateApplication, CandidateApplicationHistory, CandidateInterview,
     CandidateInterviewEvaluation, HiringApprovalAction, HiringRequisition,
     RecruitmentCandidate, RecruitmentStage, InterviewScorecard, CandidateBackgroundCheck,
     CandidateOffer, CandidateOfferApproval,
     CandidateDocument,
+    RecruitmentTaskScorecard, CandidateTaskAssessment,
 )
 from .serializers import (
     ApprovalDecisionSerializer,
@@ -45,6 +46,8 @@ from .serializers import (
     CandidateBackgroundCheckSerializer,
     CandidateOfferCreateSerializer, CandidateOfferSerializer,
     CandidateDocumentSerializer, CandidateDocumentUploadSerializer,
+    RecruitmentTaskScorecardSerializer, CandidateTaskAssessmentCreateSerializer,
+    CandidateTaskAssessmentResultSerializer, CandidateTaskAssessmentSerializer,
 )
 from .models import RecruitmentEmailTemplate, OfferRule
 from .services import (
@@ -60,6 +63,43 @@ from .offer_services import deliver_accepted_offer_letter, link_accepted_offer_t
 
 def _is_hr(user):
     return user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+
+
+def _is_hiring_manager(user):
+    """Managers can work on recruitment items tied to requests they own or approve."""
+    return user.has_role('MANAGER') or user.has_role('REPORTING_MANAGER')
+
+
+def _can_access_recruitment(user):
+    return _is_hr(user) or _is_hiring_manager(user)
+
+
+def _recruitment_requisition_scope(user):
+    requisitions = HiringRequisition.objects.all()
+    if _is_hr(user) or _is_hiring_manager(user):
+        return requisitions
+    return requisitions.none()
+
+
+def _recruitment_application_scope(user):
+    applications = CandidateApplication.objects.all()
+    if _is_hr(user):
+        return applications
+    return applications.filter(requisition__in=_recruitment_requisition_scope(user))
+
+
+def _require_recruitment_access(user):
+    if not _can_access_recruitment(user):
+        raise PermissionDenied('Only HR, managers, and reporting managers can access this recruitment workflow.')
+
+
+def _next_active_application_stage(current_stage):
+    """Return the next configured open stage in the recruitment pipeline."""
+    return RecruitmentStage.objects.filter(
+        is_active=True,
+        is_terminal=False,
+        order__gt=current_stage.order,
+    ).order_by('order').first()
 
 
 def _offer_workflow_steps(workflow):
@@ -121,8 +161,6 @@ class RecruitmentSettingsView(APIView):
         return Response(RecruitmentSettingsSerializer(get_recruitment_settings()).data)
 
     def patch(self, request):
-        if not _is_hr(request.user):
-            raise PermissionDenied('Only HR or System Admin can change hiring rules.')
         settings_obj = get_recruitment_settings()
         serializer = RecruitmentSettingsSerializer(settings_obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -143,15 +181,7 @@ class HiringRequisitionViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        user = self.request.user
-        if _is_hr(user):
-            return qs
-        employee = getattr(user, 'employee', None)
-        if not employee:
-            return qs.none()
-        return qs.filter(
-            Q(requested_by=employee) | Q(approval_actions__assigned_to=employee),
-        ).distinct()
+        return qs.filter(pk__in=_recruitment_requisition_scope(self.request.user))
 
     def get_serializer_class(self):
         return HiringRequisitionCreateSerializer if self.action == 'create' else HiringRequisitionSerializer
@@ -161,7 +191,7 @@ class HiringRequisitionViewSet(ModelViewSet):
         if not employee:
             raise PermissionDenied('Your account must be linked to an employee profile to request hiring.')
         allowed_roles = get_recruitment_settings().allowed_requester_roles
-        if not any(request.user.has_role(role) for role in allowed_roles):
+        if not (_is_hiring_manager(request.user) or any(request.user.has_role(role) for role in allowed_roles)):
             raise PermissionDenied('Your role is not allowed to open hiring requisitions.')
 
         serializer = self.get_serializer(data=request.data)
@@ -249,7 +279,7 @@ class PositionOptionsView(APIView):
 
     def get(self, request):
         allowed_roles = get_recruitment_settings().allowed_requester_roles
-        if not _is_hr(request.user) and not any(request.user.has_role(role) for role in allowed_roles):
+        if not _is_hr(request.user) and not (_is_hiring_manager(request.user) or any(request.user.has_role(role) for role in allowed_roles)):
             return Response({'positions': [], 'locations': []})
         replacement_id = request.query_params.get('replacing_employee')
         replacing_employee = None
@@ -289,7 +319,7 @@ class ReplacementEmployeeOptionsView(APIView):
 
     def get(self, request):
         allowed_roles = get_recruitment_settings().allowed_requester_roles
-        if not _is_hr(request.user) and not any(request.user.has_role(role) for role in allowed_roles):
+        if not _is_hr(request.user) and not (_is_hiring_manager(request.user) or any(request.user.has_role(role) for role in allowed_roles)):
             raise PermissionDenied('You are not allowed to view replacement employee options.')
 
         # Include every non-deleted employee with an assigned position. The
@@ -309,7 +339,7 @@ class ReplacementEmployeeOptionsView(APIView):
 
 
 class RecruitmentRuleViewSet(ModelViewSet):
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated, IsHRAdminOrRecruitmentManager]
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def perform_create(self, serializer):
@@ -319,6 +349,8 @@ class RecruitmentRuleViewSet(ModelViewSet):
 class RecruitmentStageViewSet(RecruitmentRuleViewSet):
     queryset = RecruitmentStage.objects.all()
     serializer_class = RecruitmentStageSerializer
+
+    permission_classes = [IsAuthenticated, IsHRAdminOrRecruitmentManager]
 
 
 class RecruitmentEmailTemplateViewSet(RecruitmentRuleViewSet):
@@ -331,27 +363,34 @@ class InterviewScorecardViewSet(RecruitmentRuleViewSet):
     serializer_class = InterviewScorecardSerializer
 
 
+class RecruitmentTaskScorecardViewSet(RecruitmentRuleViewSet):
+    queryset = RecruitmentTaskScorecard.objects.all()
+    serializer_class = RecruitmentTaskScorecardSerializer
+
+
 class OfferRuleViewSet(RecruitmentRuleViewSet):
     queryset = OfferRule.objects.all()
     serializer_class = OfferRuleSerializer
 
 
 class CandidateApplicationOptionsView(APIView):
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        requisitions = HiringRequisition.objects.filter(status='APPROVED').select_related(
+        _require_recruitment_access(request.user)
+        requisitions = _recruitment_requisition_scope(request.user).filter(status='APPROVED').select_related(
             'position', 'department',
         ).order_by('-created_at')
         return Response(CandidateApplicationRequisitionOptionSerializer(requisitions, many=True).data)
 
 
 class CandidateApplicationsView(APIView):
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request):
-        applications = CandidateApplication.objects.select_related(
+        _require_recruitment_access(request.user)
+        applications = _recruitment_application_scope(request.user).select_related(
             'candidate', 'requisition', 'requisition__position', 'requisition__department', 'stage',
         ).prefetch_related('history__from_stage', 'history__to_stage', 'history__changed_by').all()
         requisition_id = request.query_params.get('requisition')
@@ -371,9 +410,12 @@ class CandidateApplicationsView(APIView):
         return Response(CandidateApplicationSerializer(applications, many=True).data)
 
     def post(self, request):
+        _require_recruitment_access(request.user)
         serializer = CandidateApplicationCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
+        if not _recruitment_requisition_scope(request.user).filter(pk=values['requisition'].pk, status='APPROVED').exists():
+            raise PermissionDenied('You can add candidates only to approved requisitions you requested or are assigned to approve.')
         employee = getattr(request.user, 'employee', None)
 
         with transaction.atomic():
@@ -425,16 +467,17 @@ class CandidateApplicationsView(APIView):
 
 
 class CandidateApplicationScreeningView(APIView):
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        _require_recruitment_access(request.user)
         serializer = CandidateScreeningDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         decision = serializer.validated_data['decision']
         notes = serializer.validated_data['notes']
 
         with transaction.atomic():
-            application = CandidateApplication.objects.select_for_update().select_related('stage').filter(pk=pk).first()
+            application = _recruitment_application_scope(request.user).select_for_update().select_related('stage').filter(pk=pk).first()
             if application is None:
                 return Response({'detail': 'Candidate application not found.'}, status=status.HTTP_404_NOT_FOUND)
             if application.stage.is_terminal or application.stage.code not in {'new', 'screening'}:
@@ -451,9 +494,7 @@ class CandidateApplicationScreeningView(APIView):
                 if next_stage is None:
                     return Response({'detail': 'Configure an active Rejected stage before rejecting candidates.'}, status=status.HTTP_400_BAD_REQUEST)
             elif decision == 'PASS':
-                next_stage = RecruitmentStage.objects.filter(
-                    is_active=True, is_terminal=False, order__gt=application.stage.order,
-                ).order_by('order').first()
+                next_stage = _next_active_application_stage(application.stage)
                 if next_stage is None:
                     return Response({'detail': 'There is no next active recruitment stage configured.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -485,8 +526,11 @@ class CandidateApplicationResumeView(APIView):
         if application is None or not application.candidate.resume:
             return Response({'detail': 'Resume not found.'}, status=status.HTTP_404_NOT_FOUND)
         employee = getattr(request.user, 'employee', None)
-        if not _is_hr(request.user) and (employee is None or not application.interviews.filter(interviewers=employee).exists()):
-            raise PermissionDenied('Only HR or an assigned interviewer can download this resume.')
+        if not _is_hr(request.user) and not (
+            (employee is not None and application.interviews.filter(interviewers=employee).exists())
+            or (_is_hiring_manager(request.user) and _recruitment_application_scope(request.user).filter(pk=application.pk).exists())
+        ):
+            raise PermissionDenied('Only HR, an assigned interviewer, or a manager responsible for this requisition can download this resume.')
         file_handle = application.candidate.resume.open('rb')
         filename = get_valid_filename(
             application.candidate.resume_original_filename
@@ -497,10 +541,11 @@ class CandidateApplicationResumeView(APIView):
 
 
 class CandidateInterviewOptionsView(APIView):
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        applications = CandidateApplication.objects.filter(
+        _require_recruitment_access(request.user)
+        applications = _recruitment_application_scope(request.user).filter(
             stage__code='interview', stage__is_terminal=False,
         ).select_related('candidate', 'requisition', 'requisition__position').order_by('-updated_at')
         scorecards = InterviewScorecard.objects.filter(is_active=True).order_by('name').values(
@@ -538,21 +583,29 @@ class CandidateInterviewsView(APIView):
         ).prefetch_related('interviewers', 'evaluations__interviewer')
         if not _is_hr(request.user):
             employee = getattr(request.user, 'employee', None)
-            if employee is None:
+            manager_apps = _recruitment_application_scope(request.user)
+            if _is_hiring_manager(request.user):
+                interviews = interviews.filter(
+                    Q(interviewers=employee) | Q(application__in=manager_apps),
+                ).distinct()
+            elif employee is None:
                 return Response([])
-            interviews = interviews.filter(interviewers=employee)
+            else:
+                interviews = interviews.filter(interviewers=employee)
         interview_status = request.query_params.get('status')
         if interview_status:
             if interview_status not in dict(CandidateInterview.STATUS_CHOICES):
                 raise ValidationError({'status': 'Choose a valid interview status.'})
             interviews = interviews.filter(status=interview_status)
+        interviews = interviews.order_by('-scheduled_at', '-created_at')
         return Response(CandidateInterviewSerializer(interviews, many=True, context={'request': request}).data)
 
     def post(self, request):
-        if not _is_hr(request.user):
-            raise PermissionDenied('Only HR can schedule interviews.')
+        _require_recruitment_access(request.user)
         serializer = CandidateInterviewScheduleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        if not _recruitment_application_scope(request.user).filter(pk=serializer.validated_data['application'].pk).exists():
+            raise PermissionDenied('You can schedule interviews only for requisitions you requested or are assigned to approve.')
         interview = serializer.save(created_by=getattr(request.user, 'employee', None))
         interview = CandidateInterview.objects.select_related(
             'application', 'application__candidate', 'application__requisition',
@@ -597,16 +650,17 @@ class CandidateInterviewEvaluationView(APIView):
 
 
 class CandidateInterviewOutcomeView(APIView):
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        _require_recruitment_access(request.user)
         serializer = CandidateScreeningDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         decision = serializer.validated_data['decision']
         notes = serializer.validated_data['notes']
 
         with transaction.atomic():
-            application = CandidateApplication.objects.select_for_update().select_related('stage').filter(pk=pk).first()
+            application = _recruitment_application_scope(request.user).select_for_update().select_related('stage').filter(pk=pk).first()
             if application is None:
                 return Response({'detail': 'Candidate application not found.'}, status=status.HTTP_404_NOT_FOUND)
             if application.stage.code != 'interview' or application.stage.is_terminal:
@@ -649,14 +703,131 @@ class CandidateInterviewOutcomeView(APIView):
         return Response(CandidateApplicationSerializer(application).data)
 
 
-class CandidateBackgroundChecksView(APIView):
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+class CandidateTaskAssessmentsView(APIView):
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        applications = CandidateApplication.objects.filter(
-            stage__code='reference-check', stage__is_terminal=False,
-        ).select_related('candidate', 'requisition', 'requisition__position').order_by('-updated_at')
+        _require_recruitment_access(request.user)
+        applications = _recruitment_application_scope(request.user).filter(
+            Q(stage__code='tasks', stage__is_terminal=False) | Q(task_assessments__isnull=False),
+        ).select_related('candidate', 'requisition', 'requisition__position', 'stage').distinct().order_by('-updated_at')
+        assessments = CandidateTaskAssessment.objects.filter(application__in=applications).select_related(
+            'application__candidate', 'scorecard', 'assessed_by',
+        )
+        return Response({
+            'applications': [{
+                'id': str(app.pk), 'candidate_name': app.candidate.full_name,
+                'candidate_email': app.candidate.email,
+                'requisition_number': app.requisition.requisition_number,
+                'position_title': app.requisition.position.title,
+                'current_stage_code': app.stage.code,
+                'is_current_task_stage': app.stage.code == 'tasks' and not app.stage.is_terminal,
+            } for app in applications],
+            'scorecards': RecruitmentTaskScorecardSerializer(
+                RecruitmentTaskScorecard.objects.filter(is_active=True).order_by('name'), many=True,
+            ).data,
+            'assessments': CandidateTaskAssessmentSerializer(assessments, many=True).data,
+        })
+
+    def post(self, request):
+        _require_recruitment_access(request.user)
+        serializer = CandidateTaskAssessmentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        application = _recruitment_application_scope(request.user).select_related('stage').filter(
+            pk=serializer.validated_data['application'].pk,
+        ).first()
+        if application is None:
+            return Response({'detail': 'Candidate application not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if application.stage.code != 'tasks' or application.stage.is_terminal:
+            return Response({'detail': 'Task assessments can only be added while the candidate is in Tasks.'}, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
+        assessment = CandidateTaskAssessment.objects.create(
+            application=application, scorecard=data['scorecard'], task_title=data['task_title'],
+            task_details=data.get('task_details', ''), criteria_snapshot=data['scorecard'].criteria,
+        )
+        assessment = CandidateTaskAssessment.objects.select_related('application__candidate', 'scorecard', 'assessed_by').get(pk=assessment.pk)
+        return Response(CandidateTaskAssessmentSerializer(assessment).data, status=status.HTTP_201_CREATED)
+
+
+class CandidateTaskAssessmentResultView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        _require_recruitment_access(request.user)
+        assessment = CandidateTaskAssessment.objects.select_related(
+            'application', 'application__stage', 'application__candidate', 'scorecard', 'assessed_by',
+        ).filter(application__in=_recruitment_application_scope(request.user), pk=pk).first()
+        if assessment is None:
+            return Response({'detail': 'Candidate task assignment not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if assessment.application.stage.code != 'tasks' or assessment.application.stage.is_terminal:
+            return Response({'detail': 'Task results can only be recorded while the candidate is in Tasks.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = CandidateTaskAssessmentResultSerializer(assessment, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        assessment.ratings = serializer.validated_data['ratings']
+        assessment.comments = serializer.validated_data.get('comments', '')
+        assessment.assessed_by = getattr(request.user, 'employee', None)
+        assessment.save(update_fields=['ratings', 'comments', 'assessed_by', 'updated_at'])
+        return Response(CandidateTaskAssessmentSerializer(assessment).data)
+
+
+class CandidateTaskOutcomeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        _require_recruitment_access(request.user)
+        serializer = CandidateScreeningDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        decision = serializer.validated_data['decision']
+        notes = serializer.validated_data['notes']
+        with transaction.atomic():
+            application = _recruitment_application_scope(request.user).select_for_update().select_related('stage').filter(pk=pk).first()
+            if application is None:
+                return Response({'detail': 'Candidate application not found.'}, status=status.HTTP_404_NOT_FOUND)
+            if application.stage.code != 'tasks' or application.stage.is_terminal:
+                return Response({'detail': 'Task outcomes can only be recorded while the candidate is in Tasks.'}, status=status.HTTP_400_BAD_REQUEST)
+            if decision == 'PASS':
+                task_assessments = list(application.task_assessments.all())
+                if not task_assessments:
+                    return Response({'detail': 'Assign at least one candidate task before advancing.'}, status=status.HTTP_400_BAD_REQUEST)
+                if any(not assessment.is_assessed for assessment in task_assessments):
+                    return Response({'detail': 'Enter results for every assigned task before advancing.'}, status=status.HTTP_400_BAD_REQUEST)
+                next_stage = _next_active_application_stage(application.stage)
+                if next_stage is None:
+                    return Response({'detail': 'There is no next active recruitment stage configured.'}, status=status.HTTP_400_BAD_REQUEST)
+            elif decision == 'REJECT':
+                next_stage = RecruitmentStage.objects.filter(is_active=True, is_terminal=True, terminal_outcome='REJECTED').order_by('order').first()
+                if next_stage is None:
+                    return Response({'detail': 'Configure an active Rejected stage before rejecting candidates.'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                next_stage = application.stage
+            previous_stage = application.stage
+            application.stage = next_stage
+            application.screening_decision = decision
+            application.screening_notes = notes
+            application.save(update_fields=['stage', 'screening_decision', 'screening_notes', 'updated_at'])
+            CandidateApplicationHistory.objects.create(
+                application=application, from_stage=previous_stage, to_stage=next_stage,
+                decision=decision, notes=notes, changed_by=getattr(request.user, 'employee', None),
+            )
+        application = CandidateApplication.objects.select_related(
+            'candidate', 'requisition', 'requisition__position', 'requisition__department', 'stage',
+        ).prefetch_related('history__from_stage', 'history__to_stage', 'history__changed_by').get(pk=pk)
+        return Response(CandidateApplicationSerializer(application).data)
+
+
+class CandidateBackgroundChecksView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        _require_recruitment_access(request.user)
+        applications = _recruitment_application_scope(request.user).filter(
+            Q(stage__code='reference-check', stage__is_terminal=False)
+            | Q(background_checks__isnull=False),
+        ).select_related('candidate', 'requisition', 'requisition__position', 'stage').distinct().order_by('-updated_at')
         checks = CandidateBackgroundCheck.objects.select_related('application', 'application__candidate', 'created_by', 'updated_by')
+        if not _is_hr(request.user):
+            checks = checks.filter(application__in=applications)
         return Response({
             'applications': [{
                 'id': str(application.pk),
@@ -664,13 +835,16 @@ class CandidateBackgroundChecksView(APIView):
                 'candidate_email': application.candidate.email,
                 'requisition_number': application.requisition.requisition_number,
                 'position_title': application.requisition.position.title,
+                'current_stage_code': application.stage.code,
+                'is_current_reference_stage': application.stage.code == 'reference-check' and not application.stage.is_terminal,
             } for application in applications],
             'checks': CandidateBackgroundCheckSerializer(checks, many=True).data,
         })
 
     def post(self, request):
+        _require_recruitment_access(request.user)
         application_id = request.data.get('application')
-        application = CandidateApplication.objects.select_related('stage').filter(pk=application_id).first()
+        application = _recruitment_application_scope(request.user).select_related('stage').filter(pk=application_id).first()
         if application is None:
             return Response({'detail': 'Candidate application not found.'}, status=status.HTTP_404_NOT_FOUND)
         if application.stage.code != 'reference-check' or application.stage.is_terminal:
@@ -682,10 +856,13 @@ class CandidateBackgroundChecksView(APIView):
 
 
 class CandidateBackgroundCheckDetailView(APIView):
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated]
 
     def patch(self, request, pk):
-        check = CandidateBackgroundCheck.objects.select_related('application', 'application__stage').filter(pk=pk).first()
+        _require_recruitment_access(request.user)
+        check = CandidateBackgroundCheck.objects.select_related('application', 'application__stage').filter(
+            pk=pk, application__in=_recruitment_application_scope(request.user),
+        ).first()
         if check is None:
             return Response({'detail': 'Reference/background check not found.'}, status=status.HTTP_404_NOT_FOUND)
         if check.application.stage.code != 'reference-check' or check.application.stage.is_terminal:
@@ -697,15 +874,16 @@ class CandidateBackgroundCheckDetailView(APIView):
 
 
 class CandidateReferenceCheckOutcomeView(APIView):
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        _require_recruitment_access(request.user)
         serializer = CandidateScreeningDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         decision = serializer.validated_data['decision']
         notes = serializer.validated_data['notes']
         with transaction.atomic():
-            application = CandidateApplication.objects.select_for_update().select_related('stage').filter(pk=pk).first()
+            application = _recruitment_application_scope(request.user).select_for_update().select_related('stage').filter(pk=pk).first()
             if application is None:
                 return Response({'detail': 'Candidate application not found.'}, status=status.HTTP_404_NOT_FOUND)
             if application.stage.code != 'reference-check' or application.stage.is_terminal:
@@ -718,9 +896,9 @@ class CandidateReferenceCheckOutcomeView(APIView):
                 if next_stage is None:
                     return Response({'detail': 'Configure an active Rejected stage before rejecting candidates.'}, status=status.HTTP_400_BAD_REQUEST)
             elif decision == 'PASS':
-                next_stage = RecruitmentStage.objects.filter(code='offer', is_active=True, is_terminal=False).first()
+                next_stage = _next_active_application_stage(application.stage)
                 if next_stage is None:
-                    return Response({'detail': 'Configure an active Offer stage before advancing candidates.'}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({'detail': 'There is no next active recruitment stage configured.'}, status=status.HTTP_400_BAD_REQUEST)
             else:
                 next_stage = application.stage
 

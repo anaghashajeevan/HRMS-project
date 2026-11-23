@@ -42,7 +42,7 @@ export default function HiringRequisitionsPage() {
   const matchingReplacementEmployees = replacementEmployees.filter((employee) => employee.position_id === form.position);
   const roleCodes = user?.role_codes || [];
   const canManageRules = isHr(user);
-  const canRequest = Boolean(settings && roleCodes.some((role) => settings.allowed_requester_roles.includes(role)));
+  const canRequest = Boolean(settings && (roleCodes.some((role) => ['MANAGER', 'REPORTING_MANAGER'].includes(role)) || roleCodes.some((role) => settings.allowed_requester_roles.includes(role))));
 
   const loadPage = async () => {
     setLoading(true);
@@ -185,7 +185,7 @@ export default function HiringRequisitionsPage() {
 
           {showForm && (
             <div className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4">
-              <form onSubmit={handleCreate} className="my-8 w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
+              <form onSubmit={handleCreate} className="recruitment-form my-8 w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
                 <div className="mb-5 flex items-start justify-between gap-4">
                   <div><h2 className="text-xl font-bold text-gray-900">Request a hire</h2><p className="mt-1 text-sm text-gray-500">The selected openings are reserved while approval is pending.</p></div>
                   <button type="button" onClick={closeForm} aria-label="Close" className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"><X className="h-5 w-5" /></button>
@@ -209,7 +209,7 @@ export default function HiringRequisitionsPage() {
                   </label>
                   <div className="sm:col-span-2">
                     <label className="flex items-center gap-2 text-sm font-medium text-gray-700"><input type="checkbox" checked={form.is_replacement} onChange={(event) => setForm({ ...form, is_replacement: event.target.checked })} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />This is a replacement hire</label>
-                    {form.is_replacement && <select required value={form.replacing_employee} onChange={(event) => setForm({ ...form, replacing_employee: event.target.value })} className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5"><option value="">{!form.position ? 'Choose a position first' : matchingReplacementEmployees.length ? 'Choose employee being replaced' : 'No employees assigned to this position'}</option>{matchingReplacementEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name} · {employee.employee_id}</option>)}</select>}
+                    {form.is_replacement && <label className="mt-2 block text-sm font-medium text-gray-700">Employee being replaced<select required value={form.replacing_employee} onChange={(event) => setForm({ ...form, replacing_employee: event.target.value })} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5"><option value="">{!form.position ? 'Choose a position first' : matchingReplacementEmployees.length ? 'Choose employee being replaced' : 'No employees assigned to this position'}</option>{matchingReplacementEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name} · {employee.employee_id}</option>)}</select></label>}
                   </div>
                   <label className="text-sm font-medium text-gray-700 sm:col-span-2">Business reason
                     <textarea required minLength={10} rows={4} value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} placeholder="Explain why the role is needed and the expected impact." className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2.5" />

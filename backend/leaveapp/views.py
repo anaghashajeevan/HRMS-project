@@ -18,7 +18,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from HRMSapp.permissions import IsHRAdmin
+from HRMSapp.permissions import IsHRAdmin, IsHRAdminOrRecruitmentManager
 
 from .models import LeaveType, Holiday
 from .serializers import (
@@ -977,7 +977,7 @@ class AnnualCalendarViewSet(ModelViewSet):
 
 class WhatsAppStatusView(APIView):
     """Get gateway + connection status."""
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated, IsHRAdminOrRecruitmentManager]
 
     def get(self, request):
         from .services.whatsapp_service import get_gateway_status
@@ -986,7 +986,7 @@ class WhatsAppStatusView(APIView):
 
 class WhatsAppQRView(APIView):
     """Get QR code for connection."""
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated, IsHRAdminOrRecruitmentManager]
 
     def get(self, request):
         from .services.whatsapp_service import get_qr_code
@@ -995,7 +995,7 @@ class WhatsAppQRView(APIView):
 
 class WhatsAppConnectView(APIView):
     """Start WhatsApp connection."""
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated, IsHRAdminOrRecruitmentManager]
 
     def post(self, request):
         from .services.whatsapp_service import connect_whatsapp
@@ -1004,7 +1004,7 @@ class WhatsAppConnectView(APIView):
 
 class WhatsAppDisconnectView(APIView):
     """Disconnect WhatsApp."""
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated, IsHRAdminOrRecruitmentManager]
 
     def post(self, request):
         from .services.whatsapp_service import disconnect_whatsapp
@@ -1013,7 +1013,7 @@ class WhatsAppDisconnectView(APIView):
 
 class WhatsAppTestSendView(APIView):
     """Send test message."""
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated, IsHRAdminOrRecruitmentManager]
 
     def post(self, request):
         from .services.whatsapp_service import send_whatsapp_message
@@ -1045,7 +1045,7 @@ class WhatsAppTestSendView(APIView):
 
 class WhatsAppLogsView(APIView):
     """View WhatsApp notification logs."""
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated, IsHRAdminOrRecruitmentManager]
 
     def get(self, request):
         from .models import WhatsAppNotificationLog

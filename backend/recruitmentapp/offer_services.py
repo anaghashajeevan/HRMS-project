@@ -5,6 +5,7 @@ from django.template import Context, Template
 from django.utils.html import format_html, strip_tags
 from django.utils import timezone
 from django.utils.text import get_valid_filename
+import re
 
 from HRMSapp.models import EmployeeDocument, LetterTemplate
 from HRMSapp.services.pdf_generator import generate_recruitment_offer_pdf, get_company
@@ -37,6 +38,21 @@ def render_text_template(value, context):
     return Template(value).render(Context(context))
 
 
+def _center_email_headings(html):
+    """Inline centered heading styles because some email clients drop CSS blocks."""
+    def apply_style(match):
+        tag, attrs = match.group(1), match.group(2) or ''
+        existing = re.search(r'\sstyle=["\']([^"\']*)["\']', attrs, re.I)
+        style = existing.group(1).rstrip(';') + ';' if existing else ''
+        if existing:
+            attrs = attrs[:existing.start()] + attrs[existing.end():]
+        attrs = attrs.rstrip()
+        style += 'text-align:center;color:#1e3a8a;margin:0 0 22px'
+        return f'<{tag}{attrs} style="{style}">'
+
+    return re.sub(r'<(h1|h2)\b([^>]*)>', apply_style, html, flags=re.I)
+
+
 def send_candidate_offer_email(offer):
     """Send the approved offer details and request a response. No formal PDF is attached."""
     template = LetterTemplate.objects.filter(template_type='OFFER_EMAIL', is_active=True).order_by('-is_default', 'name').first()
@@ -55,9 +71,24 @@ def send_candidate_offer_email(offer):
         context['position_title'], context['department_name'], context['currency'], context['annual_salary'],
         context['currency'], context['signing_bonus'], context['joining_date'], context['offer_expiry_date'],
     ))
+    # A consistent email frame makes both hand-written and AI-generated
+    # templates readable across common email clients. Inline styles are used
+    # because many clients discard CSS classes and stylesheets.
+    body = _center_email_headings(body)
+    body = (
+        '<div style="margin:0;padding:24px 12px;background:#f1f5f9;'
+        'font-family:Arial,Helvetica,sans-serif;color:#1f2937;line-height:1.6">'
+        '<div style="max-width:640px;margin:0 auto;padding:32px;background:#ffffff;'
+        'border:1px solid #e2e8f0;border-radius:10px">'
+        '<style>h1,h2{text-align:center;color:#1e3a8a} p{margin:0 0 14px} '
+        'h1{font-size:24px;margin:0 0 24px} h2{font-size:20px;margin:0 0 20px} '
+        'h3{font-size:16px;margin:20px 0 8px;color:#1e3a8a}</style>'
+        f'{body}'
+        '</div></div>'
+    )
     email = EmailMultiAlternatives(
         subject=subject,
-        body=strip_tags(body).replace('&nbsp;', ' '),
+        body=strip_tags(re.sub(r'<style\b[^>]*>.*?</style>', '', body, flags=re.I | re.S)).replace('&nbsp;', ' '),
         from_email=settings.DEFAULT_FROM_EMAIL,
         to=[offer.application.candidate.email],
     )
@@ -121,7 +152,9 @@ def deliver_accepted_offer_letter(offer, uploaded_by=None, force_resend=False):
         email = EmailMultiAlternatives(
             subject=f'{get_company()["name"]} - Your formal offer letter',
             body=(
-                f"Hello {offer.application.candidate.full_name},\n\n"
+                f"To: {offer.application.candidate.full_name} "
+                f"<{offer.application.candidate.email}>\n\n"
+                f"Dear {offer.application.candidate.full_name},\n\n"
                 f"Congratulations. Please find attached your formal offer letter for "
                 f"the {offer.application.requisition.position.title} position.\n\n"
                 'Regards,\nHuman Resources'
@@ -129,6 +162,24 @@ def deliver_accepted_offer_letter(offer, uploaded_by=None, force_resend=False):
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[offer.application.candidate.email],
         )
+        email.attach_alternative(str(format_html(
+            '<div style="margin:0;padding:24px 12px;background:#f1f5f9;'
+            'font-family:Arial,Helvetica,sans-serif;color:#1f2937;line-height:1.6">'
+            '<div style="max-width:640px;margin:0 auto;padding:32px;background:#fff;'
+            'border:1px solid #e2e8f0;border-radius:10px">'
+            '<h1 style="margin:0 0 28px;text-align:center;color:#1e3a8a;font-size:24px">Formal Offer Letter</h1>'
+            '<p style="margin:0 0 8px"><strong>To:</strong> {}<br>{}</p>'
+            '<p style="margin:24px 0 14px;color:#111827;font-weight:700">Dear {},</p>'
+            '<p>Congratulations. Please find attached your formal offer letter for the <strong>{}</strong> position.</p>'
+            '<p>Please review the attached letter and contact Human Resources if you have questions.</p>'
+            '<p style="margin-top:28px">Regards,<br><strong>Human Resources</strong><br>{}</p>'
+            '</div></div>',
+            offer.application.candidate.full_name,
+            offer.application.candidate.email,
+            offer.application.candidate.full_name,
+            offer.application.requisition.position.title,
+            get_company()['name'],
+        )), 'text/html')
         email.attach(filename, pdf_bytes, 'application/pdf')
         if not email.send(fail_silently=False):
             raise RuntimeError('The formal offer letter email was not accepted by the configured email backend.')

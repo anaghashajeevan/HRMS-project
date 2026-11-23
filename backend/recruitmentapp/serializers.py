@@ -11,6 +11,7 @@ from .models import (
     CandidateBackgroundCheck,
     CandidateOffer, CandidateOfferApproval,
     CandidateDocument,
+    RecruitmentTaskScorecard, CandidateTaskAssessment,
 )
 from .services import available_openings
 
@@ -158,6 +159,63 @@ class InterviewScorecardSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Criterion weights must add up to 100%.')
         return value
 
+
+class RecruitmentTaskScorecardSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RecruitmentTaskScorecard
+        fields = ['id', 'name', 'description', 'criteria', 'is_active', 'created_by', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+
+    def validate_criteria(self, value):
+        if not isinstance(value, list) or not value:
+            raise serializers.ValidationError('Add at least one task rating point.')
+        labels = [str(item.get('label', '')).strip() for item in value if isinstance(item, dict)]
+        if len(labels) != len(value) or any(not label for label in labels):
+            raise serializers.ValidationError('Every task point needs a label.')
+        if len(set(labels)) != len(labels):
+            raise serializers.ValidationError('Task rating point labels must be unique.')
+        return [{'label': str(item['label']).strip(), 'guidance': str(item.get('guidance', '')).strip()} for item in value]
+
+
+class CandidateTaskAssessmentCreateSerializer(serializers.Serializer):
+    application = serializers.PrimaryKeyRelatedField(queryset=CandidateApplication.objects.all())
+    scorecard = serializers.PrimaryKeyRelatedField(queryset=RecruitmentTaskScorecard.objects.filter(is_active=True))
+    task_title = serializers.CharField(max_length=160)
+    task_details = serializers.CharField(required=False, allow_blank=True, max_length=10000)
+
+    def validate_task_title(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('Enter a task or project name.')
+        return value
+
+
+class CandidateTaskAssessmentResultSerializer(serializers.Serializer):
+    ratings = serializers.DictField(child=serializers.IntegerField(min_value=1, max_value=5))
+    comments = serializers.CharField(required=False, allow_blank=True, max_length=10000)
+
+    def validate(self, attrs):
+        labels = [
+            str(item.get('label', '')).strip()
+            for item in self.instance.criteria_snapshot
+            if isinstance(item, dict)
+        ]
+        if not labels or len(set(labels)) != len(labels) or set(attrs['ratings']) != set(labels):
+            raise serializers.ValidationError({'ratings': 'Provide a rating from 1 to 5 for every assigned task point.'})
+        attrs['comments'] = attrs.get('comments', '').strip()
+        return attrs
+
+
+class CandidateTaskAssessmentSerializer(serializers.ModelSerializer):
+    application_id = serializers.UUIDField(source='application.id', read_only=True)
+    candidate_name = serializers.CharField(source='application.candidate.full_name', read_only=True)
+    scorecard_name = serializers.CharField(source='scorecard.name', read_only=True)
+    assessed_by_name = serializers.CharField(source='assessed_by.full_name', read_only=True, default='')
+    is_assessed = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = CandidateTaskAssessment
+        fields = ['id', 'application_id', 'candidate_name', 'scorecard', 'scorecard_name', 'task_title', 'task_details', 'criteria_snapshot', 'ratings', 'comments', 'is_assessed', 'assessed_by_name', 'created_at', 'updated_at']
 
 class OfferRuleSerializer(serializers.ModelSerializer):
     class Meta:

@@ -38,6 +38,20 @@ class IsHRAdmin(BasePermission):
             )
         )
 
+
+class IsHRAdminOrRecruitmentManager(BasePermission):
+    """Allow HR, system admins, managers, and reporting managers to manage requested settings."""
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(
+            user and user.is_authenticated and (
+                user.has_role('HR_ADMIN')
+                or user.has_role('SYSTEM_ADMIN')
+                or user.has_role('MANAGER')
+                or user.has_role('REPORTING_MANAGER')
+            )
+        )
+
 class IsStrictHRAdmin(BasePermission):
     def has_permission(self, request, view):
         u = request.user
