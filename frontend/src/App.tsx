@@ -281,6 +281,7 @@ import LifecycleRequestDetailPage from './pages/lifecycle/LifecycleRequestDetail
 import HiringRequisitionsPage from './pages/recruitment/HiringRequisitionsPage';
 import CandidateApplicationsPage from './pages/recruitment/CandidateApplicationsPage';
 import CandidateInterviewsPage from './pages/recruitment/CandidateInterviewsPage';
+import CandidateTasksPage from './pages/recruitment/CandidateTasksPage';
 import ReferenceChecksPage from './pages/recruitment/ReferenceChecksPage';
 import CandidateOffersPage from './pages/recruitment/CandidateOffersPage';
 import RecruitmentSettingsPage from './pages/recruitment/RecruitmentSettingsPage';
@@ -465,7 +466,7 @@ export default function App() {
           <Route
             path="/settings/roles"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER']}>
                 <RolesPage />
               </ProtectedRoute>
             }
@@ -484,7 +485,7 @@ export default function App() {
           <Route
             path="/settings/probation"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER']}>
                 <ProbationSettingsPage />
               </ProtectedRoute>
             }
@@ -504,7 +505,7 @@ export default function App() {
           <Route
             path="/settings/positions"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER']}>
                 <PositionsPage />
               </ProtectedRoute>
             }
@@ -514,7 +515,7 @@ export default function App() {
           <Route
             path="/settings/approval-workflows"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER']}>
                 <ApprovalWorkflowSettingsPage />
               </ProtectedRoute>
             }
@@ -524,7 +525,7 @@ export default function App() {
           <Route
             path="/settings/letter-templates"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER']}>
                 <LetterTemplatesPage />
               </ProtectedRoute>
             }
@@ -541,7 +542,7 @@ export default function App() {
           <Route
             path="/settings/letter-templates/new"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER']}>
                 <LetterTemplateEditorPage />
               </ProtectedRoute>
             }
@@ -549,7 +550,7 @@ export default function App() {
           <Route
             path="/settings/letter-templates/:id"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER']}>
                 <LetterTemplateEditorPage />
               </ProtectedRoute>
             }
@@ -606,7 +607,7 @@ export default function App() {
           <Route
             path="/recruitment/candidates"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER','REPORTING_MANAGER']}>
                 <CandidateApplicationsPage />
               </ProtectedRoute>
             }
@@ -622,8 +623,16 @@ export default function App() {
           <Route
             path="/recruitment/reference-checks"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER', 'REPORTING_MANAGER']}>
                 <ReferenceChecksPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recruitment/tasks"
+            element={
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER']}>
+                <CandidateTasksPage />
               </ProtectedRoute>
             }
           />
@@ -638,7 +647,7 @@ export default function App() {
           <Route
             path="/settings/recruitment"
             element={
-              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+              <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN','MANAGER', 'REPORTING_MANAGER']}>
                 <RecruitmentSettingsPage />
               </ProtectedRoute>
             }
@@ -1129,7 +1138,7 @@ export default function App() {
 <Route
   path="/settings/whatsapp"
   element={
-    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN']}>
+    <ProtectedRoute requiredRoles={['SYSTEM_ADMIN', 'HR_ADMIN', 'MANAGER', 'REPORTING_MANAGER']}>
       <WhatsAppSettingsPage />
     </ProtectedRoute>
   }

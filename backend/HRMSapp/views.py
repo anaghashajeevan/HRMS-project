@@ -35,7 +35,7 @@ from .serializers import (
     CustomTokenRefreshSerializer,
     ProbationPolicySerializer,
 )
-from .permissions import IsHRAdmin, IsHRAdminOrDepartmentHead, IsHRAdminOrReadOnly, IsSystemAdmin, ReadHROnlyWriteSystemAdmin
+from .permissions import IsHRAdmin, IsHRAdminOrDepartmentHead, IsHRAdminOrReadOnly, IsHRAdminOrRecruitmentManager, IsSystemAdmin, ReadHROnlyWriteSystemAdmin
 
 
 # ==============================================================================
@@ -1390,7 +1390,7 @@ from .serializers import (
     EmployeeIdPreviewSerializer,
     ProbationPolicySerializer,
 )
-from .permissions import IsHRAdmin, IsSystemAdmin
+from .permissions import IsHRAdmin, IsHRAdminOrRecruitmentManager, IsSystemAdmin
 
 
 # ------------------------------------------------------------------------------
@@ -1401,7 +1401,7 @@ class RoleViewSet(ModelViewSet):
     """Role directory used when assigning a role to an employee account."""
     queryset = Role.objects.all().order_by('-level', 'role_name')
     serializer_class = RoleFullSerializer
-    permission_classes = [IsAuthenticated, ReadHROnlyWriteSystemAdmin]
+    permission_classes = [IsAuthenticated, IsHRAdminOrRecruitmentManager]
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['role_name', 'code', 'description']
@@ -1466,7 +1466,7 @@ class JobPositionViewSet(ModelViewSet):
         ),
     ).order_by('title')
     serializer_class = JobPositionSerializer
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated, IsHRAdminOrRecruitmentManager]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['department', 'grade_band', 'is_active']
     search_fields = ['title', 'grade_band']
@@ -1488,7 +1488,7 @@ class ProbationPolicyViewSet(ModelViewSet):
         'department', 'position'
     ).order_by('department__name', 'position__title')
     serializer_class = ProbationPolicySerializer
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated, IsHRAdminOrRecruitmentManager]
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def perform_create(self, serializer):
@@ -1719,7 +1719,7 @@ class ApprovalWorkflowViewSet(ModelViewSet):
     """CRUD for approval workflow configurations."""
     queryset = ApprovalWorkflow.objects.all().prefetch_related('steps')
     serializer_class = ApprovalWorkflowSerializer
-    permission_classes = [IsAuthenticated, IsHRAdmin]
+    permission_classes = [IsAuthenticated, IsHRAdminOrRecruitmentManager]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['module', 'is_active']
 
@@ -1789,9 +1789,7 @@ class LetterTemplateViewSet(ModelViewSet):
         - CREATE/UPDATE/DELETE: HR Admin only
         - AI generation: HR Admin only
         """
-        if self.action in ['list', 'retrieve']:
-            return [IsAuthenticated()]
-        return [IsAuthenticated(), IsHRAdmin()]
+        return [IsAuthenticated(), IsHRAdminOrRecruitmentManager()]
 
     def perform_create(self, serializer):
         employee = getattr(self.request.user, 'employee', None)
@@ -1799,10 +1797,13 @@ class LetterTemplateViewSet(ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='generate-ai')
     def generate_ai(self, request):
-        # AI generation stays HR-only via explicit check
+        # This action follows the same access granted to letter-template settings.
         user = request.user
-        if not (user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')):
-            return Response({'detail': 'Only HR Admin can generate templates.'}, status=403)
+        if not (
+            user.has_role('HR_ADMIN') or user.has_role('SYSTEM_ADMIN')
+            or user.has_role('MANAGER') or user.has_role('REPORTING_MANAGER')
+        ):
+            return Response({'detail': 'You do not have permission to generate templates.'}, status=403)
         
         serializer = AIGenerateTemplateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

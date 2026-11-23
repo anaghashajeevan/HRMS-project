@@ -832,6 +832,7 @@ class CompanyStructureSerializer(serializers.ModelSerializer):
 
 class JobPositionSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(source='department.name', read_only=True)
+    department_path = serializers.CharField(source='department.path', read_only=True)
     actual_count = serializers.SerializerMethodField()
     vacancy_count = serializers.SerializerMethodField()
     is_full = serializers.SerializerMethodField()
@@ -840,7 +841,7 @@ class JobPositionSerializer(serializers.ModelSerializer):
         model = JobPosition
         fields = [
             'id', 'title', 'grade_band',
-            'department', 'department_name',
+            'department', 'department_name', 'department_path',
             'budgeted_count', 'actual_count', 'vacancy_count', 'is_full',
             'salary_min', 'salary_max',
             'is_active', 'created_at', 'updated_at',

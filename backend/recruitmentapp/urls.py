@@ -7,6 +7,7 @@ from .views import (
     HiringRequisitionViewSet, PositionOptionsView, ReplacementEmployeeOptionsView, RecruitmentSettingsView,
     RecruitmentStageViewSet, RecruitmentEmailTemplateViewSet,
     InterviewScorecardViewSet, OfferRuleViewSet,
+    RecruitmentTaskScorecardViewSet, CandidateTaskAssessmentsView, CandidateTaskAssessmentResultView, CandidateTaskOutcomeView,
     CandidateBackgroundChecksView, CandidateBackgroundCheckDetailView, CandidateReferenceCheckOutcomeView,
     CandidateOffersView, CandidateOfferApprovalView, CandidateOfferActionView,
     CandidateOfferOptionsView,
@@ -19,6 +20,7 @@ router.register('requisitions', HiringRequisitionViewSet, basename='hiring-requi
 router.register('stages', RecruitmentStageViewSet, basename='recruitment-stage')
 router.register('email-templates', RecruitmentEmailTemplateViewSet, basename='recruitment-email-template')
 router.register('scorecards', InterviewScorecardViewSet, basename='interview-scorecard')
+router.register('task-scorecards', RecruitmentTaskScorecardViewSet, basename='recruitment-task-scorecard')
 router.register('offer-rules', OfferRuleViewSet, basename='recruitment-offer-rule')
 
 urlpatterns = [
@@ -29,12 +31,15 @@ urlpatterns = [
     path('applications/', CandidateApplicationsView.as_view(), name='candidate-applications'),
     path('applications/<uuid:pk>/screen/', CandidateApplicationScreeningView.as_view(), name='candidate-application-screening'),
     path('applications/<uuid:pk>/interview-outcome/', CandidateInterviewOutcomeView.as_view(), name='candidate-interview-outcome'),
+    path('applications/<uuid:pk>/task-outcome/', CandidateTaskOutcomeView.as_view(), name='candidate-task-outcome'),
     path('applications/<uuid:pk>/reference-check-outcome/', CandidateReferenceCheckOutcomeView.as_view(), name='candidate-reference-check-outcome'),
     path('applications/<uuid:pk>/resume/', CandidateApplicationResumeView.as_view(), name='candidate-application-resume'),
     path('interview-options/', CandidateInterviewOptionsView.as_view(), name='candidate-interview-options'),
     path('interviews/', CandidateInterviewsView.as_view(), name='candidate-interviews'),
     path('interviews/<uuid:pk>/evaluate/', CandidateInterviewEvaluationView.as_view(), name='candidate-interview-evaluation'),
     path('background-checks/', CandidateBackgroundChecksView.as_view(), name='candidate-background-checks'),
+    path('task-assessments/', CandidateTaskAssessmentsView.as_view(), name='candidate-task-assessments'),
+    path('task-assessments/<uuid:pk>/result/', CandidateTaskAssessmentResultView.as_view(), name='candidate-task-assessment-result'),
     path('background-checks/<uuid:pk>/', CandidateBackgroundCheckDetailView.as_view(), name='candidate-background-check-detail'),
     path('offers/', CandidateOffersView.as_view(), name='candidate-offers'),
     path('offer-options/', CandidateOfferOptionsView.as_view(), name='candidate-offer-options'),

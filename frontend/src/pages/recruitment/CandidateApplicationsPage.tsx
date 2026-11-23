@@ -198,7 +198,7 @@ export default function CandidateApplicationsPage() {
       </div>
 
       {showForm && <div className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4">
-        <form onSubmit={submit} className="my-8 w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
+        <form onSubmit={submit} className="recruitment-form my-8 w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
           <div className="mb-5 flex items-start justify-between gap-4"><div><h2 className="text-xl font-bold text-gray-900">Add candidate</h2><p className="mt-1 text-sm text-gray-500">The application will be added to the New stage.</p></div><button type="button" onClick={() => setShowForm(false)} aria-label="Close" className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"><X className="h-5 w-5" /></button></div>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="text-sm font-medium text-gray-700 sm:col-span-2">Approved requisition<select required value={form.requisition} onChange={(event) => setForm({ ...form, requisition: event.target.value })} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5"><option value="">Choose requisition</option>{requisitions.map((requisition) => <option key={requisition.id} value={requisition.id}>{requisition.requisition_number} · {requisition.position_title} · {requisition.department_name} · {requisition.openings} opening(s)</option>)}</select></label>

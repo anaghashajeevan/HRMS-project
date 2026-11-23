@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* Recruitment forms use native required validation; mark each required label clearly. */
+.recruitment-form label:has(:required):not(.task-rating-field)::before {
+  content: '*';
+  display: inline-block;
+  margin-right: 0.25rem;
+  color: #dc2626;
+  font-weight: 700;
+}
+
 /* ============================================================================
    HRMS THEME (existing — preserved)
    ============================================================================ */

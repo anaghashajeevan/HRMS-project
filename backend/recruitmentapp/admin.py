@@ -14,6 +14,7 @@ from .models import (
     RecruitmentEmailTemplate,
     RecruitmentSettings,
     RecruitmentStage,CandidateOfferApproval,
+    RecruitmentTaskScorecard, CandidateTaskAssessment,
 )
 
 
@@ -87,6 +88,25 @@ class InterviewScorecardAdmin(CreatedByMixin, admin.ModelAdmin):
     @admin.display(description='Criteria')
     def criteria_count(self, obj):
         return len(obj.criteria) if isinstance(obj.criteria, list) else 0
+
+
+@admin.register(RecruitmentTaskScorecard)
+class RecruitmentTaskScorecardAdmin(CreatedByMixin, admin.ModelAdmin):
+    list_display = ('name', 'criteria_count', 'is_active', 'updated_at')
+    list_filter = ('is_active',)
+    search_fields = ('name', 'description')
+    readonly_fields = ('created_at', 'updated_at')
+
+    @admin.display(description='Rating points')
+    def criteria_count(self, obj):
+        return len(obj.criteria) if isinstance(obj.criteria, list) else 0
+
+
+@admin.register(CandidateTaskAssessment)
+class CandidateTaskAssessmentAdmin(admin.ModelAdmin):
+    list_display = ('task_title', 'application', 'scorecard', 'assessed_by', 'created_at')
+    search_fields = ('task_title', 'application__candidate__first_name', 'application__candidate__last_name')
+    readonly_fields = ('criteria_snapshot', 'ratings', 'created_at', 'updated_at')
 
 
 @admin.register(OfferRule)

@@ -105,6 +105,22 @@ class InterviewScorecard(models.Model):
         ordering = ['name']
 
 
+class RecruitmentTaskScorecard(models.Model):
+    """Reusable rubric for practical, coding, or project based candidate tasks."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=120, unique=True)
+    description = models.TextField(blank=True)
+    criteria = models.JSONField(default=list)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey('HRMSapp.Employee', on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'recruitment_task_scorecards'
+        ordering = ['name']
+
+
 class OfferRule(models.Model):
     APPROVER_CHOICES = [
         ('HR_ADMIN', 'HR Administrator'),
@@ -319,6 +335,37 @@ class CandidateApplication(models.Model):
         constraints = [
             models.UniqueConstraint(fields=['candidate', 'requisition'], name='unique_candidate_per_requisition'),
         ]
+
+
+class CandidateTaskAssessment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    application = models.ForeignKey(CandidateApplication, on_delete=models.CASCADE, related_name='task_assessments')
+    scorecard = models.ForeignKey(RecruitmentTaskScorecard, on_delete=models.PROTECT, related_name='assessments')
+    task_title = models.CharField(max_length=160)
+    task_details = models.TextField(blank=True)
+    criteria_snapshot = models.JSONField(default=list)
+    ratings = models.JSONField(default=dict)
+    comments = models.TextField(blank=True)
+    assessed_by = models.ForeignKey('HRMSapp.Employee', on_delete=models.SET_NULL, null=True, blank=True, related_name='candidate_task_assessments')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'candidate_task_assessments'
+        ordering = ['-created_at']
+
+    @property
+    def is_assessed(self):
+        labels = [
+            str(item.get('label', '')).strip()
+            for item in self.criteria_snapshot
+            if isinstance(item, dict)
+        ]
+        ratings = self.ratings or {}
+        return bool(labels) and set(labels) == set(ratings) and all(
+            type(ratings.get(label)) is int and 1 <= ratings[label] <= 5
+            for label in labels
+        )
 
 
 class CandidateApplicationHistory(models.Model):

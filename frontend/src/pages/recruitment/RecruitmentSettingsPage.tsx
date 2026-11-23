@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Plus, Save, Trash2, Pencil, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import Sidebar from '../../components/Sidebar';
 import Topbar from '../../components/Topbar';
-import { recruitmentApi, type InterviewScorecard, type OfferRule, type RecruitmentSettings, type RecruitmentStage } from '../../api/recruitment';
+import { recruitmentApi, type InterviewScorecard, type OfferRule, type RecruitmentSettings, type RecruitmentStage, type RecruitmentTaskScorecard } from '../../api/recruitment';
 
-type Tab = 'stages' | 'scorecards' | 'offers';
+type Tab = 'stages' | 'scorecards' | 'tasks' | 'offers';
+type WeightedCriterion = { label: string; weight: number; guidance: string };
+type TaskCriterion = { label: string; guidance: string };
 const roles = [['SYSTEM_ADMIN', 'System administrator'], ['HR_ADMIN', 'HR administrator'], ['MANAGER', 'Manager'], ['REPORTING_MANAGER', 'Reporting manager'], ['HOD', 'Department head']];
 const errorText = (error: any) => error?.response?.data?.detail || Object.values(error?.response?.data || {}).flat().find((value) => typeof value === 'string') || 'Could not save hiring configuration';
 
@@ -17,22 +19,31 @@ export default function RecruitmentSettingsPage() {
   const [requesterSettings, setRequesterSettings] = useState<RecruitmentSettings | null>(null);
   const [stages, setStages] = useState<RecruitmentStage[]>([]);
   const [scorecards, setScorecards] = useState<InterviewScorecard[]>([]);
+  const [taskScorecards, setTaskScorecards] = useState<RecruitmentTaskScorecard[]>([]);
   const [offerRules, setOfferRules] = useState<OfferRule[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [stageForm, setStageForm] = useState({ code: '', name: '', order: '1', is_active: true, is_terminal: false, terminal_outcome: 'OPEN' as 'OPEN' | 'HIRED' | 'REJECTED' });
-  const [scorecardForm, setScorecardForm] = useState({ name: '', description: '', criteriaText: 'Communication | 25\nRole knowledge | 35\nProblem solving | 25\nCulture and collaboration | 15', is_active: true });
+  const [scorecardForm, setScorecardForm] = useState<{ name: string; description: string; criteria: WeightedCriterion[]; is_active: boolean }>({ name: '', description: '', criteria: [], is_active: true });
+  const [taskScorecardForm, setTaskScorecardForm] = useState<{ name: string; description: string; criteria: TaskCriterion[]; is_active: boolean }>({ name: '', description: '', criteria: [], is_active: true });
+  const [criterionDraft, setCriterionDraft] = useState({ label: '', weight: '', guidance: '' });
+  const [criterionEditorOpen, setCriterionEditorOpen] = useState(false);
+  const [editingCriterionIndex, setEditingCriterionIndex] = useState<number | null>(null);
+  const [taskCriterionDraft, setTaskCriterionDraft] = useState({ label: '', guidance: '' });
+  const [taskCriterionEditorOpen, setTaskCriterionEditorOpen] = useState(false);
+  const [editingTaskCriterionIndex, setEditingTaskCriterionIndex] = useState<number | null>(null);
   const [offerForm, setOfferForm] = useState({ name: '', grade_band: '', currency: 'INR', minimum_salary: '', maximum_salary: '', maximum_signing_bonus: '0', required_approvers: ['HR_ADMIN'], is_active: true });
 
   const load = async () => {
     setLoading(true);
     try {
-      const [settings, stageRows, scorecardRows, offerRows] = await Promise.all([
-        recruitmentApi.settings(), recruitmentApi.stages(), recruitmentApi.scorecards(), recruitmentApi.offerRules(),
+      const [settings, stageRows, scorecardRows, taskScorecardRows, offerRows] = await Promise.all([
+        recruitmentApi.settings(), recruitmentApi.stages(), recruitmentApi.scorecards(), recruitmentApi.taskScorecards(), recruitmentApi.offerRules(),
       ]);
       setRequesterSettings(settings);
       setStages(stageRows);
       setScorecards(scorecardRows);
+      setTaskScorecards(taskScorecardRows);
       setOfferRules(offerRows);
     } catch (error) {
       toast.error(errorText(error));
@@ -46,14 +57,23 @@ export default function RecruitmentSettingsPage() {
   const resetForm = () => {
     setEditingId(null);
     setStageForm({ code: '', name: '', order: String(stages.length + 1), is_active: true, is_terminal: false, terminal_outcome: 'OPEN' });
-    setScorecardForm({ name: '', description: '', criteriaText: 'Communication | 25\nRole knowledge | 35\nProblem solving | 25\nCulture and collaboration | 15', is_active: true });
+    setScorecardForm({ name: '', description: '', criteria: [], is_active: true });
+    setTaskScorecardForm({ name: '', description: '', criteria: [], is_active: true });
+    setCriterionDraft({ label: '', weight: '', guidance: '' }); setCriterionEditorOpen(false); setEditingCriterionIndex(null);
+    setTaskCriterionDraft({ label: '', guidance: '' }); setTaskCriterionEditorOpen(false); setEditingTaskCriterionIndex(null);
     setOfferForm({ name: '', grade_band: '', currency: 'INR', minimum_salary: '', maximum_salary: '', maximum_signing_bonus: '0', required_approvers: ['HR_ADMIN'], is_active: true });
   };
 
   const startEditStage = (item: RecruitmentStage) => { setEditingId(item.id); setStageForm({ ...item, order: String(item.order) }); };
   const startEditScorecard = (item: InterviewScorecard) => {
     setEditingId(item.id);
-    setScorecardForm({ name: item.name, description: item.description, is_active: item.is_active, criteriaText: item.criteria.map((criterion) => `${criterion.label} | ${criterion.weight}${criterion.guidance ? ` | ${criterion.guidance}` : ''}`).join('\n') });
+    setScorecardForm({ name: item.name, description: item.description, is_active: item.is_active, criteria: item.criteria.map((criterion) => ({ label: criterion.label, weight: criterion.weight, guidance: criterion.guidance || '' })) });
+    setCriterionEditorOpen(false); setEditingCriterionIndex(null);
+  };
+  const startEditTaskScorecard = (item: RecruitmentTaskScorecard) => {
+    setEditingId(item.id);
+    setTaskScorecardForm({ name: item.name, description: item.description, is_active: item.is_active, criteria: item.criteria.map((criterion) => ({ label: criterion.label, guidance: criterion.guidance || '' })) });
+    setTaskCriterionEditorOpen(false); setEditingTaskCriterionIndex(null);
   };
   const startEditOffer = (item: OfferRule) => { setEditingId(item.id); setOfferForm({ ...item, minimum_salary: item.minimum_salary, maximum_salary: item.maximum_salary, maximum_signing_bonus: item.maximum_signing_bonus }); };
 
@@ -75,15 +95,58 @@ export default function RecruitmentSettingsPage() {
     } catch (error) { toast.error(errorText(error)); } finally { setSaving(false); }
   };
 
+  const editCriterion = (index: number) => {
+    const item = scorecardForm.criteria[index];
+    setCriterionDraft({ label: item.label, weight: String(item.weight), guidance: item.guidance || '' });
+    setEditingCriterionIndex(index); setCriterionEditorOpen(true);
+  };
+  const saveCriterionRow = () => {
+    const label = criterionDraft.label.trim();
+    const weight = Number(criterionDraft.weight);
+    if (!label || !Number.isFinite(weight) || weight <= 0) return toast.error('Enter a criterion name and positive weight');
+    if (scorecardForm.criteria.some((item, index) => index !== editingCriterionIndex && item.label.toLowerCase() === label.toLowerCase())) return toast.error('Each criterion name must be unique');
+    const next = [...scorecardForm.criteria];
+    const value = { label, weight, guidance: criterionDraft.guidance.trim() };
+    if (editingCriterionIndex === null) next.push(value); else next[editingCriterionIndex] = value;
+    setScorecardForm({ ...scorecardForm, criteria: next });
+    setCriterionEditorOpen(false); setEditingCriterionIndex(null); setCriterionDraft({ label: '', weight: '', guidance: '' });
+  };
+  const removeCriterionRow = (index: number) => setScorecardForm({ ...scorecardForm, criteria: scorecardForm.criteria.filter((_, itemIndex) => itemIndex !== index) });
+
+  const editTaskCriterion = (index: number) => {
+    const item = taskScorecardForm.criteria[index];
+    setTaskCriterionDraft({ label: item.label, guidance: item.guidance || '' });
+    setEditingTaskCriterionIndex(index); setTaskCriterionEditorOpen(true);
+  };
+  const saveTaskCriterionRow = () => {
+    const label = taskCriterionDraft.label.trim();
+    if (!label) return toast.error('Enter a rating point name');
+    if (taskScorecardForm.criteria.some((item, index) => index !== editingTaskCriterionIndex && item.label.toLowerCase() === label.toLowerCase())) return toast.error('Each rating point name must be unique');
+    const next = [...taskScorecardForm.criteria];
+    const value = { label, guidance: taskCriterionDraft.guidance.trim() };
+    if (editingTaskCriterionIndex === null) next.push(value); else next[editingTaskCriterionIndex] = value;
+    setTaskScorecardForm({ ...taskScorecardForm, criteria: next });
+    setTaskCriterionEditorOpen(false); setEditingTaskCriterionIndex(null); setTaskCriterionDraft({ label: '', guidance: '' });
+  };
+  const removeTaskCriterionRow = (index: number) => setTaskScorecardForm({ ...taskScorecardForm, criteria: taskScorecardForm.criteria.filter((_, itemIndex) => itemIndex !== index) });
+
   const saveScorecard = async (event: React.FormEvent) => {
     event.preventDefault(); setSaving(true);
     try {
-      const criteria = scorecardForm.criteriaText.split('\n').filter((line) => line.trim()).map((line) => {
-        const [label, weight, ...guidance] = line.split('|').map((part) => part.trim());
-        return { label, weight: Number(weight), guidance: guidance.join(' | ') };
-      });
-      await recruitmentApi.saveScorecard(editingId, { name: scorecardForm.name, description: scorecardForm.description, criteria, is_active: scorecardForm.is_active });
+      if (!scorecardForm.criteria.length) return toast.error('Add at least one criterion');
+      const totalWeight = scorecardForm.criteria.reduce((sum, criterion) => sum + Number(criterion.weight), 0);
+      if (Math.round(totalWeight * 100) / 100 !== 100) return toast.error('Criteria weights must add up to 100');
+      await recruitmentApi.saveScorecard(editingId, { name: scorecardForm.name, description: scorecardForm.description, criteria: scorecardForm.criteria, is_active: scorecardForm.is_active });
       toast.success('Interview scorecard saved'); resetForm(); await load();
+    } catch (error) { toast.error(errorText(error)); } finally { setSaving(false); }
+  };
+
+  const saveTaskScorecard = async (event: React.FormEvent) => {
+    event.preventDefault(); setSaving(true);
+    try {
+      if (!taskScorecardForm.criteria.length) return toast.error('Add at least one rating point');
+      await recruitmentApi.saveTaskScorecard(editingId, { name: taskScorecardForm.name, description: taskScorecardForm.description, criteria: taskScorecardForm.criteria, is_active: taskScorecardForm.is_active });
+      toast.success('Task scorecard saved'); resetForm(); await load();
     } catch (error) { toast.error(errorText(error)); } finally { setSaving(false); }
   };
 
@@ -99,6 +162,7 @@ export default function RecruitmentSettingsPage() {
     try {
       if (kind === 'stages') await recruitmentApi.deleteStage(id);
       if (kind === 'scorecards') await recruitmentApi.deleteScorecard(id);
+      if (kind === 'tasks') await recruitmentApi.deleteTaskScorecard(id);
       if (kind === 'offers') await recruitmentApi.deleteOfferRule(id);
       toast.success('Configuration deleted');
       if (editingId === id) resetForm();
@@ -120,22 +184,24 @@ export default function RecruitmentSettingsPage() {
 
     {requesterSettings && <section className="mb-6 rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold text-gray-900">Requisition access and approvals</h2><p className="mt-1 text-sm text-gray-500">Approval steps are managed in the shared workflow editor.</p></div><div className="flex gap-2"><Link to="/settings/approval-workflows" className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">Approval workflow</Link><button onClick={() => void saveRequesterRoles()} disabled={saving} className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Save requester roles</button></div></div><div className="mt-4 flex flex-wrap gap-5">{roles.map(([code, label]) => <label key={code} className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={requesterSettings.allowed_requester_roles.includes(code)} onChange={() => toggleRole(code)} />{label}</label>)}</div><p className="mt-3 text-xs text-gray-500">Approver steps support reporting manager, department head, HR, Finance, system administrator, or a named employee. Openings over budget are blocked; no budget bypass is enabled.</p></section>}
 
-    <div className="mb-4 flex flex-wrap gap-2">{([['stages', 'Application stages'], ['scorecards', 'Interview scorecards'], ['offers', 'Offer rules']] as [Tab, string][]).map(([key, label]) => <button key={key} onClick={() => { setTab(key); resetForm(); }} className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === key ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50'}`}>{label}</button>)}</div>
+    <div className="mb-4 flex flex-wrap gap-2">{([['stages', 'Application stages'], ['scorecards', 'Interview scorecards'], ['tasks', 'Task scorecards'], ['offers', 'Offer rules']] as [Tab, string][]).map(([key, label]) => <button key={key} onClick={() => { setTab(key); resetForm(); }} className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === key ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50'}`}>{label}</button>)}</div>
 
     {loading ? <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-indigo-600" /></div> : <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.75fr)]">
-      <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100"><h2 className="mb-4 font-semibold text-gray-900">Configured {tab === 'stages' ? 'stages' : tab === 'scorecards' ? 'scorecards' : 'offer rules'}</h2>
+      <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100"><h2 className="mb-4 font-semibold text-gray-900">Configured {tab === 'stages' ? 'stages' : tab === 'scorecards' ? 'interview scorecards' : tab === 'tasks' ? 'task scorecards' : 'offer rules'}</h2>
         <div className="space-y-3">
           {tab === 'stages' && stages.map((item) => <CatalogRow key={item.id} title={`${item.order}. ${item.name}`} subtitle={`${item.code} · ${item.is_terminal ? item.terminal_outcome : 'Open stage'}`} active={item.is_active} onEdit={() => startEditStage(item)} onDelete={() => void removeItem(tab, item.id)} />)}
           {tab === 'scorecards' && scorecards.map((item) => <CatalogRow key={item.id} title={item.name} subtitle={`${item.criteria.length} criteria · ${item.description || 'No description'}`} active={item.is_active} onEdit={() => startEditScorecard(item)} onDelete={() => void removeItem(tab, item.id)} />)}
+          {tab === 'tasks' && taskScorecards.map((item) => <CatalogRow key={item.id} title={item.name} subtitle={`${item.criteria.length} rating points · ${item.description || 'No description'}`} active={item.is_active} onEdit={() => startEditTaskScorecard(item)} onDelete={() => void removeItem(tab, item.id)} />)}
           {tab === 'offers' && offerRules.map((item) => <CatalogRow key={item.id} title={`${item.name} · ${item.grade_band}`} subtitle={`${item.currency} ${Number(item.minimum_salary).toLocaleString()}–${Number(item.maximum_salary).toLocaleString()} · approval workflow configured separately`} active={item.is_active} onEdit={() => startEditOffer(item)} onDelete={() => void removeItem(tab, item.id)} />)}
-          {((tab === 'stages' && !stages.length) || (tab === 'scorecards' && !scorecards.length) || (tab === 'offers' && !offerRules.length)) && <p className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500">No configuration added yet.</p>}
+          {((tab === 'stages' && !stages.length) || (tab === 'scorecards' && !scorecards.length) || (tab === 'tasks' && !taskScorecards.length) || (tab === 'offers' && !offerRules.length)) && <p className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500">No configuration added yet.</p>}
         </div>
       </section>
 
-      <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100"><div className="mb-4 flex items-center justify-between"><h2 className="font-semibold text-gray-900">{editingId ? 'Edit' : 'Add'} {tab === 'stages' ? 'stage' : tab === 'scorecards' ? 'scorecard' : 'offer rule'}</h2>{editingId && <button onClick={resetForm} className="text-sm font-semibold text-gray-500">New</button>}</div>
-        {tab === 'stages' && <form onSubmit={saveStage} className="space-y-3"><Field label="Stage name"><input required value={stageForm.name} onChange={(event) => setStageForm({ ...stageForm, name: event.target.value, code: editingId ? stageForm.code : '' })} className={inputClass} /></Field><Field label="Code (auto-created if blank)"><input value={stageForm.code} onChange={(event) => setStageForm({ ...stageForm, code: event.target.value })} className={inputClass} /></Field><Field label="Order"><input required type="number" min="1" value={stageForm.order} onChange={(event) => setStageForm({ ...stageForm, order: event.target.value })} className={inputClass} /></Field><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={stageForm.is_terminal} onChange={(event) => setStageForm({ ...stageForm, is_terminal: event.target.checked, terminal_outcome: event.target.checked ? 'REJECTED' : 'OPEN' })} />Terminal stage</label>{stageForm.is_terminal && <Field label="Terminal result"><select value={stageForm.terminal_outcome} onChange={(event) => setStageForm({ ...stageForm, terminal_outcome: event.target.value as 'HIRED' | 'REJECTED' })} className={inputClass}><option value="HIRED">Hired</option><option value="REJECTED">Rejected</option></select></Field>}<ActiveCheck checked={stageForm.is_active} onChange={(is_active) => setStageForm({ ...stageForm, is_active })} /><SaveButton saving={saving} editing={Boolean(editingId)} /></form>}
-        {tab === 'scorecards' && <form onSubmit={saveScorecard} className="space-y-3"><Field label="Scorecard name"><input required value={scorecardForm.name} onChange={(event) => setScorecardForm({ ...scorecardForm, name: event.target.value })} className={inputClass} /></Field><Field label="Description"><textarea rows={2} value={scorecardForm.description} onChange={(event) => setScorecardForm({ ...scorecardForm, description: event.target.value })} className={inputClass} /></Field><Field label="Criteria (one per line: label | weight | optional guidance)"><textarea required rows={8} value={scorecardForm.criteriaText} onChange={(event) => setScorecardForm({ ...scorecardForm, criteriaText: event.target.value })} className={inputClass} /></Field><p className="text-xs text-gray-500">Weights must add up to 100.</p><ActiveCheck checked={scorecardForm.is_active} onChange={(is_active) => setScorecardForm({ ...scorecardForm, is_active })} /><SaveButton saving={saving} editing={Boolean(editingId)} /></form>}
-        {tab === 'offers' && <form onSubmit={saveOffer} className="space-y-3"><Field label="Rule name"><input required value={offerForm.name} onChange={(event) => setOfferForm({ ...offerForm, name: event.target.value })} className={inputClass} /></Field><div className="grid grid-cols-2 gap-3"><Field label="Grade"><input required value={offerForm.grade_band} onChange={(event) => setOfferForm({ ...offerForm, grade_band: event.target.value })} className={inputClass} placeholder="G5" /></Field><Field label="Currency"><input required maxLength={3} value={offerForm.currency} onChange={(event) => setOfferForm({ ...offerForm, currency: event.target.value.toUpperCase() })} className={inputClass} /></Field><Field label="Minimum salary"><input required type="number" min="0" step="0.01" value={offerForm.minimum_salary} onChange={(event) => setOfferForm({ ...offerForm, minimum_salary: event.target.value })} className={inputClass} /></Field><Field label="Maximum salary"><input required type="number" min="0" step="0.01" value={offerForm.maximum_salary} onChange={(event) => setOfferForm({ ...offerForm, maximum_salary: event.target.value })} className={inputClass} /></Field><Field label="Maximum signing bonus"><input required type="number" min="0" step="0.01" value={offerForm.maximum_signing_bonus} onChange={(event) => setOfferForm({ ...offerForm, maximum_signing_bonus: event.target.value })} className={inputClass} /></Field></div><p className="text-xs text-gray-600">Offer approvers and their order are configured in Settings → Approval Workflows → Recruitment Offers.</p><ActiveCheck checked={offerForm.is_active} onChange={(is_active) => setOfferForm({ ...offerForm, is_active })} /><SaveButton saving={saving} editing={Boolean(editingId)} /></form>}
+      <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100"><div className="mb-4 flex items-center justify-between"><h2 className="font-semibold text-gray-900">{editingId ? 'Edit' : 'Add'} {tab === 'stages' ? 'stage' : tab === 'scorecards' ? 'interview scorecard' : tab === 'tasks' ? 'task scorecard' : 'offer rule'}</h2>{editingId && <button onClick={resetForm} className="text-sm font-semibold text-gray-500">New</button>}</div>
+        {tab === 'stages' && <form onSubmit={saveStage} className="recruitment-form space-y-3"><Field label="Stage name"><input required value={stageForm.name} onChange={(event) => setStageForm({ ...stageForm, name: event.target.value, code: editingId ? stageForm.code : '' })} className={inputClass} /></Field><Field label="Code (auto-created if blank)"><input value={stageForm.code} onChange={(event) => setStageForm({ ...stageForm, code: event.target.value })} className={inputClass} /></Field><Field label="Order"><input required type="number" min="1" value={stageForm.order} onChange={(event) => setStageForm({ ...stageForm, order: event.target.value })} className={inputClass} /></Field><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={stageForm.is_terminal} onChange={(event) => setStageForm({ ...stageForm, is_terminal: event.target.checked, terminal_outcome: event.target.checked ? 'REJECTED' : 'OPEN' })} />Terminal stage</label>{stageForm.is_terminal && <Field label="Terminal result"><select value={stageForm.terminal_outcome} onChange={(event) => setStageForm({ ...stageForm, terminal_outcome: event.target.value as 'HIRED' | 'REJECTED' })} className={inputClass}><option value="HIRED">Hired</option><option value="REJECTED">Rejected</option></select></Field>}<ActiveCheck checked={stageForm.is_active} onChange={(is_active) => setStageForm({ ...stageForm, is_active })} /><SaveButton saving={saving} editing={Boolean(editingId)} /></form>}
+        {tab === 'scorecards' && <form onSubmit={saveScorecard} className="recruitment-form space-y-3"><Field label="Scorecard name"><input required value={scorecardForm.name} onChange={(event) => setScorecardForm({ ...scorecardForm, name: event.target.value })} className={inputClass} /></Field><Field label="Description"><textarea rows={2} value={scorecardForm.description} onChange={(event) => setScorecardForm({ ...scorecardForm, description: event.target.value })} className={inputClass} /></Field><div><div className="mb-2 flex items-center justify-between"><div><p className="text-sm font-medium text-gray-700">Criteria <span className="text-red-600" aria-label="required">*</span></p><p className="text-xs text-gray-500">Add each evaluation criterion and its weight. Total weight must be 100.</p></div><button type="button" onClick={() => { setCriterionDraft({ label: '', weight: '', guidance: '' }); setEditingCriterionIndex(null); setCriterionEditorOpen(true); }} className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"><Plus size={16} />Add criterion</button></div><div className="space-y-2">{scorecardForm.criteria.map((item, index) => <div key={`${item.label}-${index}`} className="flex items-start justify-between gap-3 rounded-lg border border-gray-200 p-3"><div><p className="font-medium text-gray-800">{item.label}<span className="ml-2 text-xs text-indigo-700">{item.weight}%</span></p>{item.guidance && <p className="mt-1 text-xs text-gray-500">{item.guidance}</p>}</div><div className="flex shrink-0 gap-1"><button type="button" onClick={() => editCriterion(index)} aria-label={`Edit ${item.label}`} className="rounded p-2 text-indigo-700 hover:bg-indigo-50"><Pencil size={15} /></button><button type="button" onClick={() => removeCriterionRow(index)} aria-label={`Delete ${item.label}`} className="rounded p-2 text-red-600 hover:bg-red-50"><Trash2 size={15} /></button></div></div>)}</div>{scorecardForm.criteria.length > 0 && <p className="mt-2 text-xs text-gray-600">Current total: {scorecardForm.criteria.reduce((sum, item) => sum + Number(item.weight), 0)}%</p>}{criterionEditorOpen && <div className="mt-3 space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3"><p className="text-sm font-semibold text-gray-800">{editingCriterionIndex === null ? 'Add criterion' : 'Edit criterion'}</p><div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_120px]"><Field label="Criterion name"><input autoFocus required value={criterionDraft.label} onChange={(event) => setCriterionDraft({ ...criterionDraft, label: event.target.value })} className={inputClass} placeholder="Problem solving" /></Field><Field label="Weight (%)"><input required type="number" min="0.01" max="100" step="0.01" value={criterionDraft.weight} onChange={(event) => setCriterionDraft({ ...criterionDraft, weight: event.target.value })} className={inputClass} /></Field></div><Field label="Guidance (optional)"><input value={criterionDraft.guidance} onChange={(event) => setCriterionDraft({ ...criterionDraft, guidance: event.target.value })} className={inputClass} /></Field><div className="flex gap-2"><button type="button" onClick={saveCriterionRow} className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white"><Save size={14} className="mr-1 inline" />Save criterion</button><button type="button" onClick={() => { setCriterionEditorOpen(false); setEditingCriterionIndex(null); }} className="rounded-lg border px-3 py-2 text-sm"><X size={14} className="mr-1 inline" />Cancel</button></div></div>}</div><ActiveCheck checked={scorecardForm.is_active} onChange={(is_active) => setScorecardForm({ ...scorecardForm, is_active })} /><SaveButton saving={saving} editing={Boolean(editingId)} /></form>}
+        {tab === 'tasks' && <form onSubmit={saveTaskScorecard} className="recruitment-form space-y-3"><Field label="Task rubric name"><input required value={taskScorecardForm.name} onChange={(event) => setTaskScorecardForm({ ...taskScorecardForm, name: event.target.value })} className={inputClass} /></Field><Field label="Description"><textarea rows={2} value={taskScorecardForm.description} onChange={(event) => setTaskScorecardForm({ ...taskScorecardForm, description: event.target.value })} className={inputClass} /></Field><div><div className="mb-2 flex items-center justify-between"><div><p className="text-sm font-medium text-gray-700">Rating points <span className="text-red-600" aria-label="required">*</span></p><p className="text-xs text-gray-500">Add one point at a time. Each is rated from 1 to 5 during assessment.</p></div><button type="button" onClick={() => { setTaskCriterionDraft({ label: '', guidance: '' }); setEditingTaskCriterionIndex(null); setTaskCriterionEditorOpen(true); }} className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"><Plus size={16} />Add rating point</button></div><div className="space-y-2">{taskScorecardForm.criteria.map((item, index) => <div key={`${item.label}-${index}`} className="flex items-start justify-between gap-3 rounded-lg border border-gray-200 p-3"><div><p className="font-medium text-gray-800">{item.label}</p>{item.guidance && <p className="mt-1 text-xs text-gray-500">{item.guidance}</p>}</div><div className="flex shrink-0 gap-1"><button type="button" onClick={() => editTaskCriterion(index)} aria-label={`Edit ${item.label}`} className="rounded p-2 text-indigo-700 hover:bg-indigo-50"><Pencil size={15} /></button><button type="button" onClick={() => removeTaskCriterionRow(index)} aria-label={`Delete ${item.label}`} className="rounded p-2 text-red-600 hover:bg-red-50"><Trash2 size={15} /></button></div></div>)}</div>{taskCriterionEditorOpen && <div className="mt-3 space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3"><p className="text-sm font-semibold text-gray-800">{editingTaskCriterionIndex === null ? 'Add rating point' : 'Edit rating point'}</p><Field label="Rating point name"><input autoFocus required value={taskCriterionDraft.label} onChange={(event) => setTaskCriterionDraft({ ...taskCriterionDraft, label: event.target.value })} className={inputClass} placeholder="Coding knowledge" /></Field><Field label="Guidance (optional)"><input value={taskCriterionDraft.guidance} onChange={(event) => setTaskCriterionDraft({ ...taskCriterionDraft, guidance: event.target.value })} className={inputClass} placeholder="What should the reviewer assess?" /></Field><div className="flex gap-2"><button type="button" onClick={saveTaskCriterionRow} className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white"><Save size={14} className="mr-1 inline" />Save rating point</button><button type="button" onClick={() => { setTaskCriterionEditorOpen(false); setEditingTaskCriterionIndex(null); }} className="rounded-lg border px-3 py-2 text-sm"><X size={14} className="mr-1 inline" />Cancel</button></div></div>}<p className="mt-2 text-xs text-gray-500">Rating scale: 1 Poor, 2 Below expectations, 3 Meets expectations, 4 Exceeds expectations, 5 Outstanding.</p></div><ActiveCheck checked={taskScorecardForm.is_active} onChange={(is_active) => setTaskScorecardForm({ ...taskScorecardForm, is_active })} /><SaveButton saving={saving} editing={Boolean(editingId)} /></form>}
+        {tab === 'offers' && <form onSubmit={saveOffer} className="recruitment-form space-y-3"><Field label="Rule name"><input required value={offerForm.name} onChange={(event) => setOfferForm({ ...offerForm, name: event.target.value })} className={inputClass} /></Field><div className="grid grid-cols-2 gap-3"><Field label="Grade"><input required value={offerForm.grade_band} onChange={(event) => setOfferForm({ ...offerForm, grade_band: event.target.value })} className={inputClass} placeholder="G5" /></Field><Field label="Currency"><input required maxLength={3} value={offerForm.currency} onChange={(event) => setOfferForm({ ...offerForm, currency: event.target.value.toUpperCase() })} className={inputClass} /></Field><Field label="Minimum salary"><input required type="number" min="0" step="0.01" value={offerForm.minimum_salary} onChange={(event) => setOfferForm({ ...offerForm, minimum_salary: event.target.value })} className={inputClass} /></Field><Field label="Maximum salary"><input required type="number" min="0" step="0.01" value={offerForm.maximum_salary} onChange={(event) => setOfferForm({ ...offerForm, maximum_salary: event.target.value })} className={inputClass} /></Field><Field label="Maximum signing bonus"><input required type="number" min="0" step="0.01" value={offerForm.maximum_signing_bonus} onChange={(event) => setOfferForm({ ...offerForm, maximum_signing_bonus: event.target.value })} className={inputClass} /></Field></div><p className="text-xs text-gray-600">Offer approvers and their order are configured in Settings → Approval Workflows → Recruitment Offers.</p><ActiveCheck checked={offerForm.is_active} onChange={(is_active) => setOfferForm({ ...offerForm, is_active })} /><SaveButton saving={saving} editing={Boolean(editingId)} /></form>}
       </section>
     </div>}
   </main></div></div>;

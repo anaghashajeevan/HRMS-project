@@ -686,17 +686,33 @@ def generate_recruitment_offer_pdf(offer) -> bytes:
     styles = getSampleStyleSheet()
     primary = colors.HexColor(get_company()['primary'])
     body_style = ParagraphStyle('RecruitmentOfferBody', parent=styles['BodyText'], fontName='Helvetica',
-                                fontSize=10.5, leading=15, alignment=TA_JUSTIFY,
+                                fontSize=10.5, leading=15, alignment=TA_LEFT,
                                 textColor=colors.HexColor('#1F2937'), spaceAfter=8)
     heading_style = ParagraphStyle('RecruitmentOfferHeading', parent=styles['Heading2'], fontName='Helvetica-Bold',
-                                   fontSize=15, textColor=primary, spaceAfter=12, spaceBefore=6)
+                                   fontSize=15, alignment=TA_CENTER, textColor=primary,
+                                   spaceAfter=18, spaceBefore=6)
     subheading_style = ParagraphStyle('RecruitmentOfferSubheading', parent=styles['Heading3'], fontName='Helvetica-Bold',
-                                      fontSize=12, textColor=primary, spaceAfter=8)
+                                      fontSize=12, alignment=TA_CENTER, textColor=primary, spaceAfter=10)
+    recipient_style = ParagraphStyle('RecruitmentOfferRecipient', parent=body_style,
+                                     fontSize=10.5, leading=15, spaceAfter=2)
+    salutation_style = ParagraphStyle('RecruitmentOfferSalutation', parent=body_style,
+                                      fontName='Helvetica-Bold', fontSize=11,
+                                      leading=16, textColor=colors.HexColor('#111827'),
+                                      spaceBefore=16, spaceAfter=14)
     story = []
     for kind, content in blocks:
         if not content:
             continue
-        style = heading_style if kind in ('h1', 'h2') else subheading_style if kind == 'h3' else body_style
+        if kind in ('h1', 'h2'):
+            style = heading_style
+        elif kind == 'h3':
+            style = subheading_style
+        elif re.match(r'^\s*(?:<b>)?\s*To\s*:', content, re.I):
+            style = recipient_style
+        elif re.match(r'^\s*(?:<b>)?\s*Dear\b', content, re.I):
+            style = salutation_style
+        else:
+            style = body_style
         if kind == 'li':
             content = f'• {content}'
         story.append(Paragraph(content, style))
