@@ -31,6 +31,8 @@ const templateTypeColors: Record<LetterTemplateType, string> = {
   PAYROLL_RUN_APPROVED: 'bg-green-100 text-green-800',
   PAYROLL_RUN_RETURNED: 'bg-amber-100 text-amber-800',
   PAYROLL_RUN_PAID: 'bg-teal-100 text-teal-800',
+  LEAVE_APPLICATION: 'bg-sky-100 text-sky-800',
+  LEAVE_APPROVAL: 'bg-emerald-100 text-emerald-800',
 };
 
 const templateTypeLabels: Record<LetterTemplateType, string> = {
@@ -54,6 +56,8 @@ const templateTypeLabels: Record<LetterTemplateType, string> = {
   PAYROLL_RUN_APPROVED: 'Payroll Run Approved',
   PAYROLL_RUN_RETURNED: 'Payroll Run Returned',
   PAYROLL_RUN_PAID: 'Payroll Run Paid',
+  LEAVE_APPLICATION: 'Leave Application Letter',
+  LEAVE_APPROVAL: 'Leave Approval Letter',
 };
 
 export default function LetterTemplatesPage() {
