@@ -125,11 +125,11 @@ def build_leave_context(application, approver=None):
         ),
         'application_number': application.application_number,
         'reason': application.reason or '',
-        'contact_during_leave': application.contact_during_leave or '—',
+        'contact_during_leave': application.contact_during_leave or '',
         'handover_to': (
             application.handover_to.full_name if application.handover_to else '—'
         ),
-        'handover_notes': application.handover_notes or '—',
+        'handover_notes': application.handover_notes or '',
         'is_lop': 'Yes' if application.is_lop else 'No',
         'lop_days': str(application.lop_days),
         
@@ -137,7 +137,7 @@ def build_leave_context(application, approver=None):
         'approver_name': (
             approver.full_name if approver
             else application.current_approver.full_name if application.current_approver
-            else '—'
+            else 'Approver'
         ),
         
         # Company + date
@@ -234,7 +234,12 @@ def generate_leave_letter_pdf(application, template_type='LEAVE_APPLICATION', ap
         is_default=True,
     ).first()
     
-    if not template:
+    if template_type == 'LEAVE_APPLICATION':
+        # Application letters use a concise, reliable layout. Existing saved
+        # templates may contain old AI-generated text with missing/irrelevant
+        # placeholders, so don't let that text leak into new application PDFs.
+        html_content = _get_default_template(template_type)
+    elif not template:
         # Fallback: any active template of this type
         template = LetterTemplate.objects.filter(
             template_type=template_type,
@@ -354,8 +359,6 @@ def generate_leave_letter_pdf(application, template_type='LEAVE_APPLICATION', ap
     details = [
         ['Employee Name', ctx['employee_name']],
         ['Employee ID', ctx['employee_id']],
-        ['Department', ctx['current_department']],
-        ['Position', ctx['current_position']],
         ['Leave Type', f"{ctx['leave_type_code']} - {ctx['leave_type']}"],
         ['Start Date', ctx['start_date']],
         ['End Date', ctx['end_date']],
@@ -363,14 +366,14 @@ def generate_leave_letter_pdf(application, template_type='LEAVE_APPLICATION', ap
     ]
     if application.is_half_day:
         details.append(['Half Day', ctx['half_day_period']])
-    details.extend([
-        ['Reason', ctx['reason']],
-        ['Handover To', ctx['handover_to']],
-    ])
-    if application.contact_during_leave:
-        details.append(['Contact', ctx['contact_during_leave']])
-    if application.is_lop:
-        details.append(['LOP Days', f"{ctx['lop_days']} day(s) (unpaid)"])
+    if ctx['reason']:
+        details.append(['Reason', ctx['reason']])
+    if application.handover_to:
+        details.append(['Handover To', ctx['handover_to']])
+    if application.handover_notes:
+        details.append(['Handover Notes', ctx['handover_notes']])
+    if application.is_lop and application.lop_days:
+        details.append(['Loss of Pay', f"{ctx['lop_days']} day(s)"])
     
     details_table = Table(details, colWidths=[5 * cm, 12 * cm])
     details_table.setStyle(TableStyle([
@@ -443,14 +446,8 @@ def _get_default_template(template_type):
     """Fallback templates if HR hasn't configured any."""
     if template_type == 'LEAVE_APPLICATION':
         return """
-        <h2>Leave Application</h2>
         <p>Dear {{approver_name}},</p>
-        <p>I am writing to formally request leave from work for the following period. 
-        Please find the details below and consider my application for approval.</p>
-        <p>I have arranged for a smooth handover of my responsibilities during my absence 
-        to ensure minimal disruption to ongoing work.</p>
-        <p>Thank you for considering my request. I look forward to your approval.</p>
-        <p>Sincerely,<br/>{{employee_name}}</p>
+        <p>{{employee_name}} has requested leave. The dates, leave type, duration, and reason are listed below for your review.</p>
         """
     else:  # LEAVE_APPROVAL
         return """

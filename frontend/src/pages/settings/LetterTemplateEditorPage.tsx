@@ -15,6 +15,9 @@ import type {
 } from '../../types/workflow';
 import toast from 'react-hot-toast';
 
+const LEAVE_APPLICATION_AI_PROMPT =
+  'Write a concise, respectful leave application addressed to {{approver_name}}. Use simple HTML with short paragraphs. Greet the approver, then state that {{employee_name}} requests {{leave_type}} from {{start_date}} to {{end_date}} for {{total_days}} day(s). Include the reason {{reason}} and reference {{application_number}}. Mention a half-day period only when {{is_half_day}} is Yes; if so, use {{half_day_period}}. Include handover details only when they are provided. Mention Loss of Pay only when {{is_lop}} is Yes, and then include {{lop_days}}. Do not say the leave is approved, invent details, print blank values or dashes, or add unrelated advice or lengthy assurances.';
+
 // ==============================================================================
 // AVAILABLE PLACEHOLDERS (matches backend AI prompt)
 // ==============================================================================
@@ -234,6 +237,12 @@ export default function LetterTemplateEditorPage() {
   const [isActive, setIsActive] = useState(true);
   const [creationMethod, setCreationMethod] = useState<CreationMethod>('AI');
 
+  useEffect(() => {
+    if (templateType === 'LEAVE_APPLICATION' && !aiPrompt.trim()) {
+      setAiPrompt(LEAVE_APPLICATION_AI_PROMPT);
+    }
+  }, [templateType, aiPrompt]);
+
   const [showPreview, setShowPreview] = useState(true);
   const [showHtml, setShowHtml] = useState(false);
   const [originalAIHtml, setOriginalAIHtml] = useState('');
@@ -452,6 +461,8 @@ export default function LetterTemplateEditorPage() {
       setAiPrompt(
         'Write a polished, responsive HTML offer email for {{candidate_name}} for the {{position_title}} position at {{company_name}}. Start with a short centered heading. Show a To block with {{candidate_name}} and {{candidate_email}}, then leave clear vertical space and greet them as Dear {{candidate_name}} in bold dark text. Use short readable paragraphs and clear spacing. Mention the proposed annual salary {{currency}} {{annual_salary}}, joining date {{joining_date}}, and response deadline {{offer_expiry_date}}. Ask the candidate to reply accepting or declining. This is the initial offer email, not the formal offer letter.'
       );
+    } else if (next === 'LEAVE_APPLICATION' && !aiPrompt.trim()) {
+      setAiPrompt(LEAVE_APPLICATION_AI_PROMPT);
     } else if (next === 'OFFER_LETTER' && !aiPrompt.trim()) {
       setAiPrompt(
         'Write a formal employment offer letter in HTML addressed to {{candidate_name}} for the {{position_title}} position in {{department_name}} at {{location_name}}. Start with a concise title in an h1 heading; it will be centered on the PDF. Below the title, put a To block first with {{candidate_name}} and {{candidate_email}}. Leave clear vertical space, then add “Dear {{candidate_name}},” as a separate paragraph; the PDF will style this salutation in bold dark text. Follow with readable left-aligned paragraphs. State annual compensation of {{currency}} {{annual_salary}}, signing bonus {{currency}} {{signing_bonus}}, grade {{grade_band}}, joining date {{joining_date}}, and response deadline {{offer_expiry_date}}. Include offer date {{offer_date}}, offer reference {{offer_reference}}, requisition {{requisition_number}}, the company name {{company_name}}, and signature space for Human Resources. Keep the language clear and professional.'

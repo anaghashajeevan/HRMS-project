@@ -178,6 +178,61 @@ class LeaveApplicationService:
                 f"You already have a {first_overlap.get_status_display().lower()} leave "
                 f"from {first_overlap.start_date} to {first_overlap.end_date}"
             )
+
+        # Monthly accrual policies also have a per-calendar-month usage cap.
+        # Count pending requests as reserved usage so a second request cannot
+        # consume the same month's allowance while the first awaits approval.
+        if leave_type.accrual_type == 'MONTHLY':
+            monthly_limit = Decimal(str(leave_type.accrual_per_period or 0))
+            if monthly_limit <= 0:
+                monthly_limit = Decimal(str(leave_type.yearly_quota or 0)) / Decimal('12')
+
+            existing_monthly_applications = list(LeaveApplication.objects.filter(
+                employee=employee,
+                leave_type=leave_type,
+                status__in=['PENDING', 'APPROVED'],
+                start_date__lte=end_date,
+                end_date__gte=start_date,
+            ))
+            month_cursor = date(start_date.year, start_date.month, 1)
+            while month_cursor <= end_date:
+                if month_cursor.month == 12:
+                    next_month = date(month_cursor.year + 1, 1, 1)
+                else:
+                    next_month = date(month_cursor.year, month_cursor.month + 1, 1)
+                month_end = next_month - timedelta(days=1)
+                segment_start = max(start_date, month_cursor)
+                segment_end = min(end_date, month_end)
+
+                # The joining month gets the configured monthly accrual. Months
+                # before the employee joined do not have an allowance.
+                allowance = monthly_limit if employee.date_of_joining <= month_end else Decimal('0')
+                requested_in_month = (
+                    Decimal('0.5') if is_half_day
+                    else LeaveApplicationService.calculate_working_days(
+                        segment_start, segment_end, employee,
+                    )
+                )
+                already_reserved = Decimal('0')
+                for prior in existing_monthly_applications:
+                    prior_start = max(prior.start_date, month_cursor)
+                    prior_end = min(prior.end_date, month_end)
+                    if prior.is_half_day:
+                        prior_days = Decimal('0.5')
+                    else:
+                        prior_days = LeaveApplicationService.calculate_working_days(
+                            prior_start, prior_end, employee,
+                        )
+                    already_reserved += prior_days
+
+                if already_reserved + requested_in_month > allowance:
+                    errors.append(
+                        f"Monthly {leave_type.name} allowance for {month_cursor.strftime('%B %Y')} is "
+                        f"{allowance} day(s). {already_reserved} day(s) are already pending or approved, "
+                        f"so this request for {requested_in_month} day(s) would exceed the monthly limit."
+                    )
+
+                month_cursor = next_month
         
         # ---------- Balance check ----------
         is_lop = False
@@ -293,6 +348,12 @@ class LeaveApplicationService:
         from HRMSapp.models import ApprovalWorkflow
         from HRMSapp.services.workflow_service import WorkflowService
         from .balance_service import LeaveBalanceService
+
+        # Serialize monthly-accrual submissions for the same employee so two
+        # simultaneous requests cannot both pass the monthly allowance check.
+        if leave_type.accrual_type == 'MONTHLY':
+            from HRMSapp.models import Employee
+            employee = Employee.objects.select_for_update().get(pk=employee.pk)
         
         # Validate
         validation = LeaveApplicationService.validate_application(

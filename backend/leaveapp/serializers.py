@@ -40,6 +40,13 @@ class LeaveTypeSerializer(serializers.ModelSerializer):
         divisor = attrs.get('encashment_divisor_days', getattr(self.instance, 'encashment_divisor_days', 30))
         yearly_cap = attrs.get('max_encashment_days', getattr(self.instance, 'max_encashment_days', 0))
         exit_cap = attrs.get('max_exit_encashment_days', getattr(self.instance, 'max_exit_encashment_days', None))
+        yearly_quota = attrs.get('yearly_quota', getattr(self.instance, 'yearly_quota', 0))
+        if yearly_quota < 0:
+            raise serializers.ValidationError({'yearly_quota': 'Yearly quota cannot be negative.'})
+        if (yearly_quota * 2) != (yearly_quota * 2).to_integral_value():
+            raise serializers.ValidationError({
+                'yearly_quota': 'Yearly quota must use whole-day or half-day increments (for example, 12 or 12.5).',
+            })
         if can_encash and divisor <= 0:
             raise serializers.ValidationError({'encashment_divisor_days': 'The divisor must be greater than zero.'})
         if yearly_cap < 0 or (exit_cap is not None and exit_cap < 0):
