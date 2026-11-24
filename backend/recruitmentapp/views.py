@@ -889,7 +889,7 @@ class CandidateReferenceCheckOutcomeView(APIView):
             if application.stage.code != 'reference-check' or application.stage.is_terminal:
                 return Response({'detail': 'Reference check outcomes can only be recorded at Reference Check.'}, status=status.HTTP_400_BAD_REQUEST)
             required_checks = list(application.background_checks.filter(is_required=True))
-            if decision == 'PASS' and (not required_checks or any(check.status != 'COMPLETED' or check.outcome != 'PASS' for check in required_checks)):
+            if decision == 'PASS' and any(check.status != 'COMPLETED' or check.outcome != 'PASS' for check in required_checks):
                 return Response({'detail': 'Complete and pass every required reference/background check before advancing to Offer.'}, status=status.HTTP_400_BAD_REQUEST)
             if decision == 'REJECT':
                 next_stage = RecruitmentStage.objects.filter(is_active=True, is_terminal=True, terminal_outcome='REJECTED').order_by('order').first()

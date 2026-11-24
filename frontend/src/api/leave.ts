@@ -138,6 +138,21 @@ export const leaveBalancesApi = {
     return data;
   },
 
+  recalculateAll: async (year?: number): Promise<{
+    ok: boolean;
+    year: number;
+    total_employees: number;
+    employees_recalculated: number;
+    balances_recalculated: number;
+    errors: Array<{ employee_id: string; full_name: string; error: string }>;
+    message: string;
+  }> => {
+    const { data } = await api.post(`${BASE}/leave-balances/recalculate-all/`, {
+      year: year || new Date().getFullYear(),
+    });
+    return data;
+  },
+
   adjust: async (
     balanceId: string,
     adjustment: number,

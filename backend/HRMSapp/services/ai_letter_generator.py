@@ -68,13 +68,14 @@ STRICT RULES:
 4. Do NOT include <html>, <head>, <body>, <div>, or <table>.
 5. Use only these tags: <h2>, <h3>, <p>, <strong>, <em>, <ul>, <li>, <br>.
 6. Do NOT use markdown like **bold**.
-7. Include the salutation inside the body:
-   <p>Dear {{{{employee_name}}}},</p>
+7. Include the salutation inside the body. For LEAVE_APPLICATION, address it to
+   {{{{approver_name}}}}. For other letter types, use {{{{employee_name}}}}.
 8. Use ONLY these placeholder variables:
 {AVAILABLE_VARIABLES}
-9. Keep it professional, complete, and not too short.
-10. Mention all relevant details where appropriate:
-   employee name, employee ID, current/new position, department, manager, effective date.
+9. Keep it professional and concise. Use only a few short paragraphs and avoid
+   repetitive assurances or details that do not apply to this letter type.
+10. Include only details relevant to the requested letter type. Never invent
+    values or include optional details when they are missing or do not apply.
 
 Example format:
 <h2>Promotion Announcement</h2>

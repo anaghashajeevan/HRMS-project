@@ -169,7 +169,9 @@ class LeaveBalanceViewSet(ModelViewSet):
         return [IsAuthenticated(), IsHRAdmin()]
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        # Keep historical balances in the database, but don't display inactive
+        # leave types in employee or HR balance screens.
+        qs = super().get_queryset().filter(leave_type__is_active=True)
         user = self.request.user
 
         # HR/System Admin sees all
@@ -195,7 +197,7 @@ class LeaveBalanceViewSet(ModelViewSet):
 
         year = int(request.query_params.get('year', timezone.now().year))
         balances = LeaveBalance.objects.filter(
-            employee=user.employee, year=year,
+            employee=user.employee, year=year, leave_type__is_active=True,
         ).select_related('leave_type').order_by('leave_type__display_order')
 
         serializer = self.get_serializer(balances, many=True)
@@ -313,6 +315,52 @@ class LeaveBalanceViewSet(ModelViewSet):
             'balances': LeaveBalanceSerializer(balances, many=True).data,
         })
 
+    @action(detail=False, methods=['post'], url_path='recalculate-all')
+    def recalculate_all(self, request):
+        """Recalculate policy-derived balances for every active employee."""
+        from HRMSapp.models import Employee
+
+        if not (request.user.has_role('HR_ADMIN') or request.user.has_role('SYSTEM_ADMIN')):
+            return Response({'detail': 'HR Admin only'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            year = int(request.data.get('year', timezone.localdate().year))
+        except (TypeError, ValueError):
+            return Response({'detail': 'year must be a valid calendar year'}, status=status.HTTP_400_BAD_REQUEST)
+
+        employees = Employee.objects.filter(
+            is_deleted=False,
+            status__in=['ACTIVE', 'PROBATION', 'NOTICE_PERIOD'],
+        ).order_by('employee_id')
+        result = {
+            'ok': True,
+            'year': year,
+            'total_employees': employees.count(),
+            'employees_recalculated': 0,
+            'balances_recalculated': 0,
+            'errors': [],
+        }
+
+        for employee in employees.iterator():
+            try:
+                balances = LeaveBalanceService.recalculate_employee_balance(employee, year)
+                result['employees_recalculated'] += 1
+                result['balances_recalculated'] += len(balances)
+            except Exception as exc:
+                logger.exception('Leave balance recalculation failed for employee %s', employee.employee_id)
+                result['errors'].append({
+                    'employee_id': employee.employee_id,
+                    'full_name': employee.full_name,
+                    'error': str(exc),
+                })
+
+        result['ok'] = not result['errors']
+        result['message'] = (
+            f"Recalculated {result['balances_recalculated']} leave balances for "
+            f"{result['employees_recalculated']} of {result['total_employees']} active employees for {year}."
+        )
+        return Response(result, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'], url_path='adjust')
     def adjust(self, request, pk=None):
         """
@@ -332,7 +380,11 @@ class LeaveBalanceViewSet(ModelViewSet):
 
         try:
             from decimal import Decimal
-            balance.adjustment = (balance.adjustment or Decimal('0')) + Decimal(str(adjustment))
+            delta = Decimal(str(adjustment))
+            next_adjustment = (balance.adjustment or Decimal('0')) + delta
+            if delta * 2 != (delta * 2).to_integral_value() or next_adjustment * 2 != (next_adjustment * 2).to_integral_value():
+                return Response({'detail': 'Leave adjustments must use whole-day or half-day increments.'}, status=400)
+            balance.adjustment = next_adjustment
             balance.save()
             return Response({
                 'ok': True,

@@ -387,6 +387,7 @@ export default function LeaveBalancesPage() {
   const [balances, setBalances] = useState<LeaveBalance[]>([]);
   const [loading, setLoading] = useState(true);
   const [allocating, setAllocating] = useState(false);
+  const [recalculatingAll, setRecalculatingAll] = useState(false);
   const [search, setSearch] = useState('');
   const [year, setYear] = useState(new Date().getFullYear());
   const [lastResult, setLastResult] = useState<AllocateAllResult | null>(null);
@@ -430,6 +431,30 @@ export default function LeaveBalancesPage() {
       toast.error(error?.response?.data?.detail || 'Allocation failed');
     } finally {
       setAllocating(false);
+    }
+  };
+
+  const handleRecalculateAll = async () => {
+    if (!window.confirm(
+      `Recalculate leave balances for ALL active employees for ${year}?\n\n` +
+      'This recalculates policy-based allocation and accrual from each employee’s joining date. ' +
+      'Used leave, pending requests, carry-forward, manual adjustments, and encashments are preserved. ' +
+      'Missing balance records for active leave types will be created.\n\nContinue?'
+    )) return;
+
+    setRecalculatingAll(true);
+    try {
+      const result = await leaveBalancesApi.recalculateAll(year);
+      if (result.errors.length) {
+        toast.error(`${result.message} ${result.errors.length} employee(s) had errors.`);
+      } else {
+        toast.success(result.message);
+      }
+      await loadBalances();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'Could not recalculate leave balances for all employees');
+    } finally {
+      setRecalculatingAll(false);
     }
   };
 
@@ -547,7 +572,7 @@ export default function LeaveBalancesPage() {
               </button>
               <button
                 onClick={handleAllocateAll}
-                disabled={allocating}
+                disabled={allocating || recalculatingAll}
                 className="flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-700 disabled:opacity-50"
               >
                 {allocating ? (
@@ -562,6 +587,15 @@ export default function LeaveBalancesPage() {
                   </>
                 )}
               </button>
+              {canRecalculate && <button
+                onClick={handleRecalculateAll}
+                disabled={allocating || recalculatingAll}
+                className="flex items-center gap-2 rounded-lg border border-primary-200 bg-white px-4 py-2 text-sm font-semibold text-primary-700 shadow-sm hover:bg-primary-50 disabled:opacity-50"
+                title={`Recalculate ${year} policy-based balances for all active employees`}
+              >
+                {recalculatingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
+                {recalculatingAll ? 'Recalculating All…' : 'Recalculate All'}
+              </button>}
             </div>
           </div>
 
