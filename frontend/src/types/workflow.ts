@@ -80,7 +80,9 @@ export type LetterTemplateType =
   | 'PAYROLL_APPROVAL_REQUEST'
   | 'PAYROLL_RUN_APPROVED'
   | 'PAYROLL_RUN_RETURNED'
-  | 'PAYROLL_RUN_PAID';
+  | 'PAYROLL_RUN_PAID'
+  | 'LEAVE_APPLICATION'
+  | 'LEAVE_APPROVAL';
 
 export type CreationMethod = 'AI' | 'MANUAL' | 'AI_EDITED';
 
