@@ -72,9 +72,24 @@ class NexusSsoLoginView(APIView):
 
     @staticmethod
     def _record_portal_admin_claim(user, is_portal_admin):
-        """Record the SSO claim for audit only; HRMS owns every HRMS role."""
-        user.sso_is_portal_admin = bool(is_portal_admin)
+        """Apply the verified portal-administrator claim in HRMS.
+
+        A NexusOne portal administrator can launch every registered
+        application without a per-application assignment.  Therefore HRMS
+        must both retain the claim and grant its equivalent local role;
+        otherwise the portal can issue a valid code that HRMS subsequently
+        rejects or treats as an ordinary employee.
+        """
+        is_portal_admin = bool(is_portal_admin)
+        user.sso_is_portal_admin = is_portal_admin
         user.save(update_fields=['sso_is_portal_admin'])
+
+        if is_portal_admin:
+            system_admin_role = Role.objects.filter(
+                role_name='SYSTEM_ADMIN', is_active=True,
+            ).first()
+            if system_admin_role:
+                user.roles.add(system_admin_role)
 
     @classmethod
     def _sso_role_names(cls, nexus_user):
@@ -163,13 +178,18 @@ class NexusSsoLoginView(APIView):
         user = UserAccount.objects.filter(sso_user_id=sso_user_id).first() if sso_user_id else None
         user = user or UserAccount.objects.filter(email__iexact=email).first()
         if not user:
-            # Assignment provisioning is performed by SSO at the moment the
-            # employee receives HRMS access. Login must not create accounts:
-            # that would accidentally provision portal-only administrators.
-            return Response(
-                {'detail': 'Your SSO account has not been provisioned for HRMS.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            # Portal administrators have global access to every application,
+            # so they do not need an individual HRMS assignment before their
+            # first HRMS launch. Provision their local identity on demand.
+            if bool(nexus_user.get('is_portal_admin')):
+                user = self._provision_user(nexus_user, email, sso_user_id)
+            else:
+                # Standard users are still provisioned only after the portal
+                # grants explicit HRMS access.
+                return Response(
+                    {'detail': 'Your SSO account has not been provisioned for HRMS.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
         if sso_user_id and user.sso_user_id != sso_user_id:
             user.sso_user_id = sso_user_id
             user.save(update_fields=['sso_user_id'])
@@ -191,7 +211,9 @@ class NexusSsoLoginView(APIView):
         employee.first_name = first_name
         employee.last_name = last_name
         employee.official_email = email
-        requested_employee_id = str(request.data.get('employee_id') or '').strip()[:20]
+        # The browser callback contains only the one-time code and state.
+        # Directory fields must come from the verified SSO token response.
+        requested_employee_id = str(nexus_user.get('employee_id') or '').strip()[:20]
         if requested_employee_id and requested_employee_id != employee.employee_id:
             if Employee.objects.exclude(pk=employee.pk).filter(employee_id=requested_employee_id).exists():
                 return Response({'detail': 'This Employee ID is already used in HRMS.'}, status=status.HTTP_409_CONFLICT)
@@ -200,8 +222,8 @@ class NexusSsoLoginView(APIView):
             employee.phone_number = str(nexus_user['phone_number'])[:20]
         employee.save(update_fields=['employee_id', 'first_name', 'last_name', 'official_email', 'phone_number'])
 
-        # SSO proves identity and application assignment only. HRMS owns all
-        # role assignments, including SYSTEM_ADMIN.
+        # A verified portal administrator receives HRMS's equivalent local
+        # SYSTEM_ADMIN role; standard HRMS role assignments stay local.
         self._record_portal_admin_claim(user, bool(nexus_user.get('is_portal_admin')))
 
         # Mark the local account as SSO-authenticated without changing its
@@ -253,6 +275,14 @@ class NexusSsoLoginView(APIView):
                 is_ldap_user=True,
                 sso_user_id=sso_user_id or None,
             )
+            # Every standard user provisioned through an HRMS assignment
+            # starts as an Employee. HR administrators may subsequently
+            # replace this local role with a higher HRMS role.
+            employee_role = Role.objects.filter(
+                role_name='EMPLOYEE', is_active=True,
+            ).first()
+            if employee_role:
+                user.roles.add(employee_role)
         return user
 
 
@@ -290,6 +320,10 @@ class NexusSsoDirectorySyncView(APIView):
         user.is_active = bool(request.data.get('is_active', True))
         user.save(update_fields=['email', 'sso_user_id', 'is_active'])
         NexusSsoLoginView._record_portal_admin_claim(user, bool(request.data.get('is_portal_admin')))
+        if not bool(request.data.get('is_portal_admin')) and not user.roles.filter(is_active=True).exists():
+            employee_role = Role.objects.filter(role_name='EMPLOYEE', is_active=True).first()
+            if employee_role:
+                user.roles.add(employee_role)
         return Response({'id': str(user.id), 'employee_id': str(employee.id), 'active': user.is_active}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
